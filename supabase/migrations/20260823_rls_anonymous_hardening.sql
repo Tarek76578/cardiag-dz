@@ -1,0 +1,5 @@
+-- Production RLS hardening applied to Supabase project kn...kcmo.
+-- User-owned diagnostic/session tables now require a permanent authenticated user.
+-- Catalog helper tables no longer grant SELECT to anon.
+-- A stable public.is_permanent_user() helper avoids per-row auth JWT evaluation.
+-- See Supabase migration history for the applied policy definitions.
