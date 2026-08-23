@@ -5,12 +5,14 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
 
 jobs:
   verify:
@@ -26,200 +28,59 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Prepare Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Verify repository integrity
+        run: |
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          test -f android/app/src/main/AndroidManifest.xml
+          git diff --check
 
       - name: Check repository for committed secrets
         run: |
-          ! grep -RInE '(service_role|SUPABASE_SERVICE_ROLE|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9_-]{20,})' . --exclude-dir=.git --exclude='*.md' || (echo 'Potential secret detected in repository' && exit 1)
+          ! grep -RInE '(service_role|SUPABASE_SERVICE_ROLE|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9_-]{20,})' . --exclude-dir=.git --exclude='*.md' || {
+            echo "Potential secret detected in repository"
+            exit 1
+          }
 
-      - name: Repair source before compilation
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt')
-          s = p.read_text()
-          start = s.index('@Composable\nprivate fun DiagnosticScreen(')
-          end = s.index('@Composable\nprivate fun DiagnosisResultCard', start)
-          replacement = '''@Composable
-private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoothPermissions: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val service = remember { DiagnosticService() }
-    val obd = remember { ObdService() }
-    var complaint by rememberSaveable { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<JsonObject?>(null) }
-    var status by rememberSaveable { mutableStateOf(if (ar) "غير متصل" else "Non connecté") }
-    var dtc by remember { mutableStateOf<List<String>>(emptyList()) }
-    var live by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val online = NetworkStatus.isOnline(context)
+      - name: Make Gradle executable
+        working-directory: android
+        run: chmod +x ./gradlew
 
-    LazyColumn(
-        Modifier.fillMaxSize().padding(padding),
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            SectionTitle(if (ar) "التشخيص" else "Diagnostic")
-            Text(
-                if (ar) "استخدم OBD-II مع وصف المشكلة للحصول على تحليل منظم."
-                else "Combinez OBD-II et symptômes pour une analyse structurée.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (!online) item { OfflineBanner(ar) }
-        item {
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(if (ar) "وصف المشكلة" else "Symptômes", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(
-                        value = complaint,
-                        onValueChange = { complaint = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        label = { Text(if (ar) "مثال: المحرك يهتز عند التوقف" else "Ex. moteur instable au ralenti") }
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = requestBluetoothPermissions) {
-                            Icon(Icons.Default.Bluetooth, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Bluetooth")
-                        }
-                        Button(onClick = {
-                            val permissionMissing = Build.VERSION.SDK_INT >= 31 &&
-                                context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-                            if (permissionMissing) {
-                                requestBluetoothPermissions()
-                            } else {
-                                val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()
-                                if (device == null) {
-                                    status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"
-                                } else {
-                                    scope.launch {
-                                        try {
-                                            status = obd.connect(device)
-                                            dtc = obd.readTroubleCodes()
-                                            live = mapOf(
-                                                "RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"),
-                                                "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"),
-                                                "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")
-                                            )
-                                        } catch (e: Exception) {
-                                            status = e.message ?: "OBD error"
-                                        }
-                                    }
-                                }
-                            }
-                        }) {
-                            Text(if (ar) "اتصال وفحص" else "Connecter")
-                        }
-                    }
-                    Text(status, color = MaterialTheme.colorScheme.primary)
-                    if (dtc.isNotEmpty()) Text("DTC: ${dtc.joinToString()}", color = MaterialTheme.colorScheme.error)
-                    live.forEach { (key, value) -> Text("$key: $value") }
-                }
-            }
-        }
-        item {
-            Button(
-                onClick = {
-                    if (!online) {
-                        error = if (ar) "الاتصال بالإنترنت مطلوب لتحليل AI." else "Internet requis pour l'analyse IA."
-                    } else if (complaint.isBlank() && dtc.isEmpty()) {
-                        error = if (ar) "أدخل الأعراض أو اتصل بـOBD أولًا." else "Ajoutez des symptômes ou connectez l'OBD."
-                    } else {
-                        scope.launch {
-                            running = true
-                            error = null
-                            try {
-                                val measurementJson = buildJsonObject { live.forEach { (key, value) -> put(key, value) } }
-                                result = withContext(Dispatchers.IO) {
-                                    service.runDiagnostic(
-                                        null,
-                                        complaint,
-                                        if (ar) "ar" else "fr",
-                                        dtc,
-                                        buildJsonObject { put("complaint", complaint) },
-                                        measurementJson
-                                    )
-                                }
-                            } catch (e: Exception) {
-                                error = e.message ?: if (ar) "فشل التشخيص" else "Échec du diagnostic"
-                            } finally {
-                                running = false
-                            }
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !running
-            ) {
-                if (running) CircularProgressIndicator(strokeWidth = 2.dp) else Text(if (ar) "تحليل بالذكاء الاصطناعي" else "Analyser avec l'IA")
-            }
-        }
-        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
-        if (result != null) item { DiagnosisResultCard(result!!, ar) }
-    }
-}
+      - name: Clean, unit test, lint and assemble debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug --stacktrace --warning-mode all
 
-'''
-          p.write_text(s[:start] + replacement + s[end:])
-          PY
-
-      - name: Commit source repair
-        run: |
-          if git diff --quiet; then
-            echo "No source repair needed"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt
-            git commit -m "fix: stabilize diagnostic screen Kotlin source"
-            git push
-          fi
-
-      - name: Build and test
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug
-
-      - name: Prepare signing keystore
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cardiag-release.jks"
-
-      - name: Build release APK and AAB
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/cardiag-release.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          cd android
-          ./gradlew --no-daemon assembleRelease bundleRelease
+      - name: Assemble release APK and AAB
+        working-directory: android
+        run: ./gradlew --no-daemon assembleRelease bundleRelease --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: cardiag-dz-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: cardiag-dz-release-apk
           path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Upload Play Store AAB
+      - name: Upload release AAB
         uses: actions/upload-artifact@v4
         with:
           name: cardiag-dz-release-aab
           path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 14
