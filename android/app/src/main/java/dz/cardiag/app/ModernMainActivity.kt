@@ -3,7 +3,9 @@ package dz.cardiag.app
 import android.Manifest
 import android.app.LocaleManager
 import android.bluetooth.BluetoothDevice
+import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.LocaleList
 import androidx.activity.ComponentActivity
@@ -15,8 +17,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,20 +30,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dz.cardiag.app.core.AuthService
 import dz.cardiag.app.core.DiagnosticService
+import dz.cardiag.app.core.NetworkStatus
 import dz.cardiag.app.core.ObdService
 import dz.cardiag.app.core.SupabaseClient
+import dz.cardiag.app.core.VehicleCache
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 data class VehicleModel(
@@ -52,84 +68,117 @@ data class VehicleModel(
 )
 
 @Serializable
-data class VehicleMake(val id: String, val name: String)
+data class UserVehicle(
+    val id: String,
+    @SerialName("model_id") val modelId: String,
+    val nickname: String? = null,
+    val vin: String? = null,
+    val mileage: Int? = null,
+    @SerialName("is_primary") val isPrimary: Boolean = false
+)
+
+@Serializable
+data class DiagnosticHistory(
+    val id: String,
+    val complaint: String? = null,
+    val status: String,
+    val language: String,
+    @SerialName("created_at") val createdAt: String
+)
 
 class ModernMainActivity : ComponentActivity() {
-    private val bluetoothPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
+    private val bluetoothPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ModernCarDiag(::requestBluetoothPermissions) }
+        setContent { CarDiagApp(::requestBluetoothPermissions, ::setLanguage) }
     }
 
     private fun requestBluetoothPermissions() {
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
+        if (Build.VERSION.SDK_INT >= 31) {
             bluetoothPermissionLauncher.launch(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT))
         }
     }
 
-    fun setLanguage(language: String) {
-        getSystemService(LocaleManager::class.java).applicationLocales =
-            LocaleList.forLanguageTags(if (language == "ar") "ar" else "fr")
+    private fun setLanguage(language: String) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            getSystemService(LocaleManager::class.java).applicationLocales = LocaleList.forLanguageTags(language)
+        }
     }
+}
+
+@Composable
+private fun CarDiagApp(requestBluetoothPermissions: () -> Unit, setLanguage: (String) -> Unit) {
+    val context = LocalContext.current
+    val auth = remember { AuthService() }
+    var authenticated by remember { mutableStateOf(auth.currentUser != null) }
+    var dark by rememberSaveable { mutableStateOf(context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).getBoolean("dark", true)) }
+    val ar = LocalConfiguration.current.locales[0].language == "ar"
+    val direction = if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr
+
+    CompositionLocalProvider(LocalLayoutDirection provides direction) {
+        CarDiagTheme(dark) {
+            if (!authenticated) {
+                Surface(Modifier.fillMaxSize()) { AuthScreen(onAuthenticated = { authenticated = true }, arabic = ar) }
+            } else {
+                MainShell(
+                    arabic = ar,
+                    dark = dark,
+                    setDark = { value -> dark = value; context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).edit().putBoolean("dark", value).apply() },
+                    setLanguage = setLanguage,
+                    requestBluetoothPermissions = requestBluetoothPermissions,
+                    signOut = { kotlinx.coroutines.MainScope().launch { auth.signOut(); authenticated = false } }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CarDiagTheme(dark: Boolean, content: @Composable () -> Unit) {
+    val darkScheme = darkColorScheme(
+        primary = Color(0xFF55D9CA), onPrimary = Color(0xFF00201D), secondary = Color(0xFFB3CBD0),
+        background = Color(0xFF071015), surface = Color(0xFF0C181F), surfaceVariant = Color(0xFF17262D)
+    )
+    val lightScheme = lightColorScheme(primary = Color(0xFF006A63), secondary = Color(0xFF48656A))
+    MaterialTheme(colorScheme = if (dark) darkScheme else lightScheme, typography = Typography(), content = content)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ModernCarDiag(requestBluetoothPermissions: () -> Unit) {
-    val auth = remember { AuthService() }
-    var ready by remember { mutableStateOf(auth.currentUser != null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var retry by remember { mutableStateOf(0) }
-    var tab by remember { mutableStateOf(0) }
-    val activity = LocalContext.current as? ModernMainActivity
-
-    LaunchedEffect(retry) {
-        if (!ready) {
-            try {
-                auth.signInAnonymously()
-                ready = auth.currentUser != null
-                if (!ready) error = "Authentication session was not created"
-            } catch (e: Exception) { error = e.message ?: "Authentication failed" }
-        }
-    }
-
-    if (!ready) {
-        Surface(Modifier.fillMaxSize(), color = Color(0xFF071016)) {
-            Column(Modifier.fillMaxSize().padding(28.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-                Text("CarDiag", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = Color.White)
-                Text("DZ • Intelligent vehicle diagnostics", color = Color(0xFF9EB0B9))
-                Spacer(Modifier.height(24.dp))
-                if (error == null) CircularProgressIndicator(color = Color(0xFF52E5D3))
-                else {
-                    Text(error!!, color = Color(0xFFFF8B8B), modifier = Modifier.padding(bottom = 12.dp))
-                    Button(onClick = { error = null; retry++ }) { Text("Retry / Réessayer") }
-                }
-            }
-        }
-        return
-    }
-
-    val ar = LocalConfiguration.current.locales[0].language == "ar"
-    val titles = if (ar) listOf("الرئيسية", "التشخيص", "السيارات", "الإعدادات") else listOf("Accueil", "Diagnostic", "Véhicules", "Réglages")
+private fun MainShell(
+    arabic: Boolean,
+    dark: Boolean,
+    setDark: (Boolean) -> Unit,
+    setLanguage: (String) -> Unit,
+    requestBluetoothPermissions: () -> Unit,
+    signOut: () -> Unit
+) {
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val titles = if (arabic) listOf("الرئيسية", "التشخيص", "مرآبي", "السجل", "الإعدادات") else listOf("Accueil", "Diagnostic", "Garage", "Historique", "Réglages")
+    val icons = listOf(Icons.Default.Home, Icons.Default.Build, Icons.Default.DirectionsCar, Icons.Default.History, Icons.Default.Settings)
     Scaffold(
-        containerColor = Color(0xFF071016),
-        topBar = { TopAppBar(title = { Text("CarDiag", color = Color.White, fontWeight = FontWeight.Black) }, actions = { Text("DZ", color = Color(0xFF52E5D3), fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 18.dp)) }) },
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("CarDiag", fontWeight = FontWeight.Black) },
+                navigationIcon = { Icon(Icons.Default.DirectionsCar, contentDescription = "CarDiag", tint = MaterialTheme.colorScheme.primary) }
+            )
+        },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF0C171E)) {
-                titles.forEachIndexed { index, title ->
-                    NavigationBarItem(selected = tab == index, onClick = { tab = index }, icon = { Text(listOf("⌂", "⌁", "▣", "⚙")[index]) }, label = { Text(title) })
+            NavigationBar {
+                titles.forEachIndexed { i, title ->
+                    NavigationBarItem(selected = tab == i, onClick = { tab = i }, icon = { Icon(icons[i], contentDescription = title) }, label = { Text(title, maxLines = 1) })
                 }
             }
         }
     ) { padding ->
         when (tab) {
-            0 -> HomeModern(padding, ar, { tab = 1 }, { tab = 2 })
-            1 -> DiagnoseModern(padding, ar, requestBluetoothPermissions)
-            2 -> VehiclesModern(padding, ar, { tab = 1 })
-            else -> SettingsModern(padding, ar) { activity?.setLanguage(it) }
+            0 -> HomeScreen(padding, arabic, { tab = 1 }, { tab = 2 })
+            1 -> DiagnosticScreen(padding, arabic, requestBluetoothPermissions)
+            2 -> GarageScreen(padding, arabic)
+            3 -> HistoryScreen(padding, arabic)
+            else -> SettingsScreen(padding, arabic, dark, setDark, setLanguage, signOut)
         }
     }
 }
@@ -139,175 +188,180 @@ private fun VehicleImage(vehicle: VehicleModel, modifier: Modifier = Modifier) {
     AsyncImage(
         model = vehicle.imageUrl,
         contentDescription = vehicle.name,
-        modifier = modifier,
+        modifier = modifier.semantics { contentDescription = vehicle.name },
         contentScale = ContentScale.Crop,
-        placeholder = painterResource(dz.cardiag.app.R.drawable.cardiag_car_fallback),
-        error = painterResource(dz.cardiag.app.R.drawable.cardiag_car_fallback)
+        placeholder = painterResource(R.drawable.cardiag_car_fallback),
+        error = painterResource(R.drawable.cardiag_car_fallback)
     )
 }
 
 @Composable
-private fun HomeModern(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit, vehicles: () -> Unit) {
-    val models = remember { mutableStateListOf<VehicleModel>() }
-    var loading by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        try {
-            models.clear()
-            models.addAll(SupabaseClient.client.from("vehicle_models").select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url")).decodeList())
-        } catch (_: Exception) { }
+private fun HomeScreen(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit, garage: () -> Unit) {
+    val context = LocalContext.current
+    var models by remember { mutableStateOf(VehicleCache.read(context)) }
+    var loading by remember { mutableStateOf(models.isEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun refresh() {
+        loading = true; error = null
+        runCatching {
+            SupabaseClient.client.from("vehicle_models").select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url")).decodeList<VehicleModel>()
+        }.onSuccess { fresh -> models = fresh; VehicleCache.write(context, fresh) }
+            .onFailure { if (models.isEmpty()) error = it.message }
         loading = false
     }
-    val featured = models.firstOrNull()
+    LaunchedEffect(Unit) { refresh() }
+    val online = NetworkStatus.isOnline(context)
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (!online) item { OfflineBanner(ar) }
         item {
-            Box(Modifier.fillMaxWidth().height(270.dp).clip(RoundedCornerShape(30.dp))) {
-                if (featured != null) VehicleImage(featured, Modifier.fillMaxSize())
-                else Box(Modifier.fillMaxSize().background(Color(0xFF102029)))
-                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE061015)))))
-                Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(if (ar) "تشخيص ذكي لسيارتك" else "Diagnostic intelligent", color = Color(0xFF52E5D3), fontWeight = FontWeight.Bold)
-                    Text(if (ar) "اعرف المشكلة قبل تغيير القطع" else "Comprenez le problème avant de remplacer une pièce", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                    Button(onClick = diagnose, shape = RoundedCornerShape(15.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF52E5D3))) { Text(if (ar) "ابدأ التشخيص" else "Lancer le diagnostic", color = Color(0xFF06221F), fontWeight = FontWeight.Black) }
+            Card(shape = RoundedCornerShape(30.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Box(Modifier.fillMaxWidth().height(255.dp)) {
+                    val featured = models.firstOrNull()
+                    if (featured != null) VehicleImage(featured, Modifier.fillMaxSize()) else Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface))))
+                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f)))))
+                    Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (ar) "تشخيص ذكي لسيارتك" else "Diagnostic intelligent", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text(if (ar) "اعرف المشكلة قبل تغيير القطع" else "Comprenez le problème avant de remplacer une pièce", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                        Button(onClick = diagnose) { Icon(Icons.Default.Build, null); Spacer(Modifier.width(6.dp)); Text(if (ar) "ابدأ التشخيص" else "Lancer le diagnostic") }
+                    }
                 }
             }
         }
-        item { Text(if (ar) "أدوات سريعة" else "Actions rapides", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { ActionCard("OBD", if (ar) "فحص الأعطال" else "Scanner les défauts", Modifier.weight(1f), diagnose); ActionCard("DTC", if (ar) "رموز الخطأ" else "Codes défaut", Modifier.weight(1f), diagnose) } }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { ActionCard("VIN", if (ar) "هوية السيارة" else "Identité véhicule", Modifier.weight(1f), vehicles); ActionCard("AI", if (ar) "تحليل ذكي" else "Analyse IA", Modifier.weight(1f), diagnose) } }
-        item { Text(if (ar) "سيارات متوفرة" else "Véhicules disponibles", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
-        if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        items(models.take(6)) { vehicle -> CarImageCard(vehicle, {}) }
-        if (!loading && models.isEmpty()) item { Text(if (ar) "تعذر تحميل الكتالوج. حاول لاحقًا." else "Impossible de charger le catalogue. Réessayez plus tard.", color = Color(0xFFFFB4AB)) }
-    }
-}
-
-@Composable
-private fun ActionCard(title: String, subtitle: String, modifier: Modifier, click: () -> Unit) {
-    Card(modifier = modifier.clickable(onClick = click), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF102029))) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, color = Color(0xFF52E5D3), fontWeight = FontWeight.Black); Text(subtitle, color = Color.White, fontWeight = FontWeight.SemiBold) }
-    }
-}
-
-@Composable
-private fun CarImageCard(vehicle: VehicleModel, click: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = click), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A22))) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            VehicleImage(vehicle, Modifier.size(132.dp, 92.dp).clip(RoundedCornerShape(20.dp)))
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(vehicle.name, color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                val years = listOfNotNull(vehicle.yearFrom, vehicle.yearTo).joinToString("–")
-                Text(if (years.isBlank()) vehicle.generation ?: "" else years, color = Color(0xFF9EB0B9))
-                Text("●  Ready", color = Color(0xFF52E5D3), style = MaterialTheme.typography.labelSmall)
-            }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { QuickAction(Icons.Default.Bluetooth, "OBD", if (ar) "فحص المحول" else "Scanner OBD", Modifier.weight(1f), diagnose); QuickAction(Icons.Default.DirectionsCar, "VIN", if (ar) "هوية السيارة" else "Identité VIN", Modifier.weight(1f), garage) } }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { QuickAction(Icons.Default.History, "DTC", if (ar) "رموز الأعطال" else "Codes défaut", Modifier.weight(1f), diagnose); QuickAction(Icons.Default.Add, "Garage", if (ar) "أضف سيارتك" else "Ajouter une voiture", Modifier.weight(1f), garage) } }
+        item { SectionTitle(if (ar) "الموديلات" else "Modèles") }
+        if (loading) items(3) { SkeletonCard() }
+        items(models.take(8)) { CarCard(it) }
+        if (!loading && models.isEmpty()) item {
+            EmptyState(if (ar) "لا توجد بيانات متاحة" else "Aucune donnée disponible", error ?: if (ar) "تحقق من الاتصال ثم أعد المحاولة." else "Vérifiez votre connexion puis réessayez.") { scope.launch { refresh() } }
         }
     }
 }
 
 @Composable
-private fun VehiclesModern(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit) {
-    var models by remember { mutableStateOf<List<VehicleModel>>(emptyList()) }
-    var query by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        try { models = SupabaseClient.client.from("vehicle_models").select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url")).decodeList() }
-        catch (_: Exception) { error = true }
-    }
-    val filtered = models.filter { it.name.contains(query, true) || (it.generation?.contains(query, true) == true) }
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { Text(if (ar) "كتالوج السيارات" else "Catalogue véhicules", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black); Text(if (ar) "قاعدة بيانات CarDiag للموديلات" else "Base de données CarDiag des modèles", color = Color(0xFF9EB0B9)) }
-        item { OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text(if (ar) "ابحث عن سيارة" else "Rechercher un modèle") }) }
-        if (error) item { Text(if (ar) "تعذر تحميل السيارات من الخادم." else "Impossible de charger les véhicules depuis le serveur.", color = Color(0xFFFFB4AB)) }
-        items(filtered) { vehicle -> CarImageCard(vehicle, diagnose) }
-    }
+private fun QuickAction(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, modifier: Modifier, click: () -> Unit) {
+    Card(modifier.clickable(onClick = click), shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary); Text(title, fontWeight = FontWeight.Black); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
 
+@Composable private fun SectionTitle(text: String) { Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+
+@Composable private fun CarCard(vehicle: VehicleModel, click: () -> Unit = {}) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = click), shape = RoundedCornerShape(22.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { VehicleImage(vehicle, Modifier.size(132.dp, 92.dp).clip(RoundedCornerShape(20.dp))); Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(vehicle.name, fontWeight = FontWeight.Black); Text(listOfNotNull(vehicle.yearFrom, vehicle.yearTo).joinToString("–").ifBlank { vehicle.generation.orEmpty() }, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(if (vehicle.imageUrl.isNullOrBlank()) "Illustration" else "Photo", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) } } }
+}
+
+@Composable private fun SkeletonCard() { Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(12.dp)) { Box(Modifier.size(110.dp, 78.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant)); Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Box(Modifier.width(150.dp).height(16.dp).background(MaterialTheme.colorScheme.surfaceVariant)); Box(Modifier.width(90.dp).height(12.dp).background(MaterialTheme.colorScheme.surfaceVariant)) } } } }
+
+@Composable private fun OfflineBanner(ar: Boolean) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.CloudOff, null); Spacer(Modifier.width(8.dp)); Text(if (ar) "وضع عدم الاتصال: البيانات المخزنة مؤقتًا متاحة." else "Hors connexion : les données mises en cache restent disponibles.") } } }
+
 @Composable
-private fun DiagnoseModern(padding: PaddingValues, ar: Boolean, requestBluetoothPermissions: () -> Unit) {
-    var complaint by remember { mutableStateOf("") }
-    var running by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<JsonObject?>(null) }
-    var obdStatus by remember { mutableStateOf(if (ar) "غير متصل" else "Non connecté") }
-    var obdResult by remember { mutableStateOf<String?>(null) }
+private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoothPermissions: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val service = remember { DiagnosticService() }
     val obd = remember { ObdService() }
-    val context = LocalContext.current
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    var complaint by rememberSaveable { mutableStateOf("") }
+    var running by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<JsonObject?>(null) }
+    var status by rememberSaveable { mutableStateOf(if (ar) "غير متصل" else "Non connecté") }
+    var dtc by remember { mutableStateOf<List<String>>(emptyList()) }
+    var live by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val online = NetworkStatus.isOnline(context)
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { SectionTitle(if (ar) "التشخيص" else "Diagnostic"); Text(if (ar) "استخدم OBD-II مع وصف المشكلة للحصول على تحليل منظم." else "Combinez OBD-II et symptômes pour une analyse structurée.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (!online) item { OfflineBanner(ar) }
         item {
-            Text(if (ar) "التشخيص الذكي" else "Diagnostic intelligent", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text(if (ar) "ادمج أعراض السيارة مع بيانات OBD عندما يكون المحول متصلًا." else "Combinez les symptômes avec les données OBD lorsque l'adaptateur est connecté.", color = Color(0xFF9EB0B9))
-        }
-        item {
-            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF102029))) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(if (ar) "OBD-II" else "OBD-II", color = Color(0xFF52E5D3), fontWeight = FontWeight.Black)
-                    Text(obdStatus, color = Color.White)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = requestBluetoothPermissions) { Text(if (ar) "صلاحيات Bluetooth" else "Autoriser Bluetooth") }
-                        Button(onClick = {
-                            if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED && android.os.Build.VERSION.SDK_INT >= 31) return@Button
-                            val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()
-                            if (device == null) { obdStatus = if (ar) "لا يوجد محول مقترن" else "Aucun adaptateur appairé"; return@Button }
-                            scope.launch {
-                                try { obdStatus = obd.connect(device); obdResult = obd.readTroubleCodes() }
-                                catch (e: Exception) { obdStatus = e.message ?: "OBD connection failed" }
-                            }
-                        }) { Text(if (ar) "اتصال وفحص" else "Connecter & scanner") }
-                    }
-                    obdResult?.let { Text("DTC: $it", color = Color(0xFFFFD180)) }
-                }
-            }
-        }
-        item {
-            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A22))) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(if (ar) "ما الذي يحدث؟" else "Que se passe-t-il ?", color = Color.White, fontWeight = FontWeight.Bold)
-                    OutlinedTextField(value = complaint, onValueChange = { complaint = it }, modifier = Modifier.fillMaxWidth(), minLines = 5, label = { Text(if (ar) "الأعراض" else "Symptômes") })
+            Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (ar) "وصف المشكلة" else "Symptômes", fontWeight = FontWeight.Bold)
+                OutlinedTextField(value = complaint, onValueChange = { complaint = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, label = { Text(if (ar) "مثال: المحرك يهتز عند التوقف" else "Ex. moteur instable au ralenti") })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = requestBluetoothPermissions) { Icon(Icons.Default.Bluetooth, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "Bluetooth" else "Bluetooth") }
                     Button(onClick = {
-                        if (complaint.isBlank()) return@Button
-                        scope.launch {
-                            running = true; result = null
-                            try { result = service.runDiagnostic(null, complaint, if (ar) "ar" else "fr", codes = emptyList(), vehicle = JsonObject(emptyMap())) }
-                            catch (e: Exception) { result = JsonObject(mapOf("error" to kotlinx.serialization.json.JsonPrimitive(e.message ?: "Diagnostic failed"))) }
-                            finally { running = false }
-                        }
-                    }, enabled = !running, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF52E5D3))) {
-                        if (running) CircularProgressIndicator(Modifier.size(20.dp), color = Color(0xFF06221F), strokeWidth = 2.dp)
-                        else Text(if (ar) "حلّل المشكلة بالذكاء الاصطناعي" else "Analyser avec l'IA", color = Color(0xFF06221F), fontWeight = FontWeight.Black)
-                    }
+                        if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) { requestBluetoothPermissions(); return@Button }
+                        val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()
+                        if (device == null) { status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"; return@Button }
+                        scope.launch { try { status = obd.connect(device); dtc = obd.readTroubleCodes(); live = mapOf("RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"), "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"), "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")) } catch (e: Exception) { status = e.message ?: "OBD error" } } }
+                    }) { Text(if (ar) "اتصال وفحص" else "Connecter") }
                 }
-            }
+                Text(status, color = MaterialTheme.colorScheme.primary)
+                if (dtc.isNotEmpty()) Text("DTC: ${dtc.joinToString()}", color = MaterialTheme.colorScheme.error)
+                if (live.isNotEmpty()) live.forEach { (k, v) -> Text("$k: $v") }
+            } }
         }
-        result?.let { item { ResultCard(it, ar) } }
+        item {
+            Button(onClick = {
+                if (!online) { error = if (ar) "الاتصال بالإنترنت مطلوب لتحليل AI." else "Internet requis pour l'analyse IA."; return@Button }
+                if (complaint.isBlank() && dtc.isEmpty()) { error = if (ar) "أدخل الأعراض أو اتصل بـOBD أولًا." else "Ajoutez des symptômes ou connectez l'OBD."; return@Button }
+                scope.launch {
+                    running = true; error = null
+                    try {
+                        val measurementJson = buildJsonObject { live.forEach { (k, v) -> put(k, v) } }
+                        result = withContext(Dispatchers.IO) { service.runDiagnostic(null, complaint, if (ar) "ar" else "fr", dtc, buildJsonObject { put("complaint", complaint) }, measurementJson) }
+                    } catch (e: Exception) { error = e.message ?: if (ar) "فشل التشخيص" else "Échec du diagnostic" }
+                    finally { running = false }
+                }
+            }, modifier = Modifier.fillMaxWidth(), enabled = !running) { if (running) CircularProgressIndicator(strokeWidth = 2.dp) else Text(if (ar) "تحليل بالذكاء الاصطناعي" else "Analyser avec l'IA") }
+        }
+        error?.let { msg -> item { Text(msg, color = MaterialTheme.colorScheme.error) } }
+        result?.let { json -> item { DiagnosisResultCard(json, ar) } }
+    }
+}
+
+@Composable private fun DiagnosisResultCard(result: JsonObject, ar: Boolean) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(if (ar) "نتيجة منظمة" else "Résultat structuré", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); result.entries.take(12).forEach { (key, value) -> Text("$key: $value") } } } }
+
+@Composable
+private fun GarageScreen(padding: PaddingValues, ar: Boolean) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var vehicles by remember { mutableStateOf<List<UserVehicle>>(emptyList()) }
+    var models by remember { mutableStateOf<List<VehicleModel>>(VehicleCache.read(context)) }
+    var nickname by rememberSaveable { mutableStateOf("") }
+    var vin by rememberSaveable { mutableStateOf("") }
+    var selectedModel by remember { mutableStateOf<VehicleModel?>(models.firstOrNull()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    fun refresh() { scope.launch { loading = true; runCatching { vehicles = SupabaseClient.client.from("user_vehicles").select(Columns.list("id","model_id","nickname","vin","mileage","is_primary")).decodeList() }.onFailure { error = it.message }; loading = false } }
+    LaunchedEffect(Unit) { if (models.isEmpty()) runCatching { models = SupabaseClient.client.from("vehicle_models").select(Columns.list("id","make_id","name","year_from","year_to","generation","image_url")).decodeList<VehicleModel>() }; refresh() }
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { SectionTitle(if (ar) "مرآبي" else "Mon garage"); Text(if (ar) "سياراتك وسجلها محفوظان لحسابك." else "Vos véhicules et leur historique sont liés à votre compte.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text(if (ar) "إضافة سيارة" else "Ajouter un véhicule", fontWeight = FontWeight.Bold); OutlinedTextField(nickname, { nickname = it }, Modifier.fillMaxWidth(), label = { Text(if (ar) "اسم السيارة" else "Nom") }); OutlinedTextField(vin, { vin = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(17) }, Modifier.fillMaxWidth(), label = { Text("VIN") }, singleLine = true); Text(if (ar) "الموديل: ${selectedModel?.name ?: "اختر من الكتالوج"}" else "Modèle: ${selectedModel?.name ?: "Choisir dans le catalogue"}"); Button(onClick = { val model = selectedModel ?: return@Button; scope.launch { error = null; runCatching { require(vin.isBlank() || vin.length == 17) { if (ar) "VIN يجب أن يكون 17 خانة" else "Le VIN doit contenir 17 caractères" }; SupabaseClient.client.from("user_vehicles").insert(mapOf("model_id" to model.id, "make_id" to model.makeId, "nickname" to nickname.ifBlank { model.name }, "vin" to vin.ifBlank { null }, "is_primary" to vehicles.isEmpty())); nickname = ""; vin = ""; refresh() }.onFailure { error = it.message } } }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(5.dp)); Text(if (ar) "حفظ السيارة" else "Enregistrer") } } } }
+        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
+        item { SectionTitle(if (ar) "سياراتي" else "Mes véhicules") }
+        if (loading) items(2) { SkeletonCard() }
+        items(vehicles) { v -> Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(v.nickname ?: "Vehicle", fontWeight = FontWeight.Black); Text("VIN: ${v.vin ?: "—"}"); Text("${if (ar) "الموديل" else "Modèle"}: ${models.firstOrNull { it.id == v.modelId }?.name ?: v.modelId}") } } }
+        if (!loading && vehicles.isEmpty()) item { Text(if (ar) "أضف سيارتك الأولى لربط التشخيص بها." else "Ajoutez votre premier véhicule pour lier les diagnostics.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
 @Composable
-private fun ResultCard(result: JsonObject, ar: Boolean) {
-    val diagnosis = (result["diagnosis"] as? JsonObject) ?: result
-    val summary = diagnosis["summary"]?.toString()?.trim('"') ?: diagnosis.toString()
-    val severity = diagnosis["severity"]?.toString()?.trim('"')
-    val confidence = diagnosis["confidence"]?.toString()?.trim('"')
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF102C2A))) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (ar) "نتيجة التحليل" else "Résultat de l'analyse", color = Color(0xFF52E5D3), fontWeight = FontWeight.Black)
-            Text(summary, color = Color.White, style = MaterialTheme.typography.bodyLarge)
-            if (severity != null) Text("${if (ar) "الخطورة" else "Sévérité"}: $severity", color = Color.White)
-            if (confidence != null) Text("${if (ar) "الثقة" else "Confiance"}: $confidence", color = Color.White)
-            Text(if (ar) "تنبيه: هذا تحليل مساعد وليس بديلًا عن فحص ميكانيكي مؤهل." else "Attention : cette analyse est une aide et ne remplace pas un contrôle professionnel.", color = Color(0xFFFFD180), style = MaterialTheme.typography.bodySmall)
-        }
+private fun HistoryScreen(padding: PaddingValues, ar: Boolean) {
+    var history by remember { mutableStateOf<List<DiagnosticHistory>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    fun refresh() { scope.launch { loading = true; runCatching { history = SupabaseClient.client.from("diagnostic_sessions").select(Columns.list("id","complaint","status","language","created_at")).decodeList() }.onFailure { error = it.message }; loading = false } }
+    LaunchedEffect(Unit) { refresh() }
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { SectionTitle(if (ar) "سجل التشخيص" else "Historique") }
+        if (loading) items(3) { SkeletonCard() }
+        items(history) { h -> Card { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (h.status == "completed") Icons.Default.CheckCircle else Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary); Column(Modifier.padding(start = 12.dp)) { Text(h.complaint ?: if (ar) "فحص بدون وصف" else "Diagnostic sans symptôme", fontWeight = FontWeight.Bold); Text("${h.status} • ${h.createdAt}", color = MaterialTheme.colorScheme.onSurfaceVariant) } } } }
+        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
+        if (!loading && history.isEmpty()) item { EmptyState(if (ar) "السجل فارغ" else "Historique vide", if (ar) "نتائج التشخيص ستظهر هنا." else "Vos diagnostics apparaîtront ici.") { refresh() } }
     }
 }
 
 @Composable
-private fun SettingsModern(padding: PaddingValues, ar: Boolean, change: (String) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(if (ar) "الإعدادات" else "Réglages", color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A22))) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (ar) "اللغة" else "Langue", color = Color.White, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Button(onClick = { change("ar") }) { Text("العربية") }; Button(onClick = { change("fr") }) { Text("Français") } }
-            }
-        }
+private fun SettingsScreen(padding: PaddingValues, ar: Boolean, dark: Boolean, setDark: (Boolean) -> Unit, setLanguage: (String) -> Unit, signOut: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { SectionTitle(if (ar) "الإعدادات" else "Réglages") }
+        item { SettingRow(Icons.Default.DarkMode, if (ar) "الوضع الداكن" else "Mode sombre", if (ar) "واجهة مريحة للعين" else "Interface confortable", Switch(checked = dark, onCheckedChange = setDark)) }
+        item { SettingRow(Icons.Default.Language, if (ar) "اللغة" else "Langue", if (ar) "العربية" else "Français", TextButton(onClick = { setLanguage(if (ar) "fr" else "ar") }) { Text(if (ar) "Français" else "العربية") }) }
+        item { SettingRow(Icons.Default.Security, if (ar) "الخصوصية" else "Confidentialité", if (ar) "بياناتك مرتبطة بحسابك فقط." else "Vos données restent liées à votre compte.", null) }
+        item { OutlinedButton(onClick = signOut, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Logout, null); Spacer(Modifier.width(8.dp)); Text(if (ar) "تسجيل الخروج" else "Déconnexion") } }
     }
 }
+
+@Composable private fun SettingRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, action: @Composable (() -> Unit)?) { Card { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary); Column(Modifier.weight(1f).padding(horizontal = 12.dp)) { Text(title, fontWeight = FontWeight.Bold); Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }; action?.invoke() } } }
+
+@Composable private fun EmptyState(title: String, body: String, retry: () -> Unit) { Card { Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary); Text(title, fontWeight = FontWeight.Bold); Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant); OutlinedButton(onClick = retry) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Retry") } } } }
