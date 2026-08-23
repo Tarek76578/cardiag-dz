@@ -43,6 +43,10 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:functions-kt")
     implementation("io.ktor:ktor-client-android:3.0.3")
+
+    constraints {
+        implementation("androidx.browser:browser:1.8.0")
+    }
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
