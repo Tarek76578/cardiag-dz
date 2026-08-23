@@ -8,7 +8,6 @@ plugins {
 android {
     namespace = "dz.cardiag.app"
     compileSdk = 36
-
     defaultConfig {
         applicationId = "dz.cardiag.app"
         minSdk = 26
@@ -16,28 +15,12 @@ android {
         versionCode = 10
         versionName = "1.0.0"
     }
+    buildFeatures { compose = true; buildConfig = true }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17); optIn.add("androidx.compose.material3.ExperimentalMaterial3Api") } }
 
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-            optIn.add("androidx.compose.material3.ExperimentalMaterial3Api")
-        }
-    }
-
-    val supabaseUrl = System.getenv("SUPABASE_URL")
-        ?: "https://knripjpkmvdmqtstkcmo.supabase.co"
-    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY")
-        ?: "sb_publishable_Wczl8w-35no4HbROqqnMyg_fbmYizuZ"
+    val supabaseUrl = System.getenv("SUPABASE_URL") ?: error("SUPABASE_URL GitHub/local environment variable is required")
+    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: error("SUPABASE_PUBLISHABLE_KEY GitHub/local environment variable is required")
 
     buildTypes {
         debug {
@@ -52,18 +35,12 @@ android {
             buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
     }
-
     val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
     val keystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
     val keyAlias = System.getenv("ANDROID_KEY_ALIAS")
     val keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
     if (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank() && !keyAlias.isNullOrBlank() && !keyPassword.isNullOrBlank()) {
-        signingConfigs.create("release") {
-            storeFile = file(keystorePath)
-            storePassword = keystorePassword
-            this.keyAlias = keyAlias
-            this.keyPassword = keyPassword
-        }
+        signingConfigs.create("release") { storeFile=file(keystorePath); storePassword=keystorePassword; this.keyAlias=keyAlias; this.keyPassword=keyPassword }
         buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
     }
 }
@@ -75,7 +52,6 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-
     implementation(platform("io.github.jan-tennert.supabase:bom:3.7.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
@@ -83,9 +59,7 @@ dependencies {
     implementation("io.ktor:ktor-client-android:3.5.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
-
-    constraints {
-        implementation("androidx.browser:browser:1.8.0")
-    }
+    constraints { implementation("androidx.browser:browser:1.8.0") }
     debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
 }
