@@ -12,6 +12,7 @@ import java.util.UUID
 /** Bluetooth Classic ELM327 transport with standard OBD-II parsing. */
 class ObdService {
     companion object { private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") }
+    @Suppress("DEPRECATION")
     private val adapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
     private var socket: BluetoothSocket? = null
 
