@@ -9,7 +9,7 @@
     <string name="vehicle_hint">Exemple : Renault Clio 4 1.5 dCi</string>
     <string name="describe_problem">Décrivez le problème</string>
     <string name="problem_hint">Exemple : le moteur vibre au ralenti...</string>
-    <string name="diagnose_with_ai">Diagnostiquer avec l&apos;IA</string>
+    <string name="diagnose_with_ai">Diagnostiquer avec IA</string>
     <string name="back">Retour</string>
     <string name="fill_required_fields">Veuillez renseigner le véhicule et décrire le problème.</string>
     <string name="diagnostic_received">Demande de diagnostic reçue.</string>
