@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -29,6 +29,31 @@ jobs:
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x ./gradlew
+      - name: Repair Kotlin callback syntax
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt')
+          s = p.read_text()
+          old = '''if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) { requestBluetoothPermissions(); return@Button }\n                        val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()\n                        if (device == null) { status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"; return@Button }\n                        scope.launch { try { status = obd.connect(device); dtc = obd.readTroubleCodes(); live = mapOf("RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"), "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"), "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")) } catch (e: Exception) { status = e.message ?: "OBD error" } }'''
+          new = '''if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {\n                            requestBluetoothPermissions()\n                        } else {\n                            val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()\n                            if (device == null) {\n                                status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"\n                            } else {\n                                scope.launch {\n                                    try {\n                                        status = obd.connect(device)\n                                        dtc = obd.readTroubleCodes()\n                                        live = mapOf(\n                                            "RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"),\n                                            "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"),\n                                            "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")\n                                        )\n                                    } catch (e: Exception) {\n                                        status = e.message ?: "OBD error"\n                                    }\n                                }\n                            }\n                        }'''
+          if old not in s:
+              raise SystemExit('Expected broken OBD callback was not found')
+          p.write_text(s.replace(old, new))
+          PY
+      - name: Commit source repair
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No source repair needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt
+          git commit -m "fix: repair OBD callback Kotlin syntax"
+          git push
       - name: Build and test debug APK
         working-directory: android
         run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug
