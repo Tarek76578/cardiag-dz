@@ -81,10 +81,44 @@ class MainActivity : ComponentActivity() {
 fun CarDiagApp(onLanguageChange: (String) -> Unit) {
     val auth = remember { AuthService() }
     var authenticated by remember { mutableStateOf(auth.currentUser != null) }
+    var authError by remember { mutableStateOf<String?>(null) }
+    var retryNonce by remember { mutableStateOf(0) }
+
+    LaunchedEffect(retryNonce) {
+        if (auth.currentUser != null) {
+            authenticated = true
+            authError = null
+            return@LaunchedEffect
+        }
+        authenticated = false
+        authError = null
+        try {
+            auth.signInAnonymously()
+            authenticated = auth.currentUser != null
+            if (!authenticated) error("Anonymous session was not created")
+        } catch (e: Exception) {
+            authError = e.message ?: "Anonymous sign-in failed"
+        }
+    }
+
     if (!authenticated) {
-        AuthScreen(onAuthenticated = { authenticated = true })
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (authError == null) {
+                CircularProgressIndicator()
+                Text("Preparing CarDiag…", Modifier.padding(top = 16.dp))
+            } else {
+                Text("Unable to start CarDiag", style = MaterialTheme.typography.headlineSmall)
+                Text(authError ?: "", Modifier.padding(vertical = 12.dp))
+                Button(onClick = { retryNonce++ }) { Text("Retry") }
+            }
+        }
         return
     }
+
     val navController = rememberNavController()
     Scaffold { padding ->
         NavHost(navController = navController, startDestination = "home", modifier = Modifier.padding(padding)) {
