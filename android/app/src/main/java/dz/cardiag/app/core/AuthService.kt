@@ -1,7 +1,7 @@
 package dz.cardiag.app.core
 
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.providers.Email
+import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.user.UserInfo
 
 class AuthService {
