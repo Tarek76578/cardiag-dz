@@ -26,7 +26,11 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build Debug APK
-        run: cd android && ./gradlew --no-daemon assembleDebug
+        run: |
+          cd android
+          ./gradlew --no-daemon :app:dependencyInsight --dependency kotlin-stdlib --configuration debugCompileClasspath
+          ./gradlew --no-daemon :app:dependencyInsight --dependency ktor-client-core --configuration debugCompileClasspath
+          ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
