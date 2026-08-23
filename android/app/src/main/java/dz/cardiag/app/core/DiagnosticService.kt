@@ -1,5 +1,7 @@
 package dz.cardiag.app.core
 
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.serialization.SerialName
@@ -30,7 +32,7 @@ class DiagnosticService {
         complaint: String,
         language: String
     ): DiagnosticSession {
-        val user = supabase.auth.currentUserOrNull()
+        supabase.auth.currentUserOrNull()
             ?: error("Authentication required")
 
         return supabase.from("diagnostic_sessions")
@@ -65,8 +67,10 @@ class DiagnosticService {
             put("language", language)
         }
 
-        return supabase.functions.invoke("diagnose", body = payload)
-            .decodeAs<JsonObject>()
+        return supabase.functions.invoke<JsonObject>(
+            function = "diagnose",
+            body = payload
+        )
     }
 
     suspend fun runDiagnostic(
