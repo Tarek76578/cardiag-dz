@@ -13,7 +13,7 @@ env:
   ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -29,7 +29,11 @@ jobs:
       - name: Prepare Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build and verify
+      - name: Check repository for committed secrets
+        run: |
+          ! grep -RInE '(service_role|SUPABASE_SERVICE_ROLE|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9_-]{20,})' . --exclude-dir=.git --exclude='*.md' || (echo 'Potential secret detected in repository' && exit 1)
+
+      - name: Build and test
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
