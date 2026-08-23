@@ -60,17 +60,32 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
     var live by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var error by remember { mutableStateOf<String?>(null) }
     val online = NetworkStatus.isOnline(context)
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
         item {
             SectionTitle(if (ar) "التشخيص" else "Diagnostic")
-            Text(if (ar) "استخدم OBD-II مع وصف المشكلة للحصول على تحليل منظم." else "Combinez OBD-II et symptômes pour une analyse structurée.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (ar) "استخدم OBD-II مع وصف المشكلة للحصول على تحليل منظم."
+                else "Combinez OBD-II et symptômes pour une analyse structurée.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         if (!online) item { OfflineBanner(ar) }
         item {
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(if (ar) "وصف المشكلة" else "Symptômes", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(value = complaint, onValueChange = { complaint = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, label = { Text(if (ar) "مثال: المحرك يهتز عند التوقف" else "Ex. moteur instable au ralenti") })
+                    OutlinedTextField(
+                        value = complaint,
+                        onValueChange = { complaint = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        label = { Text(if (ar) "مثال: المحرك يهتز عند التوقف" else "Ex. moteur instable au ralenti") }
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = requestBluetoothPermissions) {
                             Icon(Icons.Default.Bluetooth, contentDescription = null)
@@ -78,7 +93,8 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
                             Text("Bluetooth")
                         }
                         Button(onClick = {
-                            val permissionMissing = Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+                            val permissionMissing = Build.VERSION.SDK_INT >= 31 &&
+                                context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
                             if (permissionMissing) {
                                 requestBluetoothPermissions()
                             } else {
@@ -101,42 +117,65 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
                                     }
                                 }
                             }
-                        }) { Text(if (ar) "اتصال وفحص" else "Connecter") }
+                        }) {
+                            Text(if (ar) "اتصال وفحص" else "Connecter")
+                        }
                     }
                     Text(status, color = MaterialTheme.colorScheme.primary)
-                    if (dtc.isNotEmpty()) Text("DTC: ${dtc.joinToString()}", color = MaterialTheme.colorScheme.error)
-                    live.forEach { (key, value) -> Text("$key: $value") }
+                    if (dtc.isNotEmpty()) {
+                        Text("DTC: ${dtc.joinToString()}", color = MaterialTheme.colorScheme.error)
+                    }
+                    if (live.isNotEmpty()) {
+                        live.forEach { (key, value) -> Text("$key: $value") }
+                    }
                 }
             }
         }
         item {
-            Button(onClick = {
-                if (!online) {
-                    error = if (ar) "الاتصال بالإنترنت مطلوب لتحليل AI." else "Internet requis pour l'analyse IA."
-                } else if (complaint.isBlank() && dtc.isEmpty()) {
-                    error = if (ar) "أدخل الأعراض أو اتصل بـOBD أولًا." else "Ajoutez des symptômes ou connectez l'OBD."
-                } else {
-                    scope.launch {
-                        running = true
-                        error = null
-                        try {
-                            val measurementJson = buildJsonObject { live.forEach { (key, value) -> put(key, value) } }
-                            result = withContext(Dispatchers.IO) {
-                                service.runDiagnostic(null, complaint, if (ar) "ar" else "fr", dtc, buildJsonObject { put("complaint", complaint) }, measurementJson)
+            Button(
+                onClick = {
+                    if (!online) {
+                        error = if (ar) "الاتصال بالإنترنت مطلوب لتحليل AI." else "Internet requis pour l'analyse IA."
+                    } else if (complaint.isBlank() && dtc.isEmpty()) {
+                        error = if (ar) "أدخل الأعراض أو اتصل بـOBD أولًا." else "Ajoutez des symptômes ou connectez l'OBD."
+                    } else {
+                        scope.launch {
+                            running = true
+                            error = null
+                            try {
+                                val measurementJson = buildJsonObject {
+                                    live.forEach { (key, value) -> put(key, value) }
+                                }
+                                result = withContext(Dispatchers.IO) {
+                                    service.runDiagnostic(
+                                        null,
+                                        complaint,
+                                        if (ar) "ar" else "fr",
+                                        dtc,
+                                        buildJsonObject { put("complaint", complaint) },
+                                        measurementJson
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                error = e.message ?: if (ar) "فشل التشخيص" else "Échec du diagnostic"
+                            } finally {
+                                running = false
                             }
-                        } catch (e: Exception) {
-                            error = e.message ?: if (ar) "فشل التشخيص" else "Échec du diagnostic"
-                        } finally {
-                            running = false
                         }
                     }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !running
+            ) {
+                if (running) {
+                    CircularProgressIndicator(strokeWidth = 2.dp)
+                } else {
+                    Text(if (ar) "تحليل بالذكاء الاصطناعي" else "Analyser avec l'IA")
                 }
-            }, modifier = Modifier.fillMaxWidth(), enabled = !running) {
-                if (running) CircularProgressIndicator(strokeWidth = 2.dp) else Text(if (ar) "تحليل بالذكاء الاصطناعي" else "Analyser avec l'IA")
             }
         }
-        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
-        if (result != null) item { DiagnosisResultCard(result!!, ar) }
+        error?.let { msg -> item { Text(msg, color = MaterialTheme.colorScheme.error) } }
+        result?.let { json -> item { DiagnosisResultCard(json, ar) } }
     }
 }
 
@@ -146,6 +185,7 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
 
       - name: Verify source integrity
         run: |
+          test -f android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt
           grep -q 'private fun DiagnosticScreen' android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt
           grep -q 'private fun DiagnosisResultCard' android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt
           git diff --check
@@ -165,7 +205,7 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
 
       - name: Build and test debug APK
         working-directory: android
-        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
