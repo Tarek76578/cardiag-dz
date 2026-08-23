@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">CarDiag DZ</string>
+
+    <string name="home_title">CarDiag DZ</string>
+    <string name="home_subtitle">تشخيص السيارات بالذكاء الاصطناعي</string>
+    <string name="start_diagnostic">ابدأ التشخيص</string>
+
+    <string name="diagnostic_title">تشخيص السيارة</string>
+    <string name="vehicle">السيارة</string>
+    <string name="vehicle_hint">مثال: Renault Clio 4 1.5 dCi</string>
+    <string name="describe_problem">صف المشكلة</string>
+    <string name="problem_hint">مثال: المحرك يهتز عند التوقف...</string>
+    <string name="diagnose_with_ai">تشخيص بالذكاء الاصطناعي</string>
+    <string name="back">رجوع</string>
+    <string name="fill_required_fields">يرجى إدخال السيارة ووصف المشكلة.</string>
+    <string name="diagnostic_received">تم استلام طلب التشخيص.</string>
+
+    <string name="history">سجل التشخيص</string>
+    <string name="vehicles">سياراتي</string>
+    <string name="settings">الإعدادات</string>
+    <string name="language">اللغة</string>
+    <string name="french">الفرنسية</string>
+    <string name="arabic">العربية</string>
+</resources>

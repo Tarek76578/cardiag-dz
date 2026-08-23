@@ -1,6 +1,8 @@
 package dz.cardiag.app
 
+import android.app.LocaleManager
 import android.os.Bundle
+import android.os.LocaleList
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +17,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
 
@@ -24,59 +30,107 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                CarDiagApp()
+                CarDiagApp(
+                    onLanguageChange = { language ->
+                        setAppLanguage(language)
+                    }
+                )
+            }
+        }
+    }
+
+    private fun setAppLanguage(language: String) {
+        val localeManager = getSystemService(LocaleManager::class.java)
+
+        val locale = when (language) {
+            "ar" -> "ar"
+            else -> "fr"
+        }
+
+        localeManager.applicationLocales =
+            LocaleList.forLanguageTags(locale)
+    }
+}
+
+@Composable
+fun CarDiagApp(
+    onLanguageChange: (String) -> Unit
+) {
+    val navController = rememberNavController()
+
+    Scaffold { padding ->
+
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(padding)
+        ) {
+
+            composable("home") {
+                HomeScreen(
+                    onStartDiagnostic = {
+                        navController.navigate("diagnostic")
+                    },
+                    onSettings = {
+                        navController.navigate("settings")
+                    }
+                )
+            }
+
+            composable("diagnostic") {
+                DiagnosticScreen(
+                    onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            composable("settings") {
+                SettingsScreen(
+                    onBack = {
+                        navController.popBackStack()
+                    },
+                    onLanguageChange = onLanguageChange
+                )
             }
         }
     }
 }
 
 @Composable
-fun CarDiagApp() {
-    var showDiagnostic by remember { mutableStateOf(false) }
+fun HomeScreen(
+    onStartDiagnostic: () -> Unit,
+    onSettings: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
 
-    Scaffold { padding ->
+        Text(
+            text = stringResource(R.string.home_title),
+            style = MaterialTheme.typography.headlineLarge
+        )
 
-        if (!showDiagnostic) {
+        Text(
+            text = stringResource(R.string.home_subtitle),
+            style = MaterialTheme.typography.titleMedium
+        )
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        Button(
+            onClick = onStartDiagnostic,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.start_diagnostic))
+        }
 
-                Text(
-                    text = "CarDiag DZ",
-                    style = MaterialTheme.typography.headlineLarge
-                )
-
-                Text(
-                    text = "تشخيص السيارات بالذكاء الاصطناعي",
-                    style = MaterialTheme.typography.titleMedium
-                )
-
-                Text(
-                    text = "Diagnostic automobile intelligent"
-                )
-
-                Button(
-                    onClick = {
-                        showDiagnostic = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("ابدأ التشخيص")
-                }
-            }
-
-        } else {
-
-            DiagnosticScreen(
-                onBack = {
-                    showDiagnostic = false
-                }
-            )
+        Button(
+            onClick = onSettings,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.settings))
         }
     }
 }
@@ -85,7 +139,6 @@ fun CarDiagApp() {
 fun DiagnosticScreen(
     onBack: () -> Unit
 ) {
-
     var carInfo by remember { mutableStateOf("") }
     var problem by remember { mutableStateOf("") }
     var result by remember { mutableStateOf("") }
@@ -98,12 +151,8 @@ fun DiagnosticScreen(
     ) {
 
         Text(
-            text = "تشخيص السيارة",
+            text = stringResource(R.string.diagnostic_title),
             style = MaterialTheme.typography.headlineMedium
-        )
-
-        Text(
-            text = "Diagnostic automobile"
         )
 
         OutlinedTextField(
@@ -111,10 +160,10 @@ fun DiagnosticScreen(
             onValueChange = { carInfo = it },
             modifier = Modifier.fillMaxWidth(),
             label = {
-                Text("السيارة / Véhicule")
+                Text(stringResource(R.string.vehicle))
             },
             placeholder = {
-                Text("مثال: Renault Clio 4 1.5 dCi")
+                Text(stringResource(R.string.vehicle_hint))
             }
         )
 
@@ -124,10 +173,10 @@ fun DiagnosticScreen(
             modifier = Modifier.fillMaxWidth(),
             minLines = 4,
             label = {
-                Text("صف المشكلة / Décrivez le problème")
+                Text(stringResource(R.string.describe_problem))
             },
             placeholder = {
-                Text("مثال: المحرك يهتز عند التوقف...")
+                Text(stringResource(R.string.problem_hint))
             }
         )
 
@@ -135,14 +184,14 @@ fun DiagnosticScreen(
             onClick = {
                 result =
                     if (carInfo.isBlank() || problem.isBlank()) {
-                        "يرجى إدخال معلومات السيارة ووصف المشكلة."
+                        stringResource(R.string.fill_required_fields)
                     } else {
-                        "تم استلام طلب التشخيص. سيتم ربطه بمحرك الذكاء الاصطناعي."
+                        stringResource(R.string.diagnostic_received)
                     }
             },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("تشخيص بالذكاء الاصطناعي")
+            Text(stringResource(R.string.diagnose_with_ai))
         }
 
         if (result.isNotEmpty()) {
@@ -156,7 +205,55 @@ fun DiagnosticScreen(
             onClick = onBack,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("رجوع")
+            Text(stringResource(R.string.back))
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onLanguageChange: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+
+        Text(
+            text = stringResource(R.string.settings),
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        Text(
+            text = stringResource(R.string.language)
+        )
+
+        Button(
+            onClick = {
+                onLanguageChange("fr")
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.french))
+        }
+
+        Button(
+            onClick = {
+                onLanguageChange("ar")
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.arabic))
+        }
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.back))
         }
     }
 }
