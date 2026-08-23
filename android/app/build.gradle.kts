@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "dz.cardiag.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dz.cardiag.app"
