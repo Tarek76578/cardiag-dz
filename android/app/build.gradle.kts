@@ -75,6 +75,7 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:functions-kt")
     implementation("io.ktor:ktor-client-android:3.5.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     constraints {
         implementation("androidx.browser:browser:1.8.0")

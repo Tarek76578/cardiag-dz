@@ -17,6 +17,7 @@
     <string name="diagnostic_received">Demande de diagnostic reçue.</string>
 
     <string name="history">Historique</string>
+    <string name="no_vehicle_found">Aucun véhicule trouvé.</string>
     <string name="vehicles">Mes véhicules</string>
     <string name="settings">Paramètres</string>
     <string name="language">Langue</string>

@@ -16,6 +16,7 @@
     <string name="diagnostic_received">تم استلام طلب التشخيص.</string>
 
     <string name="history">سجل التشخيص</string>
+    <string name="no_vehicle_found">لم يتم العثور على سيارة.</string>
     <string name="vehicles">سياراتي</string>
     <string name="settings">الإعدادات</string>
     <string name="language">اللغة</string>
