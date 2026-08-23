@@ -299,7 +299,7 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
                                     }
                                 }
                             }
-                        } }
+                        } } }
                     }) { Text(if (ar) "اتصال وفحص" else "Connecter") }
                 }
                 Text(status, color = MaterialTheme.colorScheme.primary)
