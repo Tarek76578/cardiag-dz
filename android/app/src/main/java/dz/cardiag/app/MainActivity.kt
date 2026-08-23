@@ -186,6 +186,11 @@ fun DiagnosticScreen(
     var result by remember { mutableStateOf("") }
     var selectedVehicle by remember { mutableStateOf<VehicleModel?>(null) }
 
+    val fillRequiredFieldsText =
+        stringResource(R.string.fill_required_fields)
+    val diagnosticReceivedText =
+        stringResource(R.string.diagnostic_received)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -222,9 +227,9 @@ fun DiagnosticScreen(
             onClick = {
                 result =
                     if (selectedVehicle == null || problem.isBlank()) {
-                        stringResource(R.string.fill_required_fields)
+                        fillRequiredFieldsText
                     } else {
-                        stringResource(R.string.diagnostic_received)
+                        diagnosticReceivedText
                     }
             },
             modifier = Modifier.fillMaxWidth()
