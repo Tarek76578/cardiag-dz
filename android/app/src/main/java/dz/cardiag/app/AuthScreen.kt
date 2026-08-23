@@ -35,15 +35,18 @@ fun AuthScreen(onAuthenticated: () -> Unit) {
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            if (signUpMode) "Create account" else "Sign in",
-            style = MaterialTheme.typography.headlineMedium
-        )
-        OutlinedTextField(email, { email = it }, Modifier.fillMaxWidth(), label = { Text("Email") }, singleLine = true)
+        Text(if (signUpMode) "Create account" else "Sign in", style = MaterialTheme.typography.headlineMedium)
         OutlinedTextField(
-            password,
-            { password = it },
-            Modifier.fillMaxWidth(),
+            value = email,
+            onValueChange = { email = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Email") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            modifier = Modifier.fillMaxWidth(),
             label = { Text("Password") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation()
@@ -54,8 +57,18 @@ fun AuthScreen(onAuthenticated: () -> Unit) {
                     loading = true
                     message = ""
                     try {
-                        if (signUpMode) auth.signUp(email, password) else auth.signIn(email, password)
-                        onAuthenticated()
+                        if (signUpMode) {
+                            auth.signUp(email, password)
+                            if (auth.currentUser == null) {
+                                message = "Account created. Check your email to confirm the account, then sign in."
+                            } else {
+                                onAuthenticated()
+                            }
+                        } else {
+                            auth.signIn(email, password)
+                            if (auth.currentUser == null) error("Sign-in did not create a session")
+                            onAuthenticated()
+                        }
                     } catch (e: Exception) {
                         message = e.message ?: "Authentication failed"
                     } finally {
@@ -66,9 +79,11 @@ fun AuthScreen(onAuthenticated: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             enabled = !loading
         ) { Text(if (signUpMode) "Create account" else "Sign in") }
-        Button(onClick = { signUpMode = !signUpMode; message = "" }, modifier = Modifier.fillMaxWidth(), enabled = !loading) {
-            Text(if (signUpMode) "I already have an account" else "Create a new account")
-        }
+        Button(
+            onClick = { signUpMode = !signUpMode; message = "" },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
+        ) { Text(if (signUpMode) "I already have an account" else "Create a new account") }
         if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodyMedium)
     }
 }
