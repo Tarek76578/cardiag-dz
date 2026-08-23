@@ -28,8 +28,7 @@ jobs:
       - name: Build Debug APK
         run: |
           cd android
-          ./gradlew --no-daemon :app:dependencyInsight --dependency kotlin-stdlib --configuration debugCompileClasspath
-          ./gradlew --no-daemon :app:dependencyInsight --dependency ktor-client-core --configuration debugCompileClasspath
+          ./gradlew --no-daemon clean
           ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK
