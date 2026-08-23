@@ -1,48 +1,56 @@
-# CarDiag DZ 1.0 Release Checklist
+# CarDiag DZ Production Release Checklist
 
-## CI
+## Engineering
 
-- [x] Debug APK build
-- [x] Automated debug unit-test task wired into CI
-- [x] Android lint task wired into CI
-- [x] Release APK build wired into CI
-- [x] Release AAB build wired into CI
-- [x] Release artifacts uploaded by CI
+- [x] Android 16 / API 36 target
+- [x] Material 3 application shell
+- [x] Arabic RTL and French localization flow
+- [x] Dark/light theme
+- [x] Accessibility content descriptions on interactive vehicle/diagnostic imagery and navigation
+- [x] Offline vehicle catalog cache and offline state
+- [x] Loading/skeleton and retry states
+- [x] Email/password authentication
+- [x] User garage and VIN validation
+- [x] Diagnostic history
+- [x] Structured AI diagnostic flow
+- [x] Bluetooth Classic ELM327 transport
+- [x] DTC/RPM/coolant/speed parsing
+- [x] Pending DTC / clear DTC / supported PID / VIN commands
+- [x] Network timeout and retry handling
+- [x] R8/shrinker configuration
+- [x] Unit tests and lint in CI
+- [x] Debug APK + release APK + AAB CI artifacts
+- [x] Repository secret scan
 
-## App
+## Data / security
 
-- [x] Modern dark Material 3 UI
-- [x] Arabic and French language controls
-- [x] Android RTL support
-- [x] Supabase vehicle catalog loading
-- [x] Resilient vehicle-image loading with local fallback
-- [x] Supabase anonymous authentication flow
-- [x] AI diagnostic client
-- [x] Bluetooth ELM327 OBD transport
-- [x] DTC request, RPM PID and coolant-temperature PID transport methods
+- [x] Supabase RLS enabled on user-owned diagnostic tables
+- [x] Anonymous JWTs rejected by user-owned RLS policies
+- [x] Anonymous SELECT revoked from private catalog helper tables
+- [x] Database integrity constraints for mileage/year/language
+- [x] Production indexes for common access patterns
+- [x] Bilingual common DTC knowledge expanded
+- [x] Supabase Edge Function JWT validation
+- [ ] Enable Supabase leaked-password protection in Authentication settings
+- [ ] Configure production SMTP and email confirmation policy
 
-## Backend / data
-
-- [x] Diagnostic session persistence
-- [x] AI Edge Function present
-- [x] AI result persistence
-- [x] Vehicle catalog tables present
-- [x] Diagnostic-code tables present
-- [x] OBD PID tables present
-
-## Remaining external release validation
+## Release credentials / external validation
 
 - [ ] Configure production Android signing secrets in GitHub
-- [ ] Build a signed AAB with the production keystore
-- [ ] Install the release APK on a physical Android device
-- [ ] Test Arabic RTL on a physical device
-- [ ] Test French UI on a physical device
-- [ ] Test anonymous authentication against the live Supabase project
-- [ ] Test AI diagnosis against the live Edge Function with the production OpenAI secret
-- [ ] Pair a real ELM327 adapter and verify connection
-- [ ] Read real DTCs from a vehicle
-- [ ] Verify RPM and coolant PID responses on a running vehicle
-- [ ] Expand vehicle image coverage beyond the currently populated image URLs
-- [ ] Complete Play Console listing, privacy policy, data-safety form and store assets
+- [ ] Build and verify a signed AAB with the production keystore
+- [ ] Install release APK on a physical Android device
+- [ ] Test Arabic RTL and French on the physical device
+- [ ] Test real account signup/sign-in and email confirmation
+- [ ] Test AI diagnosis with the production Edge Function
+- [ ] Pair a real ELM327 adapter and verify connection/reconnection
+- [ ] Read real current and pending DTCs from a vehicle
+- [ ] Verify RPM/coolant/speed on a running vehicle
+- [ ] Test clear-DTC only on a controlled test vehicle
+- [ ] Expand `vehicle_images` coverage for the remaining catalog models with verified model-specific assets
+- [ ] Publish privacy policy at a stable HTTPS URL
+- [ ] Configure support contact and account/data deletion flow
+- [ ] Complete Play Console Data Safety and content rating
+- [ ] Capture production screenshots and feature graphic
+- [ ] Complete closed testing before production rollout
 
-A signed Play Store artifact cannot be created safely until the production keystore is supplied through GitHub Actions secrets. A real OBD diagnosis cannot be certified without a physical ELM327 adapter and vehicle.
+Google Play requires API level 36 for new apps and app updates submitted from August 31, 2026.
