@@ -43,12 +43,42 @@ jobs:
           test -f android/app/src/main/AndroidManifest.xml
           git diff --check
 
-      - name: Check repository for committed secrets
+      - name: Check tracked source files for committed secrets
         run: |
-          ! grep -RInE '(service_role|SUPABASE_SERVICE_ROLE|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9_-]{20,})' . --exclude-dir=.git --exclude='*.md' || {
-            echo "Potential secret detected in repository"
-            exit 1
-          }
+          python3 <<'PY'
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          files = subprocess.check_output(["git", "ls-files", "-z"], text=False).split(b"\0")
+          excluded = (b".github/workflows/", b".git/", b".md")
+          patterns = [
+              re.compile(r"service[_-]role", re.I),
+              re.compile(r"SUPABASE[_-]SERVICE[_-]ROLE", re.I),
+              re.compile(r"BEGIN (?:RSA|OPENSSH|EC) PRIVATE KEY"),
+              re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
+              re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
+          ]
+          hits = []
+          for raw in files:
+              if not raw or any(raw.startswith(x) or raw.endswith(x) for x in excluded):
+                  continue
+              path = pathlib.Path(raw.decode("utf-8", "replace"))
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for pattern in patterns:
+                  if pattern.search(text):
+                      hits.append(str(path))
+                      break
+          if hits:
+              print("Potential secret detected in tracked source files:")
+              print("\n".join(sorted(set(hits))))
+              sys.exit(1)
+          print("No committed secrets detected in tracked source files.")
+          PY
 
       - name: Make Gradle executable
         working-directory: android
