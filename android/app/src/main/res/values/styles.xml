@@ -1,3 +1,4 @@
 <resources>
-    <style name="Theme.CarDiagDZ" parent="android:style/Theme.Material.DayNight.NoActionBar" />
+    <!-- Platform theme only supplies the Activity window; Compose Material 3 owns app theming. -->
+    <style name="Theme.CarDiagDZ" parent="android:style/Theme.Material.NoActionBar" />
 </resources>
