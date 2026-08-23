@@ -115,6 +115,7 @@ private fun CarDiagApp(requestBluetoothPermissions: () -> Unit, setLanguage: (St
     var dark by rememberSaveable { mutableStateOf(context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).getBoolean("dark", true)) }
     val ar = LocalConfiguration.current.locales[0].language == "ar"
     val direction = if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr
+    val scope = rememberCoroutineScope()
 
     CompositionLocalProvider(LocalLayoutDirection provides direction) {
         CarDiagTheme(dark) {
@@ -127,7 +128,7 @@ private fun CarDiagApp(requestBluetoothPermissions: () -> Unit, setLanguage: (St
                     setDark = { value -> dark = value; context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).edit().putBoolean("dark", value).apply() },
                     setLanguage = setLanguage,
                     requestBluetoothPermissions = requestBluetoothPermissions,
-                    signOut = { kotlinx.coroutines.MainScope().launch { auth.signOut(); authenticated = false } }
+                    signOut = { scope.launch { auth.signOut(); authenticated = false } }
                 )
             }
         }
@@ -299,7 +300,7 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
                                     }
                                 }
                             }
-                        } } }
+                        }
                     }) { Text(if (ar) "اتصال وفحص" else "Connecter") }
                 }
                 Text(status, color = MaterialTheme.colorScheme.primary)
