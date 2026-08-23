@@ -278,10 +278,28 @@ private fun DiagnosticScreen(padding: PaddingValues, ar: Boolean, requestBluetoo
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = requestBluetoothPermissions) { Icon(Icons.Default.Bluetooth, null); Spacer(Modifier.width(4.dp)); Text(if (ar) "Bluetooth" else "Bluetooth") }
                     Button(onClick = {
-                        if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) { requestBluetoothPermissions(); return@Button }
-                        val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()
-                        if (device == null) { status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"; return@Button }
-                        scope.launch { try { status = obd.connect(device); dtc = obd.readTroubleCodes(); live = mapOf("RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"), "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"), "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")) } catch (e: Exception) { status = e.message ?: "OBD error" } } }
+                        if (Build.VERSION.SDK_INT >= 31 && context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                            requestBluetoothPermissions()
+                        } else {
+                            val device: BluetoothDevice? = obd.bondedDevices().firstOrNull()
+                            if (device == null) {
+                                status = if (ar) "لا يوجد محول ELM327 مقترن" else "Aucun adaptateur ELM327 appairé"
+                            } else {
+                                scope.launch {
+                                    try {
+                                        status = obd.connect(device)
+                                        dtc = obd.readTroubleCodes()
+                                        live = mapOf(
+                                            "RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"),
+                                            "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"),
+                                            "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")
+                                        )
+                                    } catch (e: Exception) {
+                                        status = e.message ?: "OBD error"
+                                    }
+                                }
+                            }
+                        } }
                     }) { Text(if (ar) "اتصال وفحص" else "Connecter") }
                 }
                 Text(status, color = MaterialTheme.colorScheme.primary)
