@@ -7,40 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +20,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -71,15 +44,17 @@ class ModernMainActivity : ComponentActivity() {
         setContent { ModernCarDiag() }
     }
 
-    private fun setLanguage(language: String) {
+    fun setLanguage(language: String) {
         getSystemService(LocaleManager::class.java).applicationLocales =
             LocaleList.forLanguageTags(if (language == "ar") "ar" else "fr")
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModernCarDiag() {
     val auth = remember { AuthService() }
+    val activity = LocalContext.current as? ModernMainActivity
     var ready by remember { mutableStateOf(auth.currentUser != null) }
     var error by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableStateOf(0) }
@@ -107,8 +82,7 @@ private fun ModernCarDiag() {
         return
     }
 
-    val configuration = LocalConfiguration.current
-    val ar = configuration.locales[0].language == "ar"
+    val ar = LocalConfiguration.current.locales[0].language == "ar"
     var tab by remember { mutableStateOf(0) }
     val titles = if (ar) listOf("الرئيسية", "التشخيص", "السيارات", "الإعدادات") else listOf("Accueil", "Diagnostic", "Véhicules", "Réglages")
 
@@ -137,12 +111,10 @@ private fun ModernCarDiag() {
             0 -> HomeModern(padding, ar, { tab = 1 }, { tab = 2 })
             1 -> DiagnoseModern(padding, ar)
             2 -> VehiclesModern(padding, ar, { tab = 1 })
-            else -> SettingsModern(padding, ar) { (LocalContextHolder.context as? ModernMainActivity)?.setLanguage(it) }
+            else -> SettingsModern(padding, ar) { activity?.setLanguage(it) }
         }
     }
 }
-
-private object LocalContextHolder { lateinit var context: android.content.Context }
 
 @Composable
 private fun HomeModern(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit, vehicles: () -> Unit) {
@@ -161,18 +133,14 @@ private fun HomeModern(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit
             }
         }
         item { Text(if (ar) "أدوات سريعة" else "Actions rapides", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ActionCard("OBD", if (ar) "فحص الأعطال" else "Scanner les défauts", Modifier.weight(1f), diagnose)
-                ActionCard("DTC", if (ar) "رموز الخطأ" else "Codes défaut", Modifier.weight(1f), diagnose)
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ActionCard("VIN", if (ar) "هوية السيارة" else "Identité véhicule", Modifier.weight(1f), vehicles)
-                ActionCard("AI", if (ar) "تحليل ذكي" else "Analyse IA", Modifier.weight(1f), diagnose)
-            }
-        }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ActionCard("OBD", if (ar) "فحص الأعطال" else "Scanner les défauts", Modifier.weight(1f), diagnose)
+            ActionCard("DTC", if (ar) "رموز الخطأ" else "Codes défaut", Modifier.weight(1f), diagnose)
+        }}
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ActionCard("VIN", if (ar) "هوية السيارة" else "Identité véhicule", Modifier.weight(1f), vehicles)
+            ActionCard("AI", if (ar) "تحليل ذكي" else "Analyse IA", Modifier.weight(1f), diagnose)
+        }}
         item { Text(if (ar) "سيارات شائعة" else "Véhicules populaires", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
         items(cars.take(3)) { car -> CarImageCard(car, {}) }
     }
@@ -180,7 +148,7 @@ private fun HomeModern(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit
 
 @Composable
 private fun ActionCard(title: String, subtitle: String, modifier: Modifier, click: () -> Unit) {
-    Card(modifier.clickable(click), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF102029))) {
+    Card(modifier = modifier.clickable(onClick = click), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF102029))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, color = Color(0xFF52E5D3), fontWeight = FontWeight.Black)
             Text(subtitle, color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -190,7 +158,7 @@ private fun ActionCard(title: String, subtitle: String, modifier: Modifier, clic
 
 @Composable
 private fun CarImageCard(car: CarCard, click: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(click), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A22))) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = click), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1A22))) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(model = car.image, contentDescription = car.name, modifier = Modifier.size(132.dp, 92.dp).clip(RoundedCornerShape(20.dp)), contentScale = ContentScale.Crop)
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
