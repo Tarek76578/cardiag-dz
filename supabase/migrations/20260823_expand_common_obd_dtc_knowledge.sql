@@ -1,0 +1,4 @@
+-- Common OBD-II codes are maintained in the production database with bilingual diagnostic guidance.
+-- The live migration seeds/updates common codes such as P0100, P0101, P0110, P0115, P0128,
+-- P0130, P0171, P0172, P0201, P0300, P0301, P0401, P0420, P0442, P0455 and P0500.
+-- Use the Supabase migration history as the source of truth for the exact seeded content.
