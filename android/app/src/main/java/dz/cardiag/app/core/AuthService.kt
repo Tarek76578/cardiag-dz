@@ -8,7 +8,7 @@ class AuthService {
     private val auth get() = SupabaseClient.client.auth
 
     val currentUser: UserInfo?
-        get() = auth.currentUserOrNull()
+        get() = auth.currentSessionOrNull()?.user
 
     suspend fun signUp(email: String, password: String) {
         require(email.isNotBlank()) { "Email is required" }
