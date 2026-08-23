@@ -4,9 +4,12 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import io.ktor.client.call.body
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -60,17 +63,18 @@ class DiagnosticService {
 
         val payload = buildJsonObject {
             put("session_id", sessionId)
-            put("codes", kotlinx.serialization.json.JsonArray(codes.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            put("codes", JsonArray(codes.map { JsonPrimitive(it) }))
             put("symptoms", symptoms)
             put("measurements", measurements)
             put("vehicle", vehicle)
             put("language", language)
         }
 
-        return supabase.functions.invoke<JsonObject>(
+        val response = supabase.functions.invoke(
             function = "diagnose",
             body = payload
         )
+        return response.body<JsonObject>()
     }
 
     suspend fun runDiagnostic(
