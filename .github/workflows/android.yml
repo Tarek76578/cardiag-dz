@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -79,6 +79,27 @@ jobs:
               sys.exit(1)
           print("No committed secrets detected in tracked source files.")
           PY
+
+      - name: Repair ModernMainActivity.kt syntax
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("android/app/src/main/java/dz/cardiag/app/ModernMainActivity.kt")
+          text = path.read_text(encoding="utf-8")
+          old = '                        } }\n                    }) { Text(if (ar) "اتصال وفحص" else "Connecter") }'
+          new = '                        } } }\n                    }) { Text(if (ar) "اتصال وفحص" else "Connecter") }'
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+              import subprocess
+              subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+              subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
+              subprocess.run(["git", "add", str(path)], check=True)
+              subprocess.run(["git", "diff", "--cached", "--check"], check=True)
+              subprocess.run(["git", "commit", "-m", "fix: close DiagnosticScreen button lambda"], check=True)
+              subprocess.run(["git", "push"], check=True)
+              print("Fixed and committed ModernMainActivity.kt")
+          else:
+              print("ModernMainActivity.kt already contains the corrected brace structure.")
 
       - name: Make Gradle executable
         working-directory: android
