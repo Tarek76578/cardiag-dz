@@ -10,6 +10,10 @@ class AuthService {
     val currentUser: UserInfo?
         get() = auth.currentSessionOrNull()?.user
 
+    suspend fun signInAnonymously() {
+        auth.signInAnonymously()
+    }
+
     suspend fun signUp(email: String, password: String) {
         require(email.isNotBlank()) { "Email is required" }
         require(password.length >= 8) { "Password must contain at least 8 characters" }
