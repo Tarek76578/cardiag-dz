@@ -26,6 +26,9 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build Debug APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         run: |
           cd android
           ./gradlew --no-daemon clean
