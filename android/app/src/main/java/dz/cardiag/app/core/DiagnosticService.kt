@@ -5,6 +5,8 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import io.ktor.client.call.body
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -22,33 +24,18 @@ data class DiagnosticSessionInsert(
 )
 
 @Serializable
-data class DiagnosticSession(
-    val id: String,
-    @SerialName("user_id") val userId: String? = null
-)
+data class DiagnosticSession(val id: String, @SerialName("user_id") val userId: String? = null)
 
 class DiagnosticService {
     private val supabase = SupabaseClient.client
 
-    suspend fun createSession(
-        vehicleModelId: String?,
-        complaint: String,
-        language: String
-    ): DiagnosticSession {
-        supabase.auth.currentUserOrNull()
-            ?: error("Authentication required")
-
-        return supabase.from("diagnostic_sessions")
-            .insert(
-                DiagnosticSessionInsert(
-                    vehicleModelId = vehicleModelId,
-                    complaint = complaint,
-                    language = language
-                )
-            ) {
+    suspend fun createSession(vehicleModelId: String?, complaint: String, language: String): DiagnosticSession {
+        supabase.auth.currentUserOrNull() ?: error("Authentication required")
+        return withTimeout(10_000) {
+            supabase.from("diagnostic_sessions").insert(DiagnosticSessionInsert(vehicleModelId, complaint.ifBlank { null }, language)) {
                 select(Columns.list("id", "user_id"))
-            }
-            .decodeSingle<DiagnosticSession>()
+            }.decodeSingle()
+        }
     }
 
     suspend fun diagnose(
@@ -60,40 +47,35 @@ class DiagnosticService {
         language: String = "fr"
     ): JsonObject {
         require(language == "ar" || language == "fr") { "language must be ar or fr" }
-
         val payload = buildJsonObject {
             put("session_id", sessionId)
-            put("codes", JsonArray(codes.map { JsonPrimitive(it) }))
+            put("codes", JsonArray(codes.map { JsonPrimitive(it.uppercase()) }))
             put("symptoms", symptoms)
             put("measurements", measurements)
             put("vehicle", vehicle)
             put("language", language)
         }
-
-        val response = supabase.functions.invoke(
-            function = "diagnose",
-            body = payload
-        )
-        return response.body<JsonObject>()
+        var last: Throwable? = null
+        repeat(3) { attempt ->
+            try {
+                return withTimeout(25_000) {
+                    val response = supabase.functions.invoke(function = "diagnose", body = payload)
+                    response.body<JsonObject>()
+                }
+            } catch (e: Throwable) {
+                last = e
+                if (attempt < 2) delay(500L * (attempt + 1))
+            }
+        }
+        throw IllegalStateException("Diagnostic service unavailable", last)
     }
 
     suspend fun runDiagnostic(
-        vehicleModelId: String?,
-        complaint: String,
-        language: String,
-        codes: List<String> = emptyList(),
-        symptoms: JsonObject = buildJsonObject {},
-        measurements: JsonObject = buildJsonObject {},
-        vehicle: JsonObject = buildJsonObject {}
+        vehicleModelId: String?, complaint: String, language: String,
+        codes: List<String> = emptyList(), symptoms: JsonObject = buildJsonObject {},
+        measurements: JsonObject = buildJsonObject {}, vehicle: JsonObject = buildJsonObject {}
     ): JsonObject {
         val session = createSession(vehicleModelId, complaint, language)
-        return diagnose(
-            sessionId = session.id,
-            codes = codes,
-            symptoms = symptoms,
-            measurements = measurements,
-            vehicle = vehicle,
-            language = language
-        )
+        return diagnose(session.id, codes, symptoms, measurements, vehicle, language)
     }
 }
