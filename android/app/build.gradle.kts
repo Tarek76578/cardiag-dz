@@ -11,9 +11,10 @@ android {
     defaultConfig {
         applicationId = "dz.cardiag.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 10
-        versionName = "1.0.0"
+        targetSdk = 36
+        versionCode = 11
+        versionName = "1.0.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -24,6 +25,8 @@ android {
 
     buildTypes {
         debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
             buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
             buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
@@ -52,6 +55,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation(platform("io.github.jan-tennert.supabase:bom:3.7.0"))
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
