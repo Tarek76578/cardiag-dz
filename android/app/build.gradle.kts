@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.1"
     }
 
     buildFeatures {
@@ -33,31 +33,22 @@ android {
         }
     }
 
+    // Use CI-provided values when available, but keep the public Supabase
+    // project configuration available for local/device builds too.
+    val supabaseUrl = System.getenv("SUPABASE_URL")
+        ?: "https://knripjpkmvdmqtstkcmo.supabase.co"
+    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY")
+        ?: "sb_publishable_Wczl8w-35no4HbROqqnMyg_fbmYizuZ"
+
     buildTypes {
         debug {
-            buildConfigField(
-                "String",
-                "SUPABASE_URL",
-                "\"${System.getenv("SUPABASE_URL") ?: ""}\""
-            )
-            buildConfigField(
-                "String",
-                "SUPABASE_PUBLISHABLE_KEY",
-                "\"${System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: ""}\""
-            )
+            buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+            buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
 
         release {
-            buildConfigField(
-                "String",
-                "SUPABASE_URL",
-                "\"${System.getenv("SUPABASE_URL") ?: ""}\""
-            )
-            buildConfigField(
-                "String",
-                "SUPABASE_PUBLISHABLE_KEY",
-                "\"${System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: ""}\""
-            )
+            buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+            buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"$supabasePublishableKey\"")
         }
     }
 }
