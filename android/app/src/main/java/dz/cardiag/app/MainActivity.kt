@@ -8,11 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -23,13 +21,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                Scaffold(
-                    topBar = {
-                        TopAppBar(
-                            title = { Text("CarDiag DZ") }
-                        )
-                    }
-                ) { padding ->
+                Scaffold { padding ->
 
                     Column(
                         modifier = Modifier
@@ -39,15 +31,21 @@ class MainActivity : ComponentActivity() {
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         Text(
-                            text = "تشخيص السيارات بالذكاء الاصطناعي",
-                            style = MaterialTheme.typography.headlineSmall
+                            text = "CarDiag DZ",
+                            style = MaterialTheme.typography.headlineLarge
+                        )
+
+                        Text(
+                            text = "تشخيص السيارات بالذكاء الاصطناعي"
                         )
 
                         Text(
                             text = "Diagnostic automobile intelligent"
                         )
 
-                        Button(onClick = {}) {
+                        Button(
+                            onClick = {}
+                        ) {
                             Text("ابدأ التشخيص")
                         }
                     }
