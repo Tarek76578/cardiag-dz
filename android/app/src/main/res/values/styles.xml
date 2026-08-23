@@ -1,4 +1,3 @@
 <resources>
-    <style name="Theme.CarDiagDZ"
-        parent="android:style/Theme.Material.Light.NoActionBar" />
+    <style name="Theme.CarDiagDZ" parent="android:style/Theme.Material.DayNight.NoActionBar" />
 </resources>
