@@ -32,6 +32,34 @@ android {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
+
+    buildTypes {
+        debug {
+            buildConfigField(
+                "String",
+                "SUPABASE_URL",
+                "\"${System.getenv("SUPABASE_URL") ?: ""}\""
+            )
+            buildConfigField(
+                "String",
+                "SUPABASE_PUBLISHABLE_KEY",
+                "\"${System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: ""}\""
+            )
+        }
+
+        release {
+            buildConfigField(
+                "String",
+                "SUPABASE_URL",
+                "\"${System.getenv("SUPABASE_URL") ?: ""}\""
+            )
+            buildConfigField(
+                "String",
+                "SUPABASE_PUBLISHABLE_KEY",
+                "\"${System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: ""}\""
+            )
+        }
+    }
 }
 
 dependencies {
