@@ -44,6 +44,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
+import dz.cardiag.app.core.AuthService
 import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.SupabaseClient
 import io.github.jan.supabase.postgrest.from
@@ -56,79 +57,51 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class VehicleModel(
     val id: String,
-    @SerialName("make_id")
-    val makeId: String,
+    @SerialName("make_id") val makeId: String,
     val name: String,
-    @SerialName("year_from")
-    val yearFrom: Int? = null,
-    @SerialName("year_to")
-    val yearTo: Int? = null,
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
     val generation: String? = null,
-    @SerialName("image_url")
-    val imageUrl: String? = null,
-    @SerialName("search_text")
-    val searchText: String? = null
+    @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("search_text") val searchText: String? = null
 )
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                CarDiagApp(onLanguageChange = { language -> setAppLanguage(language) })
-            }
-        }
+        setContent { MaterialTheme { CarDiagApp(onLanguageChange = ::setAppLanguage) } }
     }
-
     private fun setAppLanguage(language: String) {
         val localeManager = getSystemService(LocaleManager::class.java)
-        val locale = if (language == "ar") "ar" else "fr"
-        localeManager.applicationLocales = LocaleList.forLanguageTags(locale)
+        localeManager.applicationLocales = LocaleList.forLanguageTags(if (language == "ar") "ar" else "fr")
     }
 }
 
 @Composable
 fun CarDiagApp(onLanguageChange: (String) -> Unit) {
+    val auth = remember { AuthService() }
+    var authenticated by remember { mutableStateOf(auth.currentUser != null) }
+    if (!authenticated) {
+        AuthScreen(onAuthenticated = { authenticated = true })
+        return
+    }
     val navController = rememberNavController()
     Scaffold { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(padding)
-        ) {
-            composable("home") {
-                HomeScreen(
-                    onStartDiagnostic = { navController.navigate("diagnostic") },
-                    onSettings = { navController.navigate("settings") }
-                )
-            }
-            composable("diagnostic") {
-                DiagnosticScreen(onBack = { navController.popBackStack() })
-            }
-            composable("settings") {
-                SettingsScreen(
-                    onBack = { navController.popBackStack() },
-                    onLanguageChange = onLanguageChange
-                )
-            }
+        NavHost(navController = navController, startDestination = "home", modifier = Modifier.padding(padding)) {
+            composable("home") { HomeScreen({ navController.navigate("diagnostic") }, { navController.navigate("settings") }) }
+            composable("diagnostic") { DiagnosticScreen { navController.popBackStack() } }
+            composable("settings") { SettingsScreen({ navController.popBackStack() }, onLanguageChange) }
         }
     }
 }
 
 @Composable
 fun HomeScreen(onStartDiagnostic: () -> Unit, onSettings: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.home_title), style = MaterialTheme.typography.headlineLarge)
         Text(stringResource(R.string.home_subtitle), style = MaterialTheme.typography.titleMedium)
-        Button(onClick = onStartDiagnostic, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.start_diagnostic))
-        }
-        Button(onClick = onSettings, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.settings))
-        }
+        Button(onClick = onStartDiagnostic, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_diagnostic)) }
+        Button(onClick = onSettings, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.settings)) }
     }
 }
 
@@ -142,77 +115,26 @@ fun DiagnosticScreen(onBack: () -> Unit) {
     val diagnosticService = remember { DiagnosticService() }
     val configuration = LocalConfiguration.current
     val language = if (configuration.locales[0].language == "ar") "ar" else "fr"
-
     val fillRequiredFieldsText = stringResource(R.string.fill_required_fields)
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.diagnostic_title), style = MaterialTheme.typography.headlineMedium)
-
-        VehiclePicker(
-            selectedVehicle = selectedVehicle,
-            onVehicleSelected = { selectedVehicle = it }
-        )
-
-        OutlinedTextField(
-            value = problem,
-            onValueChange = { problem = it },
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 4,
-            label = { Text(stringResource(R.string.describe_problem)) },
-            placeholder = { Text(stringResource(R.string.problem_hint)) },
-            enabled = !running
-        )
-
-        Button(
-            onClick = {
-                if (selectedVehicle == null || problem.isBlank()) {
-                    result = fillRequiredFieldsText
-                    return@Button
-                }
-
-                scope.launch {
-                    running = true
-                    result = ""
-                    try {
-                        val response = diagnosticService.runDiagnostic(
-                            vehicleModelId = selectedVehicle!!.id,
-                            complaint = problem.trim(),
-                            language = language
-                        )
-                        result = response.toString()
-                    } catch (e: Exception) {
-                        result = e.message ?: "Diagnostic request failed"
-                    } finally {
-                        running = false
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !running
-        ) {
-            if (running) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-            } else {
-                Text(stringResource(R.string.diagnose_with_ai))
+        VehiclePicker(selectedVehicle) { selectedVehicle = it }
+        OutlinedTextField(problem, { problem = it }, Modifier.fillMaxWidth(), minLines = 4,
+            label = { Text(stringResource(R.string.describe_problem)) }, placeholder = { Text(stringResource(R.string.problem_hint)) }, enabled = !running)
+        Button(onClick = {
+            if (selectedVehicle == null || problem.isBlank()) { result = fillRequiredFieldsText; return@Button }
+            scope.launch {
+                running = true; result = ""
+                try {
+                    result = diagnosticService.runDiagnostic(selectedVehicle!!.id, problem.trim(), language).toString()
+                } catch (e: Exception) { result = e.message ?: "Diagnostic request failed" }
+                finally { running = false }
             }
+        }, modifier = Modifier.fillMaxWidth(), enabled = !running) {
+            if (running) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.diagnose_with_ai))
         }
-
-        if (result.isNotEmpty()) {
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                Text(
-                    text = result,
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-        }
-
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth(), enabled = !running) {
-            Text(stringResource(R.string.back))
-        }
+        if (result.isNotEmpty()) Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text(result, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge) }
+        Button(onClick = onBack, Modifier.fillMaxWidth(), enabled = !running) { Text(stringResource(R.string.back)) }
     }
 }
 
@@ -222,118 +144,42 @@ fun VehiclePicker(selectedVehicle: VehicleModel?, onVehicleSelected: (VehicleMod
     var vehicles by remember { mutableStateOf<List<VehicleModel>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-
     LaunchedEffect(searchQuery, selectedVehicle?.id) {
         val query = searchQuery.trim()
-        if (!selectedVehicle?.id.isNullOrEmpty()) {
-            vehicles = emptyList(); loading = false; error = null
-            return@LaunchedEffect
-        }
-        if (query.isEmpty()) {
-            vehicles = emptyList(); loading = false; error = null
-            return@LaunchedEffect
-        }
-        delay(300)
-        loading = true
-        error = null
+        if (!selectedVehicle?.id.isNullOrEmpty() || query.isEmpty()) { vehicles = emptyList(); loading = false; error = null; return@LaunchedEffect }
+        delay(300); loading = true; error = null
         try {
-            vehicles = SupabaseClient.client
-                .from("vehicle_models")
-                .select(columns = Columns.raw("""
-                    id, make_id, name, year_from, year_to, generation, image_url, search_text
-                """.trimIndent())) {
-                    filter { ilike("search_text", "%${query.lowercase()}%") }
-                    limit(20)
-                }
-                .decodeList<VehicleModel>()
-        } catch (e: Exception) {
-            vehicles = emptyList()
-            error = e.message ?: "Unknown error"
-        } finally {
-            loading = false
-        }
+            vehicles = SupabaseClient.client.from("vehicle_models").select(columns = Columns.raw("id, make_id, name, year_from, year_to, generation, image_url, search_text")) {
+                filter { ilike("search_text", "%${query.lowercase()}%") }; limit(20)
+            }.decodeList<VehicleModel>()
+        } catch (e: Exception) { vehicles = emptyList(); error = e.message ?: "Unknown error" }
+        finally { loading = false }
     }
-
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.vehicle), style = MaterialTheme.typography.titleMedium)
-
-        if (selectedVehicle == null || selectedVehicle.id.isEmpty()) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text(stringResource(R.string.vehicle)) },
-                placeholder = { Text(stringResource(R.string.vehicle_hint)) }
-            )
+        if (selectedVehicle == null || selectedVehicle.id.isEmpty()) OutlinedTextField(searchQuery, { searchQuery = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text(stringResource(R.string.vehicle)) }, placeholder = { Text(stringResource(R.string.vehicle_hint)) })
+        if (selectedVehicle != null && selectedVehicle.id.isNotEmpty()) SelectedVehicleCard(selectedVehicle) {
+            searchQuery = ""; vehicles = emptyList(); error = null; onVehicleSelected(VehicleModel("", "", ""))
         }
-
-        if (selectedVehicle != null && selectedVehicle.id.isNotEmpty()) {
-            SelectedVehicleCard(
-                vehicle = selectedVehicle,
-                onChange = {
-                    searchQuery = ""
-                    vehicles = emptyList()
-                    error = null
-                    onVehicleSelected(VehicleModel(id = "", makeId = "", name = ""))
-                }
-            )
-        }
-
-        if (loading) {
-            Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
-
+        if (loading) Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         if (error != null) Text(error ?: "", style = MaterialTheme.typography.bodySmall)
-
         if (searchQuery.isNotBlank() && !loading && error == null && selectedVehicle?.id.isNullOrEmpty()) {
-            if (vehicles.isNotEmpty()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().height(280.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(vehicles, key = { it.id }) { vehicle ->
-                        VehicleResultItem(vehicle = vehicle) {
-                            onVehicleSelected(vehicle)
-                            searchQuery = ""
-                            vehicles = emptyList()
-                        }
-                    }
-                }
-            } else {
-                Text(stringResource(R.string.no_vehicle_found), style = MaterialTheme.typography.bodyMedium)
-            }
+            if (vehicles.isNotEmpty()) LazyColumn(Modifier.fillMaxWidth().height(280.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(vehicles, key = { it.id }) { vehicle -> VehicleResultItem(vehicle) { onVehicleSelected(vehicle); searchQuery = ""; vehicles = emptyList() } }
+            } else Text(stringResource(R.string.no_vehicle_found), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
 @Composable
 private fun VehicleResultItem(vehicle: VehicleModel, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AsyncImage(
-                model = vehicle.imageUrl,
-                contentDescription = vehicle.name,
-                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
-            )
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(model = vehicle.imageUrl, contentDescription = vehicle.name, modifier = Modifier.size(72.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(vehicle.name, style = MaterialTheme.typography.titleMedium)
                 if (!vehicle.generation.isNullOrBlank()) Text(vehicle.generation, style = MaterialTheme.typography.bodySmall)
-                val years = when {
-                    vehicle.yearFrom != null && vehicle.yearTo != null -> "${vehicle.yearFrom} – ${vehicle.yearTo}"
-                    vehicle.yearFrom != null -> "${vehicle.yearFrom} –"
-                    vehicle.yearTo != null -> "– ${vehicle.yearTo}"
-                    else -> ""
-                }
+                val years = when { vehicle.yearFrom != null && vehicle.yearTo != null -> "${vehicle.yearFrom} – ${vehicle.yearTo}"; vehicle.yearFrom != null -> "${vehicle.yearFrom} –"; vehicle.yearTo != null -> "– ${vehicle.yearTo}"; else -> "" }
                 if (years.isNotEmpty()) Text(years, style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -342,21 +188,10 @@ private fun VehicleResultItem(vehicle: VehicleModel, onClick: () -> Unit) {
 
 @Composable
 private fun SelectedVehicleCard(vehicle: VehicleModel, onChange: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AsyncImage(
-                model = vehicle.imageUrl,
-                contentDescription = vehicle.name,
-                modifier = Modifier.size(80.dp).clip(RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop
-            )
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(vehicle.name, style = MaterialTheme.typography.titleMedium)
-                if (!vehicle.generation.isNullOrBlank()) Text(vehicle.generation, style = MaterialTheme.typography.bodySmall)
-            }
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(model = vehicle.imageUrl, contentDescription = vehicle.name, modifier = Modifier.size(80.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+            Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(vehicle.name, style = MaterialTheme.typography.titleMedium); if (!vehicle.generation.isNullOrBlank()) Text(vehicle.generation, style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onChange) { Text("✕") }
         }
     }
@@ -364,20 +199,11 @@ private fun SelectedVehicleCard(vehicle: VehicleModel, onChange: () -> Unit) {
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onLanguageChange: (String) -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineMedium)
         Text(stringResource(R.string.language))
-        Button(onClick = { onLanguageChange("fr") }, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.french))
-        }
-        Button(onClick = { onLanguageChange("ar") }, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.arabic))
-        }
-        Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.back))
-        }
+        Button(onClick = { onLanguageChange("fr") }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.french)) }
+        Button(onClick = { onLanguageChange("ar") }, Modifier.fillMaxWidth()) { Text(stringResource(R.string.arabic)) }
+        Button(onClick = onBack, Modifier.fillMaxWidth()) { Text(stringResource(R.string.back)) }
     }
 }
