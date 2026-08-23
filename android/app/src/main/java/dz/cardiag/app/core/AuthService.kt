@@ -10,29 +10,25 @@ class AuthService {
     val currentUser: UserInfo?
         get() = auth.currentSessionOrNull()?.user
 
-    suspend fun signInAnonymously() {
-        auth.signInAnonymously()
-    }
-
     suspend fun signUp(email: String, password: String) {
-        require(email.isNotBlank()) { "Email is required" }
+        val normalized = email.trim()
+        require(normalized.contains("@")) { "Valid email is required" }
         require(password.length >= 8) { "Password must contain at least 8 characters" }
         auth.signUpWith(Email) {
-            this.email = email.trim()
+            this.email = normalized
             this.password = password
         }
     }
 
     suspend fun signIn(email: String, password: String) {
-        require(email.isNotBlank()) { "Email is required" }
+        val normalized = email.trim()
+        require(normalized.contains("@")) { "Valid email is required" }
         require(password.isNotBlank()) { "Password is required" }
         auth.signInWith(Email) {
-            this.email = email.trim()
+            this.email = normalized
             this.password = password
         }
     }
 
-    suspend fun signOut() {
-        auth.signOut()
-    }
+    suspend fun signOut() = auth.signOut()
 }
