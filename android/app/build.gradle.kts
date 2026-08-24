@@ -12,16 +12,28 @@ android {
         applicationId = "dz.cardiag.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.0.2"
+        versionCode = 13
+        versionName = "1.0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17); optIn.add("androidx.compose.material3.ExperimentalMaterial3Api") } }
 
-    val supabaseUrl = System.getenv("SUPABASE_URL") ?: error("SUPABASE_URL GitHub/local environment variable is required")
-    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY") ?: error("SUPABASE_PUBLISHABLE_KEY GitHub/local environment variable is required")
+    // The publishable key is safe for client applications. Prefer GitHub/local
+    // environment variables when present, but keep a correct production default
+    // so a manually built APK can never silently point to localhost.
+    val supabaseUrl = System.getenv("SUPABASE_URL")?.trim().takeUnless { it.isNullOrBlank() }
+        ?: "https://knripjpkmvdmqtstkcmo.supabase.co"
+    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY")?.trim().takeUnless { it.isNullOrBlank() }
+        ?: "sb_publishable_Wczl8w-35no4HbROqqnMyg_fbmYizuZ"
+
+    require(supabaseUrl.startsWith("https://") && !supabaseUrl.contains("localhost")) {
+        "SUPABASE_URL must be a non-local HTTPS Supabase URL"
+    }
+    require(supabasePublishableKey.startsWith("sb_publishable_") || supabasePublishableKey.startsWith("eyJ")) {
+        "SUPABASE_PUBLISHABLE_KEY must be a Supabase publishable/legacy anon key"
+    }
 
     buildTypes {
         debug {
