@@ -566,7 +566,7 @@ private fun ActionScreen(padding: PaddingValues, c: Copy, primary: Color, surfac
         ActionCard("VIN Identity", Icons.Default.DirectionsCar, primary, surface) {
             open(ObdScannerActivity::class.java)
         }
-        ActionCard("AI Diagnosis • Sans OBD", Icons.Default.Psychology, primary, surface) {
+        ActionCard("AI Diagnosis • Sans OBD", Icons.Default.Build, primary, surface) {
             open(AiSymptomDiagnosisActivity::class.java)
         }
     }
