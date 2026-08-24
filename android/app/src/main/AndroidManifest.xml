@@ -21,5 +21,6 @@
         </activity>
         <activity android:name=".GuidedDiagnosisActivity" android:exported="false" />
         <activity android:name=".ObdScannerActivity" android:exported="false" />
+        <activity android:name=".LiveDataProActivity" android:exported="false" />
     </application>
 </manifest>
