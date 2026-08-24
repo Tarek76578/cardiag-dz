@@ -58,3 +58,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python tools/vehicle_catalog/sync_wikimedia_images.py
+
+# Full catalog import is intentionally triggered by this workflow-file change.
