@@ -1,5 +1,6 @@
 package dz.cardiag.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dz.cardiag.app.core.SupabaseClient
 import io.github.jan.supabase.postgrest.from
@@ -34,6 +36,7 @@ class GuidedDiagnosisActivity:ComponentActivity(){
 }
 
 @Composable private fun GuidedDiagnosisScreen(modelId:String?,modelName:String,initialCode:String){
+ val context=LocalContext.current
  val scope=rememberCoroutineScope();var code by remember{mutableStateOf(initialCode)};var guide by remember{mutableStateOf<DtcGuide?>(null)};var loading by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)}
  fun load(){scope.launch{loading=true;error=null;runCatching{SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id","code","system","category","severity","description_fr","causes_fr","diagnostic_steps_fr","repair_summary_fr")){filter{eq("code",code.trim().uppercase())}}.decodeList<DtcGuide>().firstOrNull()}.onSuccess{guide=it;if(it==null)error="Code DTC introuvable"}.onFailure{error=it.message?:"Impossible de charger le DTC"};loading=false}}
  LaunchedEffect(initialCode){load()}
@@ -41,6 +44,7 @@ class GuidedDiagnosisActivity:ComponentActivity(){
   item{Text(modelName,style=MaterialTheme.typography.titleLarge);Text(if(modelId!=null)"Véhicule sélectionné • contexte actif" else "Aucun véhicule sélectionné",color=MaterialTheme.colorScheme.onSurfaceVariant)}
   item{OutlinedTextField(value=code,onValueChange={code=it.uppercase()},modifier=Modifier.fillMaxWidth(),label={Text("Code DTC")},singleLine=true)}
   item{Button(onClick=::load,enabled=code.isNotBlank()&&!loading,modifier=Modifier.fillMaxWidth()){Text(if(loading)"Chargement…"else"Lancer le diagnostic")}}
+  item{Button(onClick={context.startActivity(Intent(context,ObdScannerActivity::class.java).apply{putExtra("model_id",modelId);putExtra("model_name",modelName);putExtra("dtc_code",code)})},enabled=!loading,modifier=Modifier.fillMaxWidth()){Text("Connecter OBD & Live Data")}}
   if(loading)item{LinearProgressIndicator(Modifier.fillMaxWidth())};error?.let{item{Text(it,color=MaterialTheme.colorScheme.error)}}
   guide?.let{d->
    item{DtcCard("${d.code} • ${d.system?:"Système inconnu"}",d.descriptionFr?:"Description non disponible")}
@@ -48,7 +52,7 @@ class GuidedDiagnosisActivity:ComponentActivity(){
    item{DtcCard("Causes probables",d.causesFr?:"Non renseignées")}
    item{DtcCard("Étapes de diagnostic",d.diagnosticStepsFr?:"Non renseignées")}
    item{DtcCard("Réparation",d.repairSummaryFr?:"Non renseignée")}
-   item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Prochaine étape",style=MaterialTheme.typography.titleMedium);Text("Connecter l'OBD, lire les PID compatibles avec ce moteur, comparer les valeurs et enregistrer la session de diagnostic.")}}}
+   item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Parcours CarDiag",style=MaterialTheme.typography.titleMedium);Text("DTC → ECU → OBD → Live PIDs → comparaison → session diagnostic Supabase")}}}
   }
  }}
 }
