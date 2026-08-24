@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
@@ -42,7 +44,6 @@ import kotlinx.serialization.Serializable
 private val VPBg = Color(0xFF06090B)
 private val VPSurface = Color(0xFF0D1418)
 private val VPTeal = Color(0xFF48D7C5)
-private val VPSoft = Color(0xFF153F3B)
 private val VPText = Color(0xFFF5F8F8)
 private val VPMuted = Color(0xFF8B9A9F)
 
@@ -63,8 +64,7 @@ fun ExactVehicleProfileScreen(model: UiModel, onBack: () -> Unit) {
 
     fun load() {
         scope.launch {
-            loading = true
-            error = null
+            loading = true; error = null
             runCatching {
                 val gs = SupabaseClient.client.from("vehicle_generations").select(Columns.list("id", "model_id", "name", "year_from", "year_to", "image_url")).decodeList<VPGeneration>().filter { it.modelId == model.id }
                 val generationIds = gs.map { it.id }.toSet()
@@ -78,12 +78,7 @@ fun ExactVehicleProfileScreen(model: UiModel, onBack: () -> Unit) {
                 val linksDtc = SupabaseClient.client.from("diagnostic_code_vehicles").select(Columns.list("code_id", "model_id", "generation_id")).decodeList<VPDtcLink>().filter { it.modelId == model.id || it.generationId in generationIds }
                 val dtcIds = linksDtc.map { it.codeId }.distinct()
                 val ds = if (dtcIds.isEmpty()) emptyList() else SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id", "code", "system", "title_fr", "description_fr", "severity", "causes_fr", "diagnostic_steps_fr")).decodeList<VPDtc>().filter { it.id in dtcIds }
-                generations = gs
-                engines = es
-                ecus = esu
-                specs = ss
-                images = ims
-                dtcs = ds
+                generations = gs; engines = es; ecus = esu; specs = ss; images = ims; dtcs = ds
             }.onFailure { error = it.message ?: "Erreur Supabase" }
             loading = false
         }
@@ -102,47 +97,31 @@ fun ExactVehicleProfileScreen(model: UiModel, onBack: () -> Unit) {
                     Box(Modifier.fillMaxWidth().height(350.dp)) {
                         if (hero != null) AsyncImage(model = hero, contentDescription = model.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, VPBg.copy(alpha = .98f)))))
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Retour", tint = VPText) }; Spacer(Modifier.weight(1f)); IconButton(onClick = { load() }) { Icon(Icons.Default.Refresh, contentDescription = "Actualiser", tint = VPText) } }
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Retour", tint = VPText) }; Spacer(Modifier.weight(1f)); IconButton(onClick = { load() }) { Icon(Icons.Default.Refresh, "Actualiser", tint = VPText) } }
                         Column(Modifier.align(Alignment.BottomStart).padding(22.dp)) { Text("VEHICLE PROFILE", color = VPTeal, fontWeight = FontWeight.Black); Text(model.name, color = VPText, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black); Text("${generations.size} générations • ${engines.size} moteurs • ${ecus.size} ECU • ${dtcs.size} DTC", color = VPMuted) }
                     }
                 }
-                item { LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(tabs) { label -> val index = tabs.indexOf(label); Surface(modifier = Modifier.clip(RoundedCornerShape(15.dp)).clickable { tab = index }, color = if (tab == index) VPTeal else VPSurface) { Text(text = label, modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp), color = if (tab == index) VPBg else VPText, fontWeight = FontWeight.Bold) } } } }
+                item { LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { items(tabs) { label -> val index = tabs.indexOf(label); Surface(modifier = Modifier.clip(RoundedCornerShape(15.dp)).clickable { tab = index }, color = if (tab == index) VPTeal else VPSurface) { Text(label, Modifier.padding(horizontal = 14.dp, vertical = 11.dp), color = if (tab == index) VPBg else VPText, fontWeight = FontWeight.Bold) } } } }
+                item { when (tab) { 0 -> OverviewTab(model, generations, engines, ecus, dtcs); 1 -> EngineTab(engines); 2 -> SpecsTab(specs); 3 -> EcuTab(ecus); else -> DtcTab(dtcs) { selectedDtc = it } } }
                 item {
-                    when (tab) {
-                        0 -> OverviewTab(model, generations, engines, ecus, dtcs)
-                        1 -> EngineTab(engines)
-                        2 -> SpecsTab(specs)
-                        3 -> EcuTab(ecus)
-                        else -> DtcTab(dtcs) { selectedDtc = it }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(onClick = { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java).apply { putExtra("model_id", model.id); putExtra("model_name", model.name) }) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Default.Build, null); Spacer(Modifier.width(6.dp)); Text("Diagnostic", fontWeight = FontWeight.Black) }
+                        FilledTonalButton(onClick = { context.startActivity(Intent(context, ObdScannerActivity::class.java).apply { putExtra("model_id", model.id); putExtra("model_name", model.name) }) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Default.BluetoothConnected, null); Spacer(Modifier.width(6.dp)); Text("OBD-II", fontWeight = FontWeight.Black) }
                     }
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java).apply { putExtra("model_id", model.id); putExtra("model_name", model.name) }) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(8.dp)); Text("AI Diagnosis • Symptômes", fontWeight = FontWeight.Black) }
                 }
-                item { Button(onClick = { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java).apply { putExtra("model_id", model.id); putExtra("model_name", model.name) }) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(17.dp)) { Icon(Icons.Default.Build, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Lancer le diagnostic", fontWeight = FontWeight.Black) } }
             }
         }
     }
-
     selectedDtc?.let { dtc -> AlertDialog(onDismissRequest = { selectedDtc = null }, title = { Text(dtc.code) }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(dtc.title ?: dtc.description ?: "Code défaut"); dtc.system?.let { Text("Système • $it") }; dtc.causes?.let { Text("Causes\n$it") }; dtc.steps?.let { Text("Diagnostic\n$it") } } }, confirmButton = { Button(onClick = { selectedDtc = null }) { Text("Fermer") } }) }
 }
 
 @Serializable private data class VPImage(@SerialName("image_url") val imageUrl: String, @SerialName("is_primary") val primary: Boolean = false, @SerialName("sort_order") val order: Int = 0)
-
-@Composable private fun OverviewTab(model: UiModel, generations: List<VPGeneration>, engines: List<VPEngine>, ecus: List<VPEcu>, dtcs: List<VPDtc>) {
-    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Vehicle overview", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { InfoCard("GENERATIONS", generations.size.toString(), Modifier.weight(1f)); InfoCard("ENGINES", engines.size.toString(), Modifier.weight(1f)); InfoCard("DTC", dtcs.size.toString(), Modifier.weight(1f)) }
-        InfoCard("MODEL ID", model.id, Modifier.fillMaxWidth())
-        Text("Diagnostic coverage", color = VPMuted, fontWeight = FontWeight.Bold)
-        Text("${ecus.size} ECU compatibles et ${dtcs.size} codes défaut associés.", color = VPText)
-    }
-}
-
+@Composable private fun OverviewTab(model: UiModel, generations: List<VPGeneration>, engines: List<VPEngine>, ecus: List<VPEcu>, dtcs: List<VPDtc>) { Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("Vehicle overview", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { InfoCard("GENERATIONS", generations.size.toString(), Modifier.weight(1f)); InfoCard("ENGINES", engines.size.toString(), Modifier.weight(1f)); InfoCard("DTC", dtcs.size.toString(), Modifier.weight(1f)) }; InfoCard("MODEL ID", model.id, Modifier.fillMaxWidth()); Text("Diagnostic coverage", color = VPMuted, fontWeight = FontWeight.Bold); Text("${ecus.size} ECU compatibles et ${dtcs.size} codes défaut associés.", color = VPText) } }
 @Composable private fun EngineTab(rows: List<VPEngine>) { Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("Motorisations", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); rows.forEach { e -> DataCard(e.name ?: e.code ?: "Moteur", listOfNotNull(e.code, e.fuel, e.cc?.let { "$it cc" }, e.cylinders?.let { "$it cylindres" }, e.hp?.let { "$it ch" }, e.torque?.let { "$it Nm" }, e.transmissions.joinToString("/").ifBlank { null }).joinToString(" • ")) } } }
-
 @Composable private fun SpecsTab(rows: List<VPSpec>) { Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Specifications", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); rows.take(120).forEach { s -> Row(Modifier.fillMaxWidth().background(VPSurface, RoundedCornerShape(14.dp)).padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(s.key, color = VPText, fontWeight = FontWeight.SemiBold); Text(listOfNotNull(s.text, s.number?.toString()).joinToString(" ") + (s.unit?.let { " $it" } ?: ""), color = VPMuted) } } } }
-
 @Composable private fun EcuTab(rows: List<VPEcu>) { Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text("ECU & OBD", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); rows.forEach { e -> DataCard(e.name ?: "ECU", listOfNotNull(e.manufacturer, e.family, e.type, e.protocols.joinToString(", ").ifBlank { null }).joinToString(" • ")) } } }
-
 @Composable private fun DtcTab(rows: List<VPDtc>, onClick: (VPDtc) -> Unit) { Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("DTC & Faults", color = VPText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); rows.take(100).forEach { d -> Card(modifier = Modifier.fillMaxWidth().clickable { onClick(d) }, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = VPSurface)) { Column(Modifier.padding(16.dp)) { Row { Text(d.code, color = VPTeal, fontWeight = FontWeight.Black); Spacer(Modifier.weight(1f)); Text(d.severity ?: "INFO", color = VPMuted) }; Text(d.title ?: d.description ?: "Code défaut", color = VPText) } } } } }
-
 @Composable private fun InfoCard(label: String, value: String, modifier: Modifier) { Card(modifier = modifier, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = VPSurface)) { Column(Modifier.padding(14.dp)) { Text(label, color = VPMuted, style = MaterialTheme.typography.labelSmall); Text(value, color = VPTeal, fontWeight = FontWeight.Black) } } }
-@Composable private fun DataCard(title: String, value: String) { Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), colors = CardDefaults.cardColors(containerColor = VPSurface)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(title, color = VPText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black); Text(value.ifBlank { "Données détaillées bientôt disponibles" }, color = VPMuted) } } }
+@Composable private fun DataCard(title: String, value: String) { Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(21.dp), colors = CardDefaults.cardColors(containerColor = VPSurface)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) { Text(title, color = VPText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black); Text(value.ifBlank { "Données détaillées bientôt disponibles" }, color = VPMuted) } } }
