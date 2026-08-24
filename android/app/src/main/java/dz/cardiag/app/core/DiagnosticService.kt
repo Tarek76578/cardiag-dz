@@ -31,8 +31,9 @@ class DiagnosticService {
     suspend fun diagnose(sessionId: String,codes: List<String> = emptyList(),symptoms: JsonObject = buildJsonObject {},measurements: JsonObject = buildJsonObject {},vehicle: JsonObject = buildJsonObject {},language: String = "fr"): JsonObject {
         require(language in setOf("ar","fr","en")) { "language must be ar, fr or en" }
         val normalizedCodes = codes.map { it.trim().uppercase() }.filter { it.matches(Regex("[PBCU][0-3][0-9A-F]{3}")) }.distinct()
-        require(normalizedCodes.isNotEmpty()) { "At least one valid DTC is required" }
-        val payload = buildJsonObject { put("session_id",sessionId); put("codes",JsonArray(normalizedCodes.map { JsonPrimitive(it) })); put("symptoms",symptoms); put("measurements",measurements); put("vehicle",vehicle); put("language",language) }
+        
+        val payload = buildJsonObject { put("session_id",sessionId); put("codes",JsonArray(normalizedCodes.map { JsonPrimitive(it) }))
+        put("complaint", vehicle["complaint"] ?: JsonPrimitive("")); put("symptoms",symptoms); put("measurements",measurements); put("vehicle",vehicle); put("language",language) }
         var last: Throwable? = null
         repeat(3) { attempt ->
             try {
