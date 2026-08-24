@@ -31,12 +31,19 @@ data class DiagnosticSession(val id: String, @SerialName("user_id") val userId: 
 class DiagnosticService {
     private val supabase = SupabaseClient.client
 
+    private suspend fun ensureUserId(): String {
+        supabase.auth.currentUserOrNull()?.let { return it.id }
+        supabase.auth.signInAnonymously()
+        return supabase.auth.currentUserOrNull()?.id
+            ?: error("Unable to create a guest session")
+    }
+
     suspend fun createSession(vehicleModelId: String?, userVehicleId: String?, complaint: String, language: String): DiagnosticSession {
-        val user = supabase.auth.currentUserOrNull() ?: error("Authentication required. Please continue as guest or sign in.")
+        val userId = ensureUserId()
         return withTimeout(10_000) {
             supabase.from("diagnostic_sessions").insert(
                 DiagnosticSessionInsert(
-                    userId = user.id,
+                    userId = userId,
                     vehicleModelId = vehicleModelId,
                     userVehicleId = userVehicleId,
                     complaint = complaint.ifBlank { null },
