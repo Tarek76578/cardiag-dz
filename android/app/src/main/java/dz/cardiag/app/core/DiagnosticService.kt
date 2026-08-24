@@ -18,6 +18,7 @@ import kotlinx.serialization.json.put
 @Serializable
 data class DiagnosticSessionInsert(
     @SerialName("vehicle_model_id") val vehicleModelId: String? = null,
+    @SerialName("user_vehicle_id") val userVehicleId: String? = null,
     val complaint: String? = null,
     val language: String = "fr",
     val status: String = "created"
@@ -29,12 +30,12 @@ data class DiagnosticSession(val id: String, @SerialName("user_id") val userId: 
 class DiagnosticService {
     private val supabase = SupabaseClient.client
 
-    suspend fun createSession(vehicleModelId: String?, complaint: String, language: String): DiagnosticSession {
+    suspend fun createSession(vehicleModelId: String?, userVehicleId: String?, complaint: String, language: String): DiagnosticSession {
         supabase.auth.currentUserOrNull() ?: error("Authentication required")
         return withTimeout(10_000) {
-            supabase.from("diagnostic_sessions").insert(DiagnosticSessionInsert(vehicleModelId, complaint.ifBlank { null }, language)) {
-                select(Columns.list("id", "user_id"))
-            }.decodeSingle()
+            supabase.from("diagnostic_sessions").insert(
+                DiagnosticSessionInsert(vehicleModelId, userVehicleId, complaint.ifBlank { null }, language)
+            ) { select(Columns.list("id", "user_id")) }.decodeSingle()
         }
     }
 
@@ -71,11 +72,11 @@ class DiagnosticService {
     }
 
     suspend fun runDiagnostic(
-        vehicleModelId: String?, complaint: String, language: String,
+        vehicleModelId: String?, userVehicleId: String?, complaint: String, language: String,
         codes: List<String> = emptyList(), symptoms: JsonObject = buildJsonObject {},
         measurements: JsonObject = buildJsonObject {}, vehicle: JsonObject = buildJsonObject {}
     ): JsonObject {
-        val session = createSession(vehicleModelId, complaint, language)
+        val session = createSession(vehicleModelId, userVehicleId, complaint, language)
         return diagnose(session.id, codes, symptoms, measurements, vehicle, language)
     }
 }
