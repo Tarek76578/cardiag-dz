@@ -17,8 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dz.cardiag.app.core.ObdService
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 class ObdScannerActivity : ComponentActivity() {
     private val obd = ObdService()
@@ -63,9 +61,8 @@ private fun ObdScannerScreen(obd: ObdService) {
     fun readLive() {
         scope.launch {
             busy = true; status = "Lecture des données ECU…"
-            runCatching {
-                Triple(obd.readRpm(), obd.readCoolantTemperature(), obd.readVehicleSpeedKmh())
-            }.onSuccess { (r, c, s) -> rpm = r; coolant = c; speed = s; status = "Données ECU actualisées" }
+            runCatching { Triple(obd.readRpm(), obd.readCoolantTemperature(), obd.readVehicleSpeedKmh()) }
+                .onSuccess { (r, c, s) -> rpm = r; coolant = c; speed = s; status = "Données ECU actualisées" }
                 .onFailure { status = it.message ?: "Lecture impossible" }
             busy = false
         }
@@ -102,10 +99,11 @@ private fun ObdScannerScreen(obd: ObdService) {
                 if (devices.isEmpty()) item { Text("Aucun appareil appairé. Appairez d'abord votre ELM327 dans les réglages Bluetooth Android.") }
             } else {
                 item { Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("ECU connecté", style = MaterialTheme.typography.titleLarge); Text("Bluetooth Classic • ELM327 • OBD-II"); OutlinedButton(onClick = { obd.disconnect(); connected = false; status = "Déconnecté" }, modifier = Modifier.fillMaxWidth()) { Text("Déconnecter") } } } }
-                item { Text("Données live", style = MaterialTheme.typography.titleLarge) }
+                item { Button(onClick = { context.startActivity(Intent(context, LiveDataProActivity::class.java)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Ouvrir Live Data Pro →") } }
+                item { Text("Données live rapides", style = MaterialTheme.typography.titleLarge) }
                 item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { LiveCard("RPM", rpm?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("°C", coolant?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("km/h", speed?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)) } }
                 item { Button(onClick = ::readLive, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Actualiser Live Data") } }
-                item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = ::readCodes, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire DTC") }; OutlinedButton(onClick = readVin, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire VIN") } } }
+                item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = ::readCodes, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire DTC") }; OutlinedButton(onClick = ::readVin, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire VIN") } } }
                 if (dtcs.isNotEmpty()) item { Text("DTC: ${dtcs.joinToString(" • ")}", style = MaterialTheme.typography.titleMedium) }
                 if (dtcs.isEmpty()) item { Text("Aucun DTC lu dans cette session.") }
                 vinRaw?.let { item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("VIN / ECU response", style = MaterialTheme.typography.titleMedium); Text(it) } } } }
