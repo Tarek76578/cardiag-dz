@@ -16,14 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dz.cardiag.app.core.DiagnosticMeasurementInsert
+import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.ObdService
 import dz.cardiag.app.core.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
 @Serializable
 data class ObdPidCatalog(
@@ -33,6 +35,7 @@ data class ObdPidCatalog(
     val mode: Int = 1,
     @SerialName("data_type") val dataType: String? = null,
     val unit: String? = null,
+    val formula: String? = null,
     val min_value: Double? = null,
     val max_value: Double? = null,
     val description_fr: String? = null,
@@ -60,6 +63,7 @@ private fun LiveDataProScreen(obd: ObdService) {
     var pids by remember { mutableStateOf<List<ObdPidCatalog>>(emptyList()) }
     var values by remember { mutableStateOf<Map<String, LiveValue>>(emptyMap()) }
     var busy by remember { mutableStateOf(false) }
+    var sessionId by remember { mutableStateOf<String?>(null) }
 
     fun refreshDevices() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -72,43 +76,70 @@ private fun LiveDataProScreen(obd: ObdService) {
     fun loadPidCatalog() {
         scope.launch {
             runCatching {
-                SupabaseClient.client.from("obd_pids").select(Columns.list("id","pid","name","mode","data_type","unit","min_value","max_value","description_fr","description_ar"))
-                    .decodeList<ObdPidCatalog>()
-                    .filter { it.mode == 1 }
-                    .sortedBy { it.pid }
-            }.onSuccess { list ->
-                pids = list
-                status = "${list.size} PID disponibles depuis CarDiag"
-            }.onFailure { status = "Catalogue PID indisponible: ${it.message}" }
+                SupabaseClient.client.from("obd_pids").select(Columns.list("id","pid","name","mode","data_type","unit","formula","min_value","max_value","description_fr","description_ar"))
+                    .decodeList<ObdPidCatalog>().filter { it.mode == 1 }.sortedBy { it.pid }
+            }.onSuccess { list -> pids = list; status = "${list.size} PID disponibles depuis CarDiag" }
+                .onFailure { status = "Catalogue PID indisponible: ${it.message}" }
         }
     }
 
     fun connect(device: BluetoothDevice) {
         scope.launch {
             busy = true; status = "Connexion à ${device.name ?: device.address}…"
-            runCatching { obd.connect(device) }.onSuccess { connected = true; status = it; loadPidCatalog() }
-                .onFailure { status = it.message ?: "Échec de connexion" }
+            runCatching { obd.connect(device) }.onSuccess {
+                connected = true
+                status = it
+                loadPidCatalog()
+                runCatching { sessionId = DiagnosticService().createSession(null, null, "OBD Live Data Pro", "fr").id }
+                    .onFailure { status = "OBD connecté; session Supabase non créée: ${it.message}" }
+            }.onFailure { status = it.message ?: "Échec de connexion" }
             busy = false
         }
+    }
+
+    suspend fun readAllOnce() {
+        val next = values.toMutableMap()
+        var ok = 0
+        pids.take(20).forEach { pid ->
+            runCatching { parsePid(pid, obd.readMode01Pid(pid.pid)) }
+                .onSuccess { next[pid.id] = LiveValue(pid, it.first, it.second); ok++ }
+                .onFailure { next[pid.id] = LiveValue(pid, null, null, it.message) }
+        }
+        values = next
+        status = "$ok/${pids.take(20).size} PID lus • ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())}"
     }
 
     fun readAll() {
         scope.launch {
             busy = true
-            val next = values.toMutableMap()
-            var ok = 0
-            pids.take(16).forEach { pid ->
-                runCatching { parsePid(pid, obd.readMode01Pid(pid.pid)) }
-                    .onSuccess { next[pid.id] = LiveValue(pid, it.first, it.second); ok++ }
-                    .onFailure { next[pid.id] = LiveValue(pid, null, null, it.message) }
-            }
-            values = next
-            status = "$ok/${pids.take(16).size} PID lus — ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())}"
+            runCatching { readAllOnce() }.onFailure { status = it.message ?: "Lecture impossible" }
+            busy = false
+        }
+    }
+
+    fun persistSnapshot() {
+        scope.launch {
+            val id = sessionId ?: runCatching { DiagnosticService().createSession(null, null, "OBD Live Data Pro", "fr").id }.getOrNull()
+            if (id == null) { status = "Impossible de créer la session Supabase"; return@launch }
+            busy = true
+            runCatching {
+                val rows = values.values.filter { it.value != null }.map { v ->
+                    DiagnosticMeasurementInsert(id, v.pid.id, v.pid.name, v.value, v.raw, v.pid.unit, "obd")
+                }
+                DiagnosticService().saveMeasurements(id, rows)
+            }.onSuccess { status = "${values.values.count { it.value != null }} mesures enregistrées • session ${id.take(8)}…" }
+                .onFailure { status = "Échec sauvegarde mesures: ${it.message}" }
             busy = false
         }
     }
 
     LaunchedEffect(Unit) { refreshDevices() }
+    LaunchedEffect(connected) {
+        if (connected) while (true) {
+            if (!busy && pids.isNotEmpty()) runCatching { readAllOnce() }
+            delay(2000)
+        }
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Live Data Pro") }) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -118,6 +149,7 @@ private fun LiveDataProScreen(obd: ObdService) {
                         Text("OBD-II Telemetry", style = MaterialTheme.typography.headlineSmall)
                         Text("PID catalogue + valeurs ECU + plage normale", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(status, style = MaterialTheme.typography.labelLarge)
+                        sessionId?.let { Text("Session: ${it.take(8)}…", color = MaterialTheme.colorScheme.primary) }
                     }
                 }
             }
@@ -135,22 +167,19 @@ private fun LiveDataProScreen(obd: ObdService) {
             } else {
                 item {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = ::readAll, enabled = !busy && pids.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Lire Live Data") }
-                        OutlinedButton(onClick = { obd.disconnect(); connected = false; status = "Déconnecté" }, modifier = Modifier.weight(1f)) { Text("Déconnecter") }
+                        Button(onClick = ::readAll, enabled = !busy && pids.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Actualiser") }
+                        OutlinedButton(onClick = ::persistSnapshot, enabled = !busy && values.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Sauvegarder") }
                     }
                 }
-                items(pids.take(16)) { pid ->
-                    val v = values[pid.id]
-                    PidCard(v ?: LiveValue(pid, null, null))
-                }
+                items(pids.take(20)) { pid -> PidCard(values[pid.id] ?: LiveValue(pid, null, null)) }
             }
         }
     }
 }
 
 private fun parsePid(pid: ObdPidCatalog, raw: String): Pair<Double?, String?> {
-    val bytes = raw.replace("\\s".toRegex(), "").uppercase()
-    val marker = "41${pid.pid.padStart(2, '0')}"
+    val bytes = raw.replace(Regex("\\s|\\r|\\n|>"), "").uppercase()
+    val marker = "41${pid.pid.padStart(2, '0').uppercase()}"
     val idx = bytes.indexOf(marker)
     require(idx >= 0) { "PID ${pid.pid} not returned" }
     val payload = bytes.substring(idx + marker.length).take(8)
@@ -158,7 +187,6 @@ private fun parsePid(pid: ObdPidCatalog, raw: String): Pair<Double?, String?> {
     val a = payload.substring(0, 2).toInt(16)
     val b = if (payload.length >= 4) payload.substring(2, 4).toInt(16) else 0
     val c = if (payload.length >= 6) payload.substring(4, 6).toInt(16) else 0
-    val d = if (payload.length >= 8) payload.substring(6, 8).toInt(16) else 0
     val value = when (pid.pid.uppercase()) {
         "04" -> a * 100.0 / 255.0
         "05" -> a - 40.0
@@ -175,7 +203,7 @@ private fun parsePid(pid: ObdPidCatalog, raw: String): Pair<Double?, String?> {
         "46" -> a - 40.0
         "5C" -> a - 40.0
         "5E" -> (a * 256.0 + b) / 20.0
-        else -> (a * 256.0 + b * 1.0 + c / 256.0 + d / 65536.0)
+        else -> (a * 256.0 + b + c / 256.0)
     }
     return value to raw
 }
@@ -188,14 +216,11 @@ private fun PidCard(value: LiveValue) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text(p.name, style = MaterialTheme.typography.titleMedium)
-                    Text("PID ${p.pid} • Mode ${p.mode}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Text(if (number == null) "—" else String.format("%.1f %s", number, p.unit ?: ""), style = MaterialTheme.typography.headlineSmall)
+                Column(Modifier.weight(1f)) { Text(p.name, style = MaterialTheme.typography.titleMedium); Text("PID ${p.pid} • Mode ${p.mode}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text(if (number == null) "—" else "%.1f %s".format(java.util.Locale.US, number, p.unit ?: ""), style = MaterialTheme.typography.headlineSmall)
             }
-            if (p.min_value != null || p.max_value != null) Text("Normal: ${p.min_value ?: "—"} → ${p.max_value ?: "—"} ${p.unit ?: ""}", color = if (outOfRange) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            if (value.error != null) Text(value.error, color = MaterialTheme.colorScheme.error)
+            Text(if (outOfRange) "⚠ Valeur hors plage normale" else "Normal: ${p.min_value ?: "—"} → ${p.max_value ?: "—"} ${p.unit ?: ""}", color = if (outOfRange) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            value.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
