@@ -111,7 +111,8 @@ class ModernMainActivity : ComponentActivity() {
 private fun CarDiagApp(requestBluetoothPermissions: () -> Unit, setLanguage: (String) -> Unit) {
     val context = LocalContext.current
     val auth = remember { AuthService() }
-    var authenticated by remember { mutableStateOf(auth.currentUser != null) }
+    // CarDiag is guest-first: authentication is optional and must never block app startup.
+    var authenticated by remember { mutableStateOf(true) }
     var dark by rememberSaveable { mutableStateOf(context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).getBoolean("dark", true)) }
     val ar = LocalConfiguration.current.locales[0].language == "ar"
     val direction = if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr
@@ -119,18 +120,15 @@ private fun CarDiagApp(requestBluetoothPermissions: () -> Unit, setLanguage: (St
 
     CompositionLocalProvider(LocalLayoutDirection provides direction) {
         CarDiagTheme(dark) {
-            if (!authenticated) {
-                Surface(Modifier.fillMaxSize()) { AuthScreen(onAuthenticated = { authenticated = true }, arabic = ar) }
-            } else {
-                MainShell(
-                    arabic = ar,
-                    dark = dark,
-                    setDark = { value -> dark = value; context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).edit().putBoolean("dark", value).apply() },
-                    setLanguage = setLanguage,
-                    requestBluetoothPermissions = requestBluetoothPermissions,
-                    signOut = { scope.launch { auth.signOut(); authenticated = false } }
-                )
-            }
+            MainShell(
+                arabic = ar,
+                dark = dark,
+                setDark = { value -> dark = value; context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).edit().putBoolean("dark", value).apply() },
+                setLanguage = setLanguage,
+                requestBluetoothPermissions = requestBluetoothPermissions,
+                // Sign out only clears the optional Supabase session; it must not return the user to Login.
+                signOut = { scope.launch { auth.signOut(); authenticated = true } }
+            )
         }
     }
 }
