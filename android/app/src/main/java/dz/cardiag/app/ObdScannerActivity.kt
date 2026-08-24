@@ -18,138 +18,42 @@ import androidx.core.content.ContextCompat
 import dz.cardiag.app.core.DiagnosticMeasurementInsert
 import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.ObdService
+import dz.cardiag.app.core.ReadinessStatus
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-class ObdScannerActivity : ComponentActivity() {
-    private val obd = ObdService()
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent { ObdScannerScreen(obd, intent.getStringExtra("model_id"), intent.getStringExtra("model_name"), intent.getStringExtra("dtc_code")) }
-    }
-    override fun onDestroy() { obd.disconnect(); super.onDestroy() }
+class ObdScannerActivity : ComponentActivity(){private val obd=ObdService();override fun onCreate(b:Bundle?){super.onCreate(b);setContent{ObdScannerScreen(obd,intent.getStringExtra("model_id"),intent.getStringExtra("model_name"),intent.getStringExtra("dtc_code"))}}override fun onDestroy(){obd.disconnect();super.onDestroy()}}
+
+@Composable private fun ObdScannerScreen(obd:ObdService,modelId:String?,modelName:String?,targetDtc:String?){
+ val context=androidx.compose.ui.platform.LocalContext.current;val scope=rememberCoroutineScope();var devices by remember{mutableStateOf<List<BluetoothDevice>>(emptyList())};var connected by remember{mutableStateOf(false)};var status by remember{mutableStateOf("Prêt — sélectionnez un adaptateur ELM327 appairé")};var dtcs by remember{mutableStateOf<List<String>>(emptyList())};var pending by remember{mutableStateOf<List<String>>(emptyList())};var permanent by remember{mutableStateOf<List<String>>(emptyList())};var rpm by remember{mutableStateOf<Double?>(null)};var coolant by remember{mutableStateOf<Double?>(null)};var speed by remember{mutableStateOf<Double?>(null)};var maf by remember{mutableStateOf<Double?>(null)};var map by remember{mutableStateOf<Double?>(null)};var throttle by remember{mutableStateOf<Double?>(null)};var intake by remember{mutableStateOf<Double?>(null)};var fuel by remember{mutableStateOf<Double?>(null)};var load by remember{mutableStateOf<Double?>(null)};var voltage by remember{mutableStateOf<Double?>(null)};var vinRaw by remember{mutableStateOf<String?>(null)};var freeze by remember{mutableStateOf<String?>(null)};var readiness by remember{mutableStateOf<ReadinessStatus?>(null)};var adapterInfo by remember{mutableStateOf<String?>(null)};var supported by remember{mutableStateOf<Set<Int>>(emptySet())};var busy by remember{mutableStateOf(false)};var aiResult by remember{mutableStateOf<String?>(null)}
+ val permission=ContextCompat.checkSelfPermission(context,Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED
+ fun refresh(){if(!permission){(context as? ComponentActivity)?.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT),4101);return};devices=obd.bondedDevices()}
+ fun connect(d:BluetoothDevice){scope.launch{busy=true;status="Connexion…";runCatching{obd.connect(d)}.onSuccess{connected=true;status=it}.onFailure{connected=false;status=it.message?:"Connexion impossible"};busy=false}}
+ fun fullScan(){scope.launch{busy=true;status="Scan complet OBD en cours…";runCatching{val c=obd.readTroubleCodes();val p=obd.readPendingTroubleCodes();val perm=obd.readPermanentTroubleCodes();val r=obd.readReadiness();val sup=obd.readSupportedPids();Triple(c,p to perm)}.onSuccess{(c,pp)->dtcs=c;pending=pp.first;permanent=pp.second;readiness=runCatching{obd.readReadiness()}.getOrNull();supported=runCatching{obd.readSupportedPids()}.getOrDefault(emptySet());status="Scan terminé • ${c.size} confirmé(s) • ${pending.size} pending • ${permanent.size} permanent"}.onFailure{status=it.message?:"Scan impossible"};busy=false}}
+ fun live(){scope.launch{busy=true;status="Lecture des PID…";runCatching{val values=listOf(obd.readRpm(),obd.readCoolantTemperature(),obd.readVehicleSpeedKmh(),obd.readMaf(),obd.readMap(),obd.readThrottlePosition(),obd.readIntakeTemperature(),obd.readFuelLevel(),obd.readEngineLoad(),obd.readBatteryVoltage());values}.onSuccess{v->rpm=v[0];coolant=v[1];speed=v[2];maf=v[3];map=v[4];throttle=v[5];intake=v[6];fuel=v[7];load=v[8];voltage=v[9];status="Live Data actualisée"}.onFailure{status=it.message?:"Lecture impossible"};busy=false}}
+ fun vin(){scope.launch{busy=true;runCatching{obd.readVehicleInfoVin()}.onSuccess{vinRaw=it;status="VIN lu"}.onFailure{status=it.message?:"VIN non disponible"};busy=false}}
+ fun details(){scope.launch{busy=true;runCatching{val a=obd.adapterInfo();val p=obd.adapterProtocol();a to p}.onSuccess{(a,p)->adapterInfo="$a\nProtocol: $p";status="Adaptateur contrôlé"}.onFailure{status=it.message?:"Adapter check failed"};busy=false}}
+ fun ai(){if(dtcs.isEmpty()){status="Lisez d'abord les DTC";return};scope.launch{busy=true;aiResult=null;status="Analyse CarDiag AI…";runCatching{val s=DiagnosticService().createSession(modelId,null,"Full OBD scan — ${modelName?:"Véhicule"}","fr");val measurements=listOfNotNull(rpm?.let{DiagnosticMeasurementInsert(s.id,name="RPM",valueNumeric=it,unit="rpm")},coolant?.let{DiagnosticMeasurementInsert(s.id,name="Coolant",valueNumeric=it,unit="°C")},speed?.let{DiagnosticMeasurementInsert(s.id,name="Speed",valueNumeric=it,unit="km/h")},maf?.let{DiagnosticMeasurementInsert(s.id,name="MAF",valueNumeric=it,unit="g/s")},map?.let{DiagnosticMeasurementInsert(s.id,name="MAP",valueNumeric=it,unit="kPa")},throttle?.let{DiagnosticMeasurementInsert(s.id,name="Throttle",valueNumeric=it,unit="%")},intake?.let{DiagnosticMeasurementInsert(s.id,name="IAT",valueNumeric=it,unit="°C")},voltage?.let{DiagnosticMeasurementInsert(s.id,name="Voltage",valueNumeric=it,unit="V")});DiagnosticService().saveMeasurements(s.id,measurements);DiagnosticService().diagnose(s.id,dtcs,buildJsonObject{put("source","obd")},buildJsonObject{rpm?.let{put("rpm",it)};coolant?.let{put("coolant_c",it)};speed?.let{put("speed_kmh",it)};maf?.let{put("maf_gps",it)};map?.let{put("map_kpa",it)};throttle?.let{put("throttle_percent",it)};intake?.let{put("iat_c",it)};fuel?.let{put("fuel_percent",it)};load?.let{put("load_percent",it)};voltage?.let{put("battery_voltage",it)}},buildJsonObject{put("model_id",modelId?:"");put("model_name",modelName?:"Véhicule");vinRaw?.let{put("vin_response",it)}},"fr")}.onSuccess{aiResult=it.toString();status="Diagnostic AI terminé"}.onFailure{status=it.message?:"AI indisponible"};busy=false}}
+ LaunchedEffect(Unit){refresh()}
+ Scaffold(topBar={TopAppBar(title={Text("Scanner OBD-II Pro")})}){p->LazyColumn(Modifier.fillMaxSize().padding(p),contentPadding=PaddingValues(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
+  item{Text("Connexion & ECU",style=MaterialTheme.typography.titleLarge);Text(status,color=MaterialTheme.colorScheme.onSurfaceVariant)};item{Button(onClick=::refresh,enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Actualiser adaptateurs")}}
+  if(!connected){items(devices){d->Card(Modifier.fillMaxWidth()){Row(Modifier.fillMaxWidth().padding(16.dp),horizontalArrangement=Arrangement.SpaceBetween){Column(Modifier.weight(1f)){Text(d.name?:"ELM327",style=MaterialTheme.typography.titleMedium);Text(d.address)};Button(onClick={connect(d)},enabled=!busy){Text("Connecter")}}}};if(devices.isEmpty())item{Text("Aucun ELM327 appairé. Le diagnostic OBD réel nécessite un adaptateur compatible.")}}
+  else{
+   item{Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("OBD connecté",style=MaterialTheme.typography.titleLarge);Text("${obd.protocol()} • Bluetooth Classic");Button(onClick=::details,enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Tester l'adaptateur")};OutlinedButton(onClick={obd.disconnect();connected=false;status="Déconnecté"},modifier=Modifier.fillMaxWidth()){Text("Déconnecter")}}}}
+   item{Button(onClick=::fullScan,enabled=!busy,modifier=Modifier.fillMaxWidth()){Text(if(busy)"Scan en cours…" else "FULL VEHICLE SCAN")}}
+   item{Button(onClick=::live,enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Actualiser Live Data")}}
+   item{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){Button(onClick={scope.launch{busy=true;runCatching{obd.readTroubleCodes()}.onSuccess{dtcs=it;status="DTC confirmé lus"}.onFailure{status=it.message?:"Erreur DTC"};busy=false}},enabled=!busy,modifier=Modifier.weight(1f)){Text("DTC")};OutlinedButton(onClick=::vin,enabled=!busy,modifier=Modifier.weight(1f)){Text("VIN")}}}
+   item{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){Button(onClick={scope.launch{busy=true;runCatching{obd.readPendingTroubleCodes()}.onSuccess{pending=it;status="Pending DTC lus"}.onFailure{status=it.message?:"Erreur"};busy=false}},enabled=!busy,modifier=Modifier.weight(1f)){Text("Pending")};OutlinedButton(onClick={scope.launch{busy=true;runCatching{obd.readPermanentTroubleCodes()}.onSuccess{permanent=it;status="Permanent DTC lus"}.onFailure{status=it.message?:"Erreur"};busy=false}},enabled=!busy,modifier=Modifier.weight(1f)){Text("Permanent")}}}
+   item{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){Button(onClick={scope.launch{busy=true;runCatching{obd.readFreezeFrameRaw()}.onSuccess{freeze=it;status="Freeze Frame reçu"}.onFailure{status=it.message?:"Freeze Frame indisponible"};busy=false}},enabled=!busy,modifier=Modifier.weight(1f)){Text("Freeze Frame")};OutlinedButton(onClick={scope.launch{busy=true;runCatching{obd.readReadiness()}.onSuccess{readiness=it;status="Readiness actualisée"}.onFailure{status=it.message?:"Readiness indisponible"};busy=false}},enabled=!busy,modifier=Modifier.weight(1f)){Text("Readiness")}}}
+   item{Button(onClick={scope.launch{busy=true;runCatching{obd.clearTroubleCodes()}.onSuccess{dtcs=emptyList();status="Clear DTC envoyé — rescanner recommandé"}.onFailure{status=it.message?:"Clear DTC impossible"};busy=false}},enabled=!busy,modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=MaterialTheme.colorScheme.error)){Text("EFFACER DTC")}}
+   item{Button(onClick={context.startActivity(Intent(context,LiveDataProActivity::class.java).apply{putExtra("model_id",modelId);putExtra("model_name",modelName?:"Véhicule");putExtra("dtc_code",targetDtc?:dtcs.firstOrNull())})},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Ouvrir Live Data Pro →")}}
+   item{Text("Live Data",style=MaterialTheme.typography.titleLarge)};item{Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(7.dp)){LiveCard("RPM",rpm?.let{"%.0f".format(it)}?:"—",Modifier.weight(1f));LiveCard("°C",coolant?.let{"%.0f".format(it)}?:"—",Modifier.weight(1f));LiveCard("km/h",speed?.let{"%.0f".format(it)}?:"—",Modifier.weight(1f));LiveCard("V",voltage?.let{"%.2f".format(it)}?:"—",Modifier.weight(1f))}}
+   item{Text("MAF ${maf?.let{"%.2f g/s".format(it)}?:"—"} • MAP ${map?.let{"%.0f kPa".format(it)}?:"—"} • Throttle ${throttle?.let{"%.1f%%".format(it)}?:"—"}")}
+   item{Text("DTC confirmés: ${dtcs.joinToString().ifBlank{"aucun"}}")};item{Text("Pending: ${pending.joinToString().ifBlank{"aucun"}}")};item{Text("Permanent: ${permanent.joinToString().ifBlank{"aucun"}}")}
+   readiness?.let{item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp)){Text("Readiness / MIL",style=MaterialTheme.typography.titleMedium);Text("MIL: ${it.milOn?.toString()?:"unknown"} • Monitors ready: ${it.monitorsReady?.toString()?:"unknown"}");Text(it.raw)}}}};freeze?.let{item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp)){Text("Freeze Frame",style=MaterialTheme.typography.titleMedium);Text(it)}}}};adapterInfo?.let{item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp)){Text("Adapter health");Text(it)}}}};vinRaw?.let{item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp)){Text("VIN");Text(it)}}}};item{Text("Supported PID count: ${supported.count { it }}")}
+   if(dtcs.isNotEmpty())item{Button(onClick=::ai,enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("Analyser avec CarDiag AI")}};aiResult?.let{item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("CarDiag AI",style=MaterialTheme.typography.titleLarge);Text(it)}}}}
+  }}
+ }}
 }
-
-@Composable
-private fun ObdScannerScreen(obd: ObdService, modelId: String?, modelName: String?, targetDtc: String?) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = rememberCoroutineScope()
-    var devices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
-    var connected by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("Prêt — sélectionnez un adaptateur ELM327 appairé") }
-    var dtcs by remember { mutableStateOf<List<String>>(emptyList()) }
-    var rpm by remember { mutableStateOf<Double?>(null) }
-    var coolant by remember { mutableStateOf<Double?>(null) }
-    var speed by remember { mutableStateOf<Double?>(null) }
-    var vinRaw by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var aiResult by remember { mutableStateOf<String?>(null) }
-    val hasBluetoothPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-
-    fun refreshDevices() {
-        if (!hasBluetoothPermission) {
-            (context as? ComponentActivity)?.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT), 4101)
-            return
-        }
-        devices = obd.bondedDevices()
-    }
-
-    fun connect(device: BluetoothDevice) {
-        scope.launch {
-            busy = true; status = "Connexion à ${device.name ?: device.address}…"
-            runCatching { obd.connect(device) }.onSuccess { connected = true; status = it }.onFailure { connected = false; status = it.message ?: "Échec de connexion" }
-            busy = false
-        }
-    }
-
-    fun readLive() {
-        scope.launch {
-            busy = true; status = "Lecture des données ECU…"
-            runCatching { Triple(obd.readRpm(), obd.readCoolantTemperature(), obd.readVehicleSpeedKmh()) }
-                .onSuccess { (r, c, s) -> rpm = r; coolant = c; speed = s; status = "Données ECU actualisées" }
-                .onFailure { status = it.message ?: "Lecture impossible" }
-            busy = false
-        }
-    }
-
-    fun readCodes() {
-        scope.launch {
-            busy = true; status = "Lecture des DTC…"
-            runCatching { obd.readTroubleCodes() }.onSuccess { dtcs = it.distinct().map { code -> code.uppercase() }; aiResult = null; status = if (dtcs.isEmpty()) "Aucun DTC confirmé" else "${dtcs.size} DTC détecté(s)" }
-                .onFailure { status = it.message ?: "Lecture DTC impossible" }
-            busy = false
-        }
-    }
-
-    fun readVin() {
-        scope.launch {
-            busy = true; status = "Lecture VIN…"
-            runCatching { obd.readVehicleInfoVin() }.onSuccess { vinRaw = it; status = "Réponse VIN reçue" }
-                .onFailure { status = it.message ?: "VIN non disponible" }
-            busy = false
-        }
-    }
-
-    fun analyzeWithAi() {
-        if (dtcs.isEmpty()) { status = "Lisez d'abord les DTC."; return }
-        scope.launch {
-            busy = true; aiResult = null; status = "Préparation du diagnostic AI…"
-            runCatching {
-                val service = DiagnosticService()
-                val session = service.createSession(modelId, null, "OBD scan — ${modelName ?: "Véhicule"}", "fr")
-                service.saveMeasurements(session.id, listOfNotNull(
-                    rpm?.let { DiagnosticMeasurementInsert(session.id, name = "RPM", valueNumeric = it, unit = "rpm") },
-                    coolant?.let { DiagnosticMeasurementInsert(session.id, name = "Coolant temperature", valueNumeric = it, unit = "°C") },
-                    speed?.let { DiagnosticMeasurementInsert(session.id, name = "Vehicle speed", valueNumeric = it, unit = "km/h") },
-                    vinRaw?.let { DiagnosticMeasurementInsert(session.id, name = "VIN response", valueText = it, unit = null) }
-                ))
-                val measurements = buildJsonObject {
-                    rpm?.let { put("rpm", it) }
-                    coolant?.let { put("coolant_c", it) }
-                    speed?.let { put("speed_kmh", it) }
-                    vinRaw?.let { put("vin_response", it) }
-                }
-                service.diagnose(
-                    session.id,
-                    codes = dtcs,
-                    symptoms = buildJsonObject { put("source", "obd") },
-                    measurements = measurements,
-                    vehicle = buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName ?: "Véhicule") },
-                    language = "fr"
-                ).toString()
-            }.onSuccess { aiResult = it; status = "Analyse AI terminée" }
-                .onFailure { status = it.message ?: "Diagnostic AI indisponible" }
-            busy = false
-        }
-    }
-
-    LaunchedEffect(Unit) { refreshDevices() }
-
-    Scaffold(topBar = { TopAppBar(title = { Text("Scanner OBD-II") }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { Text("Connexion Bluetooth", style = MaterialTheme.typography.titleLarge); Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            item { Button(onClick = ::refreshDevices, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Actualiser les adaptateurs appairés") } }
-            if (!connected) {
-                items(devices) { device -> Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Column(Modifier.weight(1f)) { Text(device.name ?: "ELM327", style = MaterialTheme.typography.titleMedium); Text(device.address, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Button(onClick = { connect(device) }, enabled = !busy) { Text("Connecter") } } } }
-                if (devices.isEmpty()) item { Text("Aucun appareil appairé. Appairez d'abord votre ELM327 dans les réglages Bluetooth Android.") }
-            } else {
-                item { Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("ECU connecté", style = MaterialTheme.typography.titleLarge); Text("Bluetooth Classic • ELM327 • OBD-II"); OutlinedButton(onClick = { obd.disconnect(); connected = false; status = "Déconnecté" }, modifier = Modifier.fillMaxWidth()) { Text("Déconnecter") } } } }
-                item { Button(onClick = { context.startActivity(Intent(context, LiveDataProActivity::class.java).apply { putExtra("model_id", modelId); putExtra("model_name", modelName ?: "Véhicule"); putExtra("dtc_code", targetDtc ?: dtcs.firstOrNull()) }) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Ouvrir Live Data Pro →") } }
-                item { Text("Données live rapides", style = MaterialTheme.typography.titleLarge) }
-                item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { LiveCard("RPM", rpm?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("°C", coolant?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("km/h", speed?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)) } }
-                item { Button(onClick = ::readLive, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Actualiser Live Data") } }
-                item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = ::readCodes, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire DTC") }; OutlinedButton(onClick = ::readVin, enabled = !busy, modifier = Modifier.weight(1f)) { Text("Lire VIN") } } }
-                if (dtcs.isNotEmpty()) {
-                    item { Text("DTC: ${dtcs.joinToString(" • ")}", style = MaterialTheme.typography.titleMedium) }
-                    item { Button(onClick = ::analyzeWithAi, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Analyse en cours…" else "Analyser avec CarDiag AI") } }
-                } else item { Text("Aucun DTC lu dans cette session.") }
-                aiResult?.let { result -> item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("CarDiag AI", style = MaterialTheme.typography.titleLarge); Text(result) } } } }
-                vinRaw?.let { item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("VIN / ECU response", style = MaterialTheme.typography.titleMedium); Text(it) } } } }
-                item { Button(onClick = { scope.launch { busy = true; status = "Création de la session…"; runCatching { DiagnosticService().createSession(modelId, null, "OBD live scan — ${modelName ?: "Véhicule"}", "fr") }.onSuccess { status = "Session diagnostic ${it.id} créée dans Supabase" }.onFailure { status = it.message ?: "Impossible de créer la session" }; busy = false } }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Enregistrer la session") } }
-            }
-        }
-    }
-}
-
-@Composable private fun LiveCard(label: String, value: String, modifier: Modifier) { Card(modifier) { Column(Modifier.padding(14.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) { Text(value, style = MaterialTheme.typography.titleLarge); Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+@Composable private fun LiveCard(label:String,value:String,modifier:Modifier){Card(modifier){Column(Modifier.padding(10.dp),horizontalAlignment=androidx.compose.ui.Alignment.CenterHorizontally){Text(value,style=MaterialTheme.typography.titleMedium);Text(label,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}
