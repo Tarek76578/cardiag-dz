@@ -44,6 +44,9 @@ class ObdService {
     suspend fun readVehicleInfoVin(): String = command("0902", 4000)
     suspend fun freezeFrame(): List<String> = ObdParser.parseDtc(command("02", 4000))
 
+    /** Reads a Mode 01 PID such as 0B (MAP), 0F (IAT), 11 (throttle) or 2F (fuel level). */
+    suspend fun readMode01Pid(pid: String): String = command("01${pid.trim().uppercase().padStart(2, '0')}", 2500)
+
     suspend fun command(command: String, timeoutMs: Long = 1800): String = withContext(Dispatchers.IO) {
         val normalized = command.trim().uppercase()
         require(normalized.matches(Regex("[0-9A-Z]+"))) { "Invalid ELM327 command" }
