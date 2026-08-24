@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 data class ObdPidCatalog(
@@ -39,16 +41,17 @@ data class ObdPidCatalog(
     @SerialName("data_type") val dataType: String? = null,
     val unit: String? = null,
     val formula: String? = null,
-    val min_value: Double? = null,
-    val max_value: Double? = null,
-    val description_fr: String? = null,
-    val description_ar: String? = null
+    @SerialName("min_value") val minValue: Double? = null,
+    @SerialName("max_value") val maxValue: Double? = null,
+    @SerialName("description_fr") val descriptionFr: String? = null,
+    @SerialName("description_ar") val descriptionAr: String? = null
 )
 
 data class LiveValue(val pid: ObdPidCatalog, val value: Double?, val raw: String?, val error: String? = null)
 
 class LiveDataProActivity : ComponentActivity() {
     private val obd = ObdService()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val initialDtc = intent.getStringExtra("dtc_code")
@@ -56,7 +59,11 @@ class LiveDataProActivity : ComponentActivity() {
         val modelName = intent.getStringExtra("model_name") ?: "Véhicule"
         setContent { LiveDataProScreen(obd, initialDtc, modelId, modelName) }
     }
-    override fun onDestroy() { obd.disconnect(); super.onDestroy() }
+
+    override fun onDestroy() {
+        obd.disconnect()
+        super.onDestroy()
+    }
 }
 
 @Composable
@@ -74,7 +81,9 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
 
     fun refreshDevices() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            (context as? ComponentActivity)?.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT), 4201)
+            (context as? ComponentActivity)?.requestPermissions(
+                arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT), 4201
+            )
             return
         }
         devices = obd.bondedDevices()
@@ -83,22 +92,33 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
     fun loadPidCatalog() {
         scope.launch {
             runCatching {
-                SupabaseClient.client.from("obd_pids").select(Columns.list("id","pid","name","mode","data_type","unit","formula","min_value","max_value","description_fr","description_ar"))
-                    .decodeList<ObdPidCatalog>().filter { it.mode == 1 }.sortedBy { it.pid }
-            }.onSuccess { list -> pids = list; status = "${list.size} PID disponibles depuis CarDiag" }
-                .onFailure { status = "Catalogue PID indisponible: ${it.message}" }
+                SupabaseClient.client.from("obd_pids")
+                    .select(Columns.list("id", "pid", "name", "mode", "data_type", "unit", "formula", "min_value", "max_value", "description_fr", "description_ar"))
+                    .decodeList<ObdPidCatalog>()
+                    .filter { it.mode == 1 }
+                    .sortedBy { it.pid }
+            }.onSuccess { list ->
+                pids = list
+                status = "${list.size} PID disponibles depuis CarDiag"
+            }.onFailure { status = "Catalogue PID indisponible: ${it.message}" }
         }
     }
 
     fun connect(device: BluetoothDevice) {
         scope.launch {
-            busy = true; status = "Connexion à ${device.name ?: device.address}…"
+            busy = true
+            status = "Connexion à ${device.name ?: device.address}…"
             runCatching { obd.connect(device) }.onSuccess {
                 connected = true
                 status = it
                 loadPidCatalog()
-                runCatching { sessionId = DiagnosticService().createSession(modelId, null, "OBD Live Data Pro — $modelName", "fr").id }
-                    .onFailure { status = "OBD connecté; session Supabase non créée: ${it.message}" }
+                runCatching {
+                    sessionId = DiagnosticService().createSession(
+                        modelId, null, "OBD Live Data Pro — $modelName", "fr"
+                    ).id
+                }.onFailure {
+                    status = "OBD connecté; session Supabase non créée: ${it.message}"
+                }
             }.onFailure { status = it.message ?: "Échec de connexion" }
             busy = false
         }
@@ -106,14 +126,18 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
 
     suspend fun readAllOnce() {
         val next = values.toMutableMap()
+        val requested = pids.take(20)
         var ok = 0
-        pids.take(20).forEach { pid ->
+        requested.forEach { pid ->
             runCatching { parsePid(pid, obd.readMode01Pid(pid.pid)) }
-                .onSuccess { next[pid.id] = LiveValue(pid, it.first, it.second); ok++ }
+                .onSuccess { (number, raw) ->
+                    next[pid.id] = LiveValue(pid, number, raw)
+                    ok++
+                }
                 .onFailure { next[pid.id] = LiveValue(pid, null, null, it.message) }
         }
         values = next
-        status = "$ok/${pids.take(20).size} PID lus • ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date())}"
+        status = "$ok/${requested.size} PID lus • ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())}"
     }
 
     fun readAll() {
@@ -126,16 +150,23 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
 
     fun persistSnapshot() {
         scope.launch {
-            val id = sessionId ?: runCatching { DiagnosticService().createSession(modelId, null, "OBD Live Data Pro — $modelName", "fr").id }.getOrNull()
-            if (id == null) { status = "Impossible de créer la session Supabase"; return@launch }
+            val id = sessionId ?: runCatching {
+                DiagnosticService().createSession(modelId, null, "OBD Live Data Pro — $modelName", "fr").id
+            }.getOrNull()
+            if (id == null) {
+                status = "Impossible de créer la session Supabase"
+                return@launch
+            }
+            sessionId = id
             busy = true
             runCatching {
                 val rows = values.values.filter { it.value != null }.map { v ->
                     DiagnosticMeasurementInsert(id, v.pid.id, v.pid.name, v.value, v.raw, v.pid.unit, "obd")
                 }
                 DiagnosticService().saveMeasurements(id, rows)
-            }.onSuccess { status = "${values.values.count { it.value != null }} mesures enregistrées • session ${id.take(8)}…" }
-                .onFailure { status = "Échec sauvegarde mesures: ${it.message}" }
+            }.onSuccess {
+                status = "${values.values.count { it.value != null }} mesures enregistrées • session ${id.take(8)}…"
+            }.onFailure { status = "Échec sauvegarde mesures: ${it.message}" }
             busy = false
         }
     }
@@ -150,10 +181,12 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
                 return@launch
             }
             val observations = values.values.filter { it.value != null }.map {
-                CorrelationObservation(it.pid.pid, it.value!!, it.pid.unit, it.pid.min_value, it.pid.max_value)
+                CorrelationObservation(it.pid.pid, it.value!!, it.pid.unit, it.pid.minValue, it.pid.maxValue)
             }
             findings = DiagnosticCorrelation.correlate(code, observations)
-            val id = sessionId ?: runCatching { DiagnosticService().createSession(modelId, null, "DTC $code — $modelName", "fr").id }.getOrNull()
+            val id = sessionId ?: runCatching {
+                DiagnosticService().createSession(modelId, null, "DTC $code — $modelName", "fr").id
+            }.getOrNull()
             if (id != null) {
                 sessionId = id
                 runCatching {
@@ -164,29 +197,42 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
                     DiagnosticService().diagnose(
                         id,
                         codes = listOf(code),
-                        measurements = kotlinx.serialization.json.buildJsonObject {
-                            values.values.filter { it.value != null }.forEach { v -> put(v.pid.pid, v.value!!) }
+                        measurements = buildJsonObject {
+                            values.values.filter { it.value != null }.forEach { v ->
+                                put(v.pid.pid, v.value!!)
+                            }
                         },
-                        vehicle = kotlinx.serialization.json.buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName) },
+                        vehicle = buildJsonObject {
+                            put("model_id", modelId ?: "")
+                            put("model_name", modelName)
+                        },
                         language = "fr"
                     )
                 }.onSuccess { status = "Corrélation $code terminée • session ${id.take(8)}…" }
                     .onFailure { status = "Corrélation locale terminée; service diagnostic indisponible: ${it.message}" }
-            } else status = "Corrélation locale terminée; session Supabase indisponible"
+            } else {
+                status = "Corrélation locale terminée; session Supabase indisponible"
+            }
             busy = false
         }
     }
 
     LaunchedEffect(Unit) { refreshDevices() }
     LaunchedEffect(connected) {
-        if (connected) while (true) {
-            if (!busy && pids.isNotEmpty()) runCatching { readAllOnce() }
-            delay(2000)
+        if (connected) {
+            while (true) {
+                if (!busy && pids.isNotEmpty()) runCatching { readAllOnce() }
+                delay(2000)
+            }
         }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Live Data Pro") }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -202,8 +248,15 @@ private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: Str
                 item { Button(onClick = ::refreshDevices, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Actualiser Bluetooth") } }
                 items(devices) { device ->
                     Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Column(Modifier.weight(1f)) { Text(device.name ?: "ELM327", style = MaterialTheme.typography.titleMedium); Text(device.address, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(device.name ?: "ELM327", style = MaterialTheme.typography.titleMedium)
+                                Text(device.address, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             Button(onClick = { connect(device) }, enabled = !busy) { Text("Connecter") }
                         }
                     }
@@ -268,14 +321,23 @@ private fun parsePid(pid: ObdPidCatalog, raw: String): Pair<Double?, String?> {
 private fun PidCard(value: LiveValue) {
     val p = value.pid
     val number = value.value
-    val outOfRange = number != null && ((p.min_value != null && number < p.min_value!!) || (p.max_value != null && number > p.max_value!!))
+    val outOfRange = number != null && ((p.minValue != null && number < p.minValue!!) || (p.maxValue != null && number > p.maxValue!!))
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) { Text(p.name, style = MaterialTheme.typography.titleMedium); Text("PID ${p.pid} • Mode ${p.mode}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                Text(if (number == null) "—" else "%.1f %s".format(java.util.Locale.US, number, p.unit ?: ""), style = MaterialTheme.typography.headlineSmall)
+                Column(Modifier.weight(1f)) {
+                    Text(p.name, style = MaterialTheme.typography.titleMedium)
+                    Text("PID ${p.pid} • Mode ${p.mode}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(
+                    if (number == null) "—" else "%.1f %s".format(java.util.Locale.US, number, p.unit ?: ""),
+                    style = MaterialTheme.typography.headlineSmall
+                )
             }
-            Text(if (outOfRange) "⚠ Valeur hors plage normale" else "Normal: ${p.min_value ?: "—"} → ${p.max_value ?: "—"} ${p.unit ?: ""}", color = if (outOfRange) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (outOfRange) "⚠ Valeur hors plage normale" else "Normal: ${p.minValue ?: "—"} → ${p.maxValue ?: "—"} ${p.unit ?: ""}",
+                color = if (outOfRange) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+            )
             value.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
