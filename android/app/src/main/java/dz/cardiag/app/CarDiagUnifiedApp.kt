@@ -1,69 +1,223 @@
 package dz.cardiag.app
 
 import android.content.Intent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Garage
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import dz.cardiag.app.core.SupabaseClient
-import dz.cardiag.app.ui.theme.CarDiagColors
-import dz.cardiag.app.ui.theme.CarDiagShapes
-import dz.cardiag.app.ui.theme.CarDiagSpacing
-import dz.cardiag.app.ui.theme.CarDiagTheme
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-@Serializable private data class UnifiedMake(val id: String, val name: String)
-@Serializable private data class UnifiedModel(val id: String, @SerialName("make_id") val makeId: String, val name: String, @SerialName("year_from") val yearFrom: Int? = null, @SerialName("year_to") val yearTo: Int? = null, val generation: String? = null, @SerialName("image_url") val imageUrl: String? = null)
-@Serializable private data class UnifiedImage(@SerialName("model_id") val modelId: String, @SerialName("image_url") val imageUrl: String, @SerialName("is_primary") val isPrimary: Boolean = false)
-private enum class UnifiedTab { HOME, CARS, DIAGNOSTIC, GARAGE, MENU }
+@Serializable
+private data class Make(val id: String, val name: String)
+
+@Serializable
+private data class Model(
+    val id: String,
+    @SerialName("make_id") val makeId: String,
+    val name: String,
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null
+)
+
+private enum class Tab { HOME, CARS, DIAGNOSTIC, GARAGE, MENU }
 
 @Composable
 fun CarDiagUnifiedApp() {
-    var dark by remember { mutableStateOf(true) }; var arabic by remember { mutableStateOf(false) }; var tab by remember { mutableStateOf(UnifiedTab.HOME) }; var selected by remember { mutableStateOf<UnifiedModel?>(null) }; var selectedImage by remember { mutableStateOf<String?>(null)
-    CarDiagTheme(darkTheme = dark) { CompositionLocalProvider(LocalLayoutDirection provides if (arabic) LayoutDirection.Rtl else LayoutDirection.Ltr) { if (selected != null) VehicleScreen(selected!!, selectedImage, arabic) { selected = null } else Scaffold(containerColor = MaterialTheme.colorScheme.background, bottomBar = { BottomBar(tab, arabic) { tab = it } }) { p -> when (tab) { UnifiedTab.HOME -> HomeScreen(p, arabic) { tab = UnifiedTab.CARS }; UnifiedTab.CARS -> CarsScreen(p, arabic) { model, image -> selected = model; selectedImage = image }; UnifiedTab.DIAGNOSTIC -> DiagnosticScreen(p, arabic); UnifiedTab.GARAGE -> GarageScreen(p, arabic) { tab = UnifiedTab.CARS }; UnifiedTab.MENU -> MenuScreen(p, arabic, dark, { dark = !dark }, { arabic = !arabic }) { tab = it } } } } }
+    var tab by remember { mutableStateOf(Tab.HOME) }
+    var selected by remember { mutableStateOf<Model?>(null) }
+
+    if (selected != null) {
+        VehicleDetails(selected!!, onBack = { selected = null })
+        return
+    }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                val labels = listOf("Home", "Cars", "Diagnostic", "Garage", "Menu")
+                val icons = listOf(Icons.Default.Home, Icons.Default.DirectionsCar, Icons.Default.Build, Icons.Default.Garage, Icons.Default.MoreHoriz)
+                Tab.values().forEachIndexed { index, item ->
+                    NavigationBarItem(
+                        selected = tab == item,
+                        onClick = { tab = item },
+                        icon = { Icon(icons[index], labels[index]) },
+                        label = { Text(labels[index]) }
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        when (tab) {
+            Tab.HOME -> HomeScreen(padding, onCars = { tab = Tab.CARS })
+            Tab.CARS -> CarsScreen(padding, onSelect = { selected = it })
+            Tab.DIAGNOSTIC -> DiagnosticScreen(padding)
+            Tab.GARAGE -> GarageScreen(padding, onCars = { tab = Tab.CARS })
+            Tab.MENU -> MenuScreen(padding)
+        }
+    }
 }
 
-@Composable private fun BottomBar(tab: UnifiedTab, arabic: Boolean, onTab: (UnifiedTab) -> Unit) { val labels = if (arabic) listOf("الرئيسية", "السيارات", "التشخيص", "المرآب", "المزيد") else listOf("Accueil", "Voitures", "Diagnostic", "Garage", "Menu"); val icons = listOf(Icons.Default.Home, Icons.Default.DirectionsCar, Icons.Default.Build, Icons.Default.Garage, Icons.Default.MoreHoriz); NavigationBar(containerColor = MaterialTheme.colorScheme.surface) { UnifiedTab.values().forEachIndexed { i, t -> NavigationBarItem(t == tab, { onTab(t) }, { Icon(icons[i], labels[i]) }, label = { Text(labels[i]) }) } } }
-
-@Composable private fun HomeScreen(p: PaddingValues, arabic: Boolean, onCars: () -> Unit) { val c = LocalContext.current; LazyColumn(Modifier.fillMaxSize().padding(p), contentPadding = PaddingValues(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { item { Surface(shape = CarDiagShapes.Hero, color = CarDiagColors.DarkSurfaceElevated, tonalElevation = 2.dp) { Column(Modifier.padding(CarDiagSpacing.xl), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { Text("CarDiag", style = MaterialTheme.typography.headlineLarge); Text(if (arabic) "تشخيص السيارات الذكي" else "SMART VEHICLE DIAGNOSTICS", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.secondary); Text(if (arabic) "السيارة أولاً • التشخيص ثانياً • AI عندما تحتاجه" else "Vehicle first • diagnostics second • AI when you need it", color = MaterialTheme.colorScheme.onSurfaceVariant); PrimaryAction(if (arabic) "تشخيص AI" else "AI Diagnosis", Icons.Default.AutoAwesome) { c.startActivity(Intent(c, AiSymptomDiagnosisActivity::class.java)) } } } }; item { SectionTitle(if (arabic) "ابدأ" else "Start") }; item { ActionCard(if (arabic) "اختيار سيارة" else "Choose a vehicle", if (arabic) "ماركة → موديل → جيل → محرك" else "Make → Model → Generation → Engine", Icons.Default.DirectionsCar, onCars) }; item { ActionCard("Diagnostic", "OBD-II • Live Data • DTC • VIN • AI", Icons.Default.Build) { c.startActivity(Intent(c, ObdScannerActivity::class.java)) } }; item { ActionCard(if (arabic) "المرآب" else "Garage", if (arabic) "سياراتك وملفاتها" else "Your vehicles and profiles", Icons.Default.Garage) {} } } }
-
-@Composable private fun CarsScreen(p: PaddingValues, arabic: Boolean, onModel: (UnifiedModel, String?) -> Unit) {
-    var models by remember { mutableStateOf<List<UnifiedModel>>(emptyList()) }; var makes by remember { mutableStateOf<List<UnifiedMake>>(emptyList()) }; var images by remember { mutableStateOf<List<UnifiedImage>>(emptyList()) }; var query by remember { mutableStateOf("") }; var loading by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { models = runCatching { SupabaseClient.client.from("vehicle_models").select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url")).decodeList<UnifiedModel>() }.getOrDefault(emptyList()); makes = runCatching { SupabaseClient.client.from("vehicle_makes").select(Columns.list("id", "name")).decodeList<UnifiedMake>() }.getOrDefault(emptyList()); images = runCatching { SupabaseClient.client.from("vehicle_images").select(Columns.list("model_id", "image_url", "is_primary")).decodeList<UnifiedImage>() }.getOrDefault(emptyList()); loading = false }
-    val imageByModel = images.filter { it.imageUrl.isNotBlank() }.groupBy { it.modelId }.mapValues { (_, list) -> list.firstOrNull { it.isPrimary }?.imageUrl ?: list.first().imageUrl }
-    val filtered = models.filter { m -> query.isBlank() || m.name.contains(query, true) || makes.any { it.id == m.makeId && it.name.contains(query, true) } }
-    LazyColumn(Modifier.fillMaxSize().padding(p), contentPadding = PaddingValues(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { item { SectionTitle(if (arabic) "كتالوج السيارات" else "Vehicle Catalog", if (arabic) "ماركة → موديل → جيل → محرك" else "Make → Model → Generation → Engine") }; item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, shape = CarDiagShapes.Medium, placeholder = { Text(if (arabic) "ابحث عن سيارة أو ماركة" else "Search make or model") }, leadingIcon = { Icon(Icons.Default.Search, null) }) }; if (loading) item { Box(Modifier.fillMaxWidth().padding(CarDiagSpacing.xxl), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }; items(filtered.take(100), key = { it.id }) { m -> ModelCard(m, makes.firstOrNull { it.id == m.makeId }?.name ?: "Vehicle", imageByModel[m.id] ?: m.imageUrl) { onModel(m, imageByModel[m.id] ?: m.imageUrl) } } }
+@Composable
+private fun HomeScreen(padding: PaddingValues, onCars: () -> Unit) {
+    val context = LocalContext.current
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item {
+            Text("CarDiag", style = MaterialTheme.typography.headlineLarge)
+            Text("SMART VEHICLE DIAGNOSTICS", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+        }
+        item { ActionCard("Vehicle Catalog", "Make → Model → Year → Engine", Icons.Default.DirectionsCar, onCars) }
+        item { ActionCard("OBD-II Scanner", "ECU, DTC, VIN and Live Data", Icons.Default.Build) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
+        item { ActionCard("AI Diagnosis", "Analyse symptoms with AI", Icons.Default.Warning) { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) } }
+    }
 }
 
-@Composable private fun ModelCard(model: UnifiedModel, make: String, imageUrl: String?, onClick: () -> Unit) { Card(onClick = onClick, Modifier.fillMaxWidth(), shape = CarDiagShapes.Card) { Row(Modifier.padding(CarDiagSpacing.md), verticalAlignment = Alignment.CenterVertically) { if (!imageUrl.isNullOrBlank()) AsyncImage(imageUrl, model.name, Modifier.size(92.dp).background(MaterialTheme.colorScheme.surfaceVariant, CarDiagShapes.Medium), contentScale = ContentScale.Crop) else Surface(Modifier.size(92.dp), shape = CarDiagShapes.Medium, color = CarDiagColors.DarkSurfaceElevated) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.DirectionsCar, null, tint = CarDiagColors.Accent) } }; Spacer(Modifier.width(CarDiagSpacing.md)); Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.xs)) { Text(make, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary); Text(model.name, style = MaterialTheme.typography.titleMedium); Text(listOfNotNull(model.generation, model.yearFrom?.toString(), model.yearTo?.toString()).joinToString(" • "), color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+@Composable
+private fun CarsScreen(padding: PaddingValues, onSelect: (Model) -> Unit) {
+    var models by remember { mutableStateOf<List<Model>>(emptyList()) }
+    var makes by remember { mutableStateOf<List<Make>>(emptyList()) }
+    var query by remember { mutableStateOf("") }
 
-@Composable private fun VehicleScreen(model: UnifiedModel, imageUrl: String?, arabic: Boolean, onBack: () -> Unit) { val c = LocalContext.current; LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = CarDiagSpacing.xxl), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { item { Box(Modifier.fillMaxWidth().height(250.dp).background(CarDiagColors.DarkSurface)) { if (!imageUrl.isNullOrBlank()) AsyncImage(imageUrl, model.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Icon(Icons.Default.DirectionsCar, null, Modifier.size(72.dp), tint = CarDiagColors.Accent) }; Surface(Modifier.padding(CarDiagSpacing.lg), shape = CarDiagShapes.Medium, color = CarDiagColors.DarkSurfaceElevated) { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, if (arabic) "رجوع" else "Back") } } } }; item { Column(Modifier.padding(horizontal = CarDiagSpacing.xl), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.xs)) { Text(model.name, style = MaterialTheme.typography.headlineMedium); Text(listOfNotNull(model.generation, model.yearFrom?.toString(), model.yearTo?.toString()).joinToString(" • "), color = MaterialTheme.colorScheme.onSurfaceVariant) } }; item { SectionTitle(if (arabic) "تشخيص السيارة" else "Vehicle Diagnostics") }; item { Row(Modifier.fillMaxWidth().padding(horizontal = CarDiagSpacing.lg), horizontalArrangement = Arrangement.spacedBy(CarDiagSpacing.sm)) { PrimaryAction("OBD-II", Icons.Default.BluetoothConnected, Modifier.weight(1f)) { c.startActivity(Intent(c, ObdScannerActivity::class.java)) }; SecondaryAction("AI", Icons.Default.AutoAwesome, Modifier.weight(1f)) { c.startActivity(Intent(c, AiSymptomDiagnosisActivity::class.java)) } } }; item { ActionCard("Live Data", if (arabic) "بيانات الحساسات مباشرة" else "Live sensor data", Icons.Default.Speed) { c.startActivity(Intent(c, LiveDataProActivity::class.java)) } }; item { ActionCard("DTC & Faults", if (arabic) "الأكواد والأعطال" else "Codes and faults", Icons.Default.Warning) { c.startActivity(Intent(c, GuidedDiagnosisActivity::class.java)) } }; item { SectionTitle(if (arabic) "معلومات السيارة" else "Vehicle Information") }; item { Row(Modifier.padding(horizontal = CarDiagSpacing.lg), horizontalArrangement = Arrangement.spacedBy(CarDiagSpacing.sm)) { InfoCard(if (arabic) "الجيل" else "Generation", model.generation ?: "—", Modifier.weight(1f)); InfoCard(if (arabic) "من" else "From", model.yearFrom?.toString() ?: "—", Modifier.weight(1f)); InfoCard(if (arabic) "إلى" else "To", model.yearTo?.toString() ?: "—", Modifier.weight(1f)) } } } }
+    LaunchedEffect(Unit) {
+        models = runCatching {
+            SupabaseClient.client.from("vehicle_models")
+                .select(Columns.list("id", "make_id", "name", "year_from", "year_to"))
+                .decodeList<Model>()
+        }.getOrDefault(emptyList())
+        makes = runCatching {
+            SupabaseClient.client.from("vehicle_makes")
+                .select(Columns.list("id", "name"))
+                .decodeList<Make>()
+        }.getOrDefault(emptyList())
+    }
 
-@Composable private fun DiagnosticScreen(p: PaddingValues, arabic: Boolean) { val c = LocalContext.current; LazyColumn(Modifier.fillMaxSize().padding(p), contentPadding = PaddingValues(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { item { SectionTitle(if (arabic) "مركز التشخيص" else "Diagnostic Center", "OBD-II • Live Data • DTC • VIN • AI") }; item { ActionCard("OBD-II Scanner", if (arabic) "فحص ECU والاتصال بالسيارة" else "Connect and scan ECUs", Icons.Default.BluetoothConnected) { c.startActivity(Intent(c, ObdScannerActivity::class.java)) } }; item { ActionCard("Live Data", if (arabic) "قراءة الحساسات في الوقت الحقيقي" else "Read sensors in real time", Icons.Default.Speed) { c.startActivity(Intent(c, LiveDataProActivity::class.java)) } }; item { ActionCard("DTC & Faults", if (arabic) "رموز الأعطال وتحليلها" else "Fault codes and analysis", Icons.Default.Warning) { c.startActivity(Intent(c, GuidedDiagnosisActivity::class.java)) } }; item { ActionCard("VIN Identity", if (arabic) "تحديد هوية السيارة" else "Identify the vehicle", Icons.Default.DirectionsCar) { c.startActivity(Intent(c, ObdScannerActivity::class.java)) } }; item { Surface(shape = CarDiagShapes.Card, color = MaterialTheme.colorScheme.surface) { Column(Modifier.padding(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { Text("AI Diagnosis", style = MaterialTheme.typography.titleLarge); Text(if (arabic) "حلل الأعراض بدون OBD" else "Analyze symptoms without an OBD device", color = MaterialTheme.colorScheme.onSurfaceVariant); SecondaryAction(if (arabic) "ابدأ تشخيص AI" else "Start AI Diagnosis", Icons.Default.AutoAwesome, Modifier.fillMaxWidth()) { c.startActivity(Intent(c, AiSymptomDiagnosisActivity::class.java)) } } } } } }
+    val filtered = models.filter { model ->
+        val make = makes.firstOrNull { it.id == model.makeId }?.name.orEmpty()
+        query.isBlank() || model.name.contains(query, true) || make.contains(query, true)
+    }
 
-@Composable private fun GarageScreen(p: PaddingValues, arabic: Boolean, onAdd: () -> Unit) { LazyColumn(Modifier.fillMaxSize().padding(p), contentPadding = PaddingValues(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.md)) { item { SectionTitle(if (arabic) "المرآب" else "Garage", if (arabic) "سياراتك وملفاتها" else "Your vehicles and profiles") }; item { ActionCard(if (arabic) "إضافة سيارة" else "Add a vehicle", if (arabic) "اختر السيارة من الكتالوج" else "Choose a vehicle from the catalog", Icons.Default.AddCircle, onAdd) }; item { ActionCard(if (arabic) "سجل التشخيص" else "Diagnostic History", if (arabic) "الجلسات والنتائج السابقة" else "Previous sessions and results", Icons.Default.History) {} } } }
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("Vehicle Catalog", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Search make or model") },
+                leadingIcon = { Icon(Icons.Default.Search, null) }
+            )
+        }
+        items(filtered.take(200), key = { it.id }) { model ->
+            val make = makes.firstOrNull { it.id == model.makeId }?.name ?: "Vehicle"
+            ActionCard(
+                title = "$make ${model.name}",
+                subtitle = listOfNotNull(model.yearFrom, model.yearTo).joinToString(" – "),
+                icon = Icons.Default.DirectionsCar,
+                onClick = { onSelect(model) }
+            )
+        }
+    }
+}
 
-@Composable private fun MenuScreen(p: PaddingValues, arabic: Boolean, dark: Boolean, toggleDark: () -> Unit, toggleLanguage: () -> Unit, onTab: (UnifiedTab) -> Unit) { val c = LocalContext.current; LazyColumn(Modifier.fillMaxSize().padding(p), contentPadding = PaddingValues(CarDiagSpacing.lg), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.sm)) { item { SectionTitle(if (arabic) "المزيد" else "Menu") }; item { ActionCard("AI Diagnosis", "", Icons.Default.AutoAwesome) { c.startActivity(Intent(c, AiSymptomDiagnosisActivity::class.java)) } }; item { ActionCard(if (arabic) "كتالوج السيارات" else "Vehicle Catalog", "", Icons.Default.DirectionsCar) { onTab(UnifiedTab.CARS) } }; item { ActionCard(if (arabic) "المرآب" else "Garage", "", Icons.Default.Garage) { onTab(UnifiedTab.GARAGE) } }; item { ActionCard(if (arabic) "الوضع الداكن" else "Dark Mode", if (dark) "ON" else "OFF", Icons.Default.DarkMode, toggleDark) }; item { ActionCard(if (arabic) "Français" else "العربية", "", Icons.Default.Language, toggleLanguage) }; item { ActionCard(if (arabic) "حول CarDiag" else "About CarDiag", "", Icons.Default.Info) {} } } }
+@Composable
+private fun VehicleDetails(model: Model, onBack: () -> Unit) {
+    val context = LocalContext.current
+    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item {
+            Row(Modifier.fillMaxWidth()) {
+                IconButton(onClick = onBack) { Text("‹") }
+                Column(Modifier.weight(1f)) {
+                    Text(model.name, style = MaterialTheme.typography.headlineMedium)
+                    Text("${model.yearFrom ?: "—"} – ${model.yearTo ?: "—"}")
+                }
+            }
+        }
+        item { ActionCard("OBD-II Scanner", "Scan ECU and read DTCs", Icons.Default.Build) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
+        item { ActionCard("Live Data", "Real-time sensor values", Icons.Default.Build) { context.startActivity(Intent(context, LiveDataProActivity::class.java)) } }
+        item { ActionCard("DTC & Faults", "Fault codes and guided diagnosis", Icons.Default.Warning) { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java)) } }
+        item { ActionCard("AI Diagnosis", "Analyse symptoms", Icons.Default.Warning) { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) } }
+    }
+}
 
-@Composable private fun ActionCard(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) { Card(onClick = onClick, Modifier.fillMaxWidth(), shape = CarDiagShapes.Card, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Row(Modifier.padding(CarDiagSpacing.lg), verticalAlignment = Alignment.CenterVertically) { Surface(shape = CarDiagShapes.Medium, color = CarDiagColors.PrimaryStrong) { Icon(icon, null, Modifier.padding(CarDiagSpacing.md), tint = CarDiagColors.AccentBright) }; Spacer(Modifier.width(CarDiagSpacing.md)); Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+@Composable
+private fun DiagnosticScreen(padding: PaddingValues) {
+    val context = LocalContext.current
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Diagnostic", style = MaterialTheme.typography.headlineMedium) }
+        item { ActionCard("OBD-II Scanner", "Connect to the vehicle", Icons.Default.Build) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
+        item { ActionCard("Live Data", "Read sensor values", Icons.Default.Build) { context.startActivity(Intent(context, LiveDataProActivity::class.java)) } }
+        item { ActionCard("DTC & Faults", "Read and analyse trouble codes", Icons.Default.Warning) { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java)) } }
+        item { ActionCard("VIN Identity", "Identify the vehicle", Icons.Default.DirectionsCar) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
+    }
+}
 
-@Composable private fun PrimaryAction(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) { Button(onClick, modifier, shape = CarDiagShapes.Medium, colors = ButtonDefaults.buttonColors(containerColor = CarDiagColors.PrimaryStrong, contentColor = MaterialTheme.colorScheme.onPrimary)) { Icon(icon, null); Spacer(Modifier.width(CarDiagSpacing.sm)); Text(label) } }
-@Composable private fun SecondaryAction(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) { FilledTonalButton(onClick, modifier, shape = CarDiagShapes.Medium, colors = ButtonDefaults.filledTonalButtonColors(containerColor = CarDiagColors.DarkSurfaceElevated, contentColor = CarDiagColors.AccentBright)) { Icon(icon, null); Spacer(Modifier.width(CarDiagSpacing.sm)); Text(label) } }
-@Composable private fun InfoCard(title: String, value: String, modifier: Modifier) { Card(modifier, shape = CarDiagShapes.Medium) { Column(Modifier.padding(CarDiagSpacing.md)) { Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.titleMedium) } } }
-@Composable private fun SectionTitle(title: String, subtitle: String? = null) { Column(Modifier.padding(vertical = CarDiagSpacing.sm), verticalArrangement = Arrangement.spacedBy(CarDiagSpacing.xs)) { Text(title, style = MaterialTheme.typography.titleLarge); if (!subtitle.isNullOrBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) } }
+@Composable
+private fun GarageScreen(padding: PaddingValues, onCars: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Garage", style = MaterialTheme.typography.headlineMedium) }
+        item { ActionCard("Add Vehicle", "Choose a vehicle from the catalog", Icons.Default.DirectionsCar, onCars) }
+        item { ActionCard("Diagnostic History", "Previous sessions and results", Icons.Default.Build) {} }
+    }
+}
+
+@Composable
+private fun MenuScreen(padding: PaddingValues) {
+    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Menu", style = MaterialTheme.typography.headlineMedium) }
+        item { Text("CarDiag • Algeria", style = MaterialTheme.typography.bodyLarge) }
+        item { Text("Arabic and French support is available in the app settings.") }
+    }
+}
+
+@Composable
+private fun ActionCard(title: String, subtitle: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Icon(icon, contentDescription = title, modifier = Modifier.size(28.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
