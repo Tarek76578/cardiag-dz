@@ -17,6 +17,7 @@ import kotlinx.serialization.json.put
 
 @Serializable
 data class DiagnosticSessionInsert(
+    @SerialName("user_id") val userId: String,
     @SerialName("vehicle_model_id") val vehicleModelId: String? = null,
     @SerialName("user_vehicle_id") val userVehicleId: String? = null,
     val complaint: String? = null,
@@ -31,10 +32,16 @@ class DiagnosticService {
     private val supabase = SupabaseClient.client
 
     suspend fun createSession(vehicleModelId: String?, userVehicleId: String?, complaint: String, language: String): DiagnosticSession {
-        supabase.auth.currentUserOrNull() ?: error("Authentication required")
+        val user = supabase.auth.currentUserOrNull() ?: error("Authentication required. Please continue as guest or sign in.")
         return withTimeout(10_000) {
             supabase.from("diagnostic_sessions").insert(
-                DiagnosticSessionInsert(vehicleModelId, userVehicleId, complaint.ifBlank { null }, language)
+                DiagnosticSessionInsert(
+                    userId = user.id,
+                    vehicleModelId = vehicleModelId,
+                    userVehicleId = userVehicleId,
+                    complaint = complaint.ifBlank { null },
+                    language = language
+                )
             ) { select(Columns.list("id", "user_id")) }.decodeSingle()
         }
     }
