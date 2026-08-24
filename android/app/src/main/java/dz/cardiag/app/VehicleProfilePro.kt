@@ -60,9 +60,10 @@ fun VehicleProfileProScreen(model:UiModel,onBack:()->Unit){
     var error by remember(model.id){mutableStateOf<String?>(null)}
     var selectedDtc by remember{mutableStateOf<ProfileDtc?>(null)}
 
-    fun load(){
+    fun loadProfile(){
         scope.launch {
-            loading=true; error=null
+            loading=true
+            error=null
             runCatching {
                 val gens=SupabaseClient.client.from("vehicle_generations").select(Columns.list("id","model_id","name","code","year_from","year_to","body_type","platform_code","image_url")).decodeList<UiGeneration>().filter{it.modelId==model.id}
                 val genIds=gens.map{it.id}.toSet()
@@ -71,47 +72,92 @@ fun VehicleProfileProScreen(model:UiModel,onBack:()->Unit){
                 val eLinks=SupabaseClient.client.from("vehicle_ecus").select(Columns.list("id","generation_id","engine_id","ecu_id","required","notes")).decodeList<ProfileEcuLink>().filter{it.generationId in genIds}
                 val ecuIds=eLinks.map{it.ecuId}.distinct()
                 val ecuRows=if(ecuIds.isEmpty()) emptyList() else SupabaseClient.client.from("ecu_modules").select(Columns.list("id","manufacturer","name","family","ecu_type","protocols","part_numbers","description_fr")).decodeList<ProfileEcu>().filter{it.id in ecuIds}
-                val dLinks=SupabaseClient.client.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability")).decodeList<ProfileDtcLink>().filter{it.modelId==model.id || it.modelId==null && it.generationId in genIds}
+                val dLinks=SupabaseClient.client.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability")).decodeList<ProfileDtcLink>().filter{it.modelId==model.id || (it.modelId==null && it.generationId in genIds)}
                 val codeIds=dLinks.map{it.codeId}.distinct()
                 val codes=if(codeIds.isEmpty()) emptyList() else SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id","code","system","title_fr","description_fr","severity","category","causes_fr","diagnostic_steps_fr","repair_summary_fr")).decodeList<ProfileDtc>().filter{it.id in codeIds}.sortedBy{it.code}
                 val sp=SupabaseClient.client.from("vehicle_specifications").select(Columns.list("id","generation_id","engine_id","key","value_text","value_number","unit")).decodeList<ProfileSpec>().filter{it.generationId in genIds}
-                generations=gens; images=imgs; engines=ens; ecuLinks=eLinks; ecus=ecuRows; dtcLinks=dLinks; dtcs=codes; specs=sp
-            }.onFailure{error=it.message?:"Impossible de charger le profil"}
+                generations=gens
+                images=imgs
+                engines=ens
+                ecuLinks=eLinks
+                ecus=ecuRows
+                dtcLinks=dLinks
+                dtcs=codes
+                specs=sp
+            }.onFailure { error=it.message ?: "Impossible de charger le profil" }
             loading=false
         }
     }
-    LaunchedEffect(model.id){load()}
 
-    fun openDiagnosis(dtc:ProfileDtc){context.startActivity(Intent(context,GuidedDiagnosisActivity::class.java).apply{putExtra("model_id",model.id);putExtra("model_name",model.name);putExtra("dtc_id",dtc.id);putExtra("dtc_code",dtc.code)})}
-    val hero=images.firstOrNull{it.primary}?.imageUrl?:images.firstOrNull()?.imageUrl?:model.imageUrl
-    Scaffold(topBar={TopAppBar(title={Text(model.name,fontWeight=FontWeight.Black)},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Retour")}},actions={IconButton(onClick={::load}){Icon(Icons.Default.Refresh,"Actualiser")}})}){padding->
-        when{
-            loading->Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){CircularProgressIndicator()}
-            error!=null->Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text("Erreur de chargement",fontWeight=FontWeight.Black);Text(error!!,color=MaterialTheme.colorScheme.error);Button(onClick={load}){Text("Réessayer")}}
-            else->LazyColumn(Modifier.fillMaxSize().padding(padding),contentPadding=PaddingValues(bottom=32.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){
-                item{Box(Modifier.fillMaxWidth().height(280.dp).background(Brush.verticalGradient(listOf(Color(0xFF123039),Color(0xFF071014))))){AsyncImage(model=hero,contentDescription=model.name,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Crop);Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xEE071014)))));Column(Modifier.align(Alignment.BottomStart).padding(20.dp)){Text("VEHICLE PROFILE",color=ProfileTeal,fontWeight=FontWeight.Black);Text(model.name,color=Color.White,style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Black);Text("${generations.size} générations • ${engines.size} moteurs • ${ecus.size} ECU • ${dtcs.size} DTC",color=Color.White.copy(alpha=.8f))}}}
-                item{Row(Modifier.padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){Metric("${generations.size}","Générations",Modifier.weight(1f));Metric("${engines.size}","Moteurs",Modifier.weight(1f));Metric("${ecus.size}","ECU",Modifier.weight(1f));Metric("${dtcs.size}","DTC",Modifier.weight(1f))}}
-                item{Section("Galerie",Icons.Default.PhotoLibrary)}
-                item{if(images.isEmpty())Empty("Aucune image disponible") else LazyRow(contentPadding=PaddingValues(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)){items(images){AsyncImage(model=it.imageUrl,contentDescription=it.altFr?:model.name,modifier=Modifier.size(220.dp,140.dp).clip(RoundedCornerShape(18.dp)),contentScale=ContentScale.Crop)}}}
-                item{Section("Moteurs",Icons.Default.Settings)}
-                if(engines.isEmpty())item{Empty("Aucune motorisation cataloguée")} else items(engines){e->EngineCard(e)}
-                item{Section("ECU & électronique",Icons.Default.Memory)}
-                if(ecus.isEmpty())item{Empty("Aucun ECU associé")} else items(ecus.distinctBy{it.id}){e->EcuCard(e,ecuLinks.count{it.ecuId==e.id})}
-                item{Section("Codes défaut compatibles",Icons.Default.Warning)}
-                if(dtcs.isEmpty())item{Empty("Aucun DTC lié à ce véhicule")} else items(dtcs.take(60)){d->DtcCard(d,dtcLinks.count{it.codeId==d.id}){selectedDtc=d}}
-                item{Section("Spécifications techniques",Icons.Default.Tune)}
-                if(specs.isEmpty())item{Empty("Aucune spécification détaillée")} else items(specs){s->SpecCard(s)}
-                item{Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){Text("Diagnostic de ce véhicule",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black);Text("Utilisez le profil comme contexte pour les DTC et les mesures OBD.",color=MaterialTheme.colorScheme.onSurfaceVariant);Button(onClick={dtcs.firstOrNull()?.let(::openDiagnosis)},enabled=dtcs.isNotEmpty(),modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.Build,null);Spacer(Modifier.width(8.dp));Text("Lancer le diagnostic")}}}}
+    LaunchedEffect(model.id){ loadProfile() }
+
+    fun openDiagnosis(dtc:ProfileDtc){
+        context.startActivity(Intent(context,GuidedDiagnosisActivity::class.java).apply{
+            putExtra("model_id",model.id)
+            putExtra("model_name",model.name)
+            putExtra("dtc_id",dtc.id)
+            putExtra("dtc_code",dtc.code)
+        })
+    }
+
+    val hero=images.firstOrNull{it.primary}?.imageUrl ?: images.firstOrNull()?.imageUrl ?: model.imageUrl
+
+    Scaffold(
+        topBar={TopAppBar(title={Text(model.name,fontWeight=FontWeight.Black)},navigationIcon={IconButton(onClick=onBack){Icon(Icons.Default.ArrowBack,"Retour")}},actions={IconButton(onClick={loadProfile()}){Icon(Icons.Default.Refresh,"Actualiser")}})}
+    ){padding->
+        when {
+            loading -> Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center){CircularProgressIndicator()}
+            error!=null -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text("Erreur de chargement",fontWeight=FontWeight.Black);Text(error!!,color=MaterialTheme.colorScheme.error);Button(onClick={loadProfile()}){Text("Réessayer")}}
+            else -> LazyColumn(Modifier.fillMaxSize().padding(padding),contentPadding=PaddingValues(bottom=32.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){
+                item{
+                    Box(Modifier.fillMaxWidth().height(280.dp).background(Brush.verticalGradient(listOf(Color(0xFF123039),Color(0xFF071014))))){
+                        AsyncImage(model=hero,contentDescription=model.name,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Crop)
+                        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent,Color(0xEE071014)))))
+                        Column(Modifier.align(Alignment.BottomStart).padding(20.dp)){
+                            Text("VEHICLE PROFILE",color=ProfileTeal,fontWeight=FontWeight.Black)
+                            Text(model.name,color=Color.White,style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Black)
+                            Text("${generations.size} générations • ${engines.size} moteurs • ${ecus.size} ECU • ${dtcs.size} DTC",color=Color.White.copy(alpha=.8f))
+                        }
+                    }
+                }
+                item{Row(Modifier.padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){ProfileMetric("${generations.size}","Générations",Modifier.weight(1f));ProfileMetric("${engines.size}","Moteurs",Modifier.weight(1f));ProfileMetric("${ecus.size}","ECU",Modifier.weight(1f));ProfileMetric("${dtcs.size}","DTC",Modifier.weight(1f))}}
+                item{ProfileSection("Galerie",Icons.Default.PhotoLibrary)}
+                item{if(images.isEmpty())ProfileEmpty("Aucune image disponible") else LazyRow(contentPadding=PaddingValues(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)){items(images){img->AsyncImage(model=img.imageUrl,contentDescription=img.altFr?:model.name,modifier=Modifier.size(220.dp,140.dp).clip(RoundedCornerShape(18.dp)),contentScale=ContentScale.Crop)}}}
+                item{ProfileSection("Moteurs",Icons.Default.Settings)}
+                if(engines.isEmpty())item{ProfileEmpty("Aucune motorisation cataloguée")} else items(engines){engine->ProfileEngineCard(engine)}
+                item{ProfileSection("ECU & électronique",Icons.Default.Memory)}
+                if(ecus.isEmpty())item{ProfileEmpty("Aucun ECU associé")} else items(ecus.distinctBy{it.id}){ecu->ProfileEcuCard(ecu,ecuLinks.count{link->link.ecuId==ecu.id})}
+                item{ProfileSection("Codes défaut compatibles",Icons.Default.Warning)}
+                if(dtcs.isEmpty())item{ProfileEmpty("Aucun DTC lié à ce véhicule")} else items(dtcs.take(60)){dtc->ProfileDtcCard(dtc,dtcLinks.count{link->link.codeId==dtc.id}){selectedDtc=dtc}}
+                item{ProfileSection("Spécifications techniques",Icons.Default.Tune)}
+                if(specs.isEmpty())item{ProfileEmpty("Aucune spécification détaillée")} else items(specs){spec->ProfileSpecCard(spec)}
+                item{Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.primaryContainer)){Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){Text("Diagnostic de ce véhicule",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black);Text("Utilisez le profil comme contexte pour les DTC et les mesures OBD.",color=MaterialTheme.colorScheme.onSurfaceVariant);Button(onClick={dtcs.firstOrNull()?.let{openDiagnosis(it)}},enabled=dtcs.isNotEmpty(),modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.Build,null);Spacer(Modifier.width(8.dp));Text("Lancer le diagnostic")}}}}
             }
         }
     }
-    selectedDtc?.let{d->AlertDialog(onDismissRequest={selectedDtc=null},title={Text(d.code,fontWeight=FontWeight.Black)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text(d.titleFr?:d.descriptionFr?:"Code défaut");d.system?.let{Text("Système: $it")};d.severity?.let{Text("Sévérité: $it")};d.causesFr?.let{Text("Causes: $it")};d.stepsFr?.let{Text("Diagnostic: $it")};d.repairFr?.let{Text("Réparation: $it")}},confirmButton={Button(onClick={selectedDtc=null;openDiagnosis(d)}){Text("Diagnostic guidé")}},dismissButton={TextButton(onClick={selectedDtc=null}){Text("Fermer")}})}
+
+    selectedDtc?.let { dtc ->
+        AlertDialog(
+            onDismissRequest={selectedDtc=null},
+            title={Text(dtc.code,fontWeight=FontWeight.Black)},
+            text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Text(dtc.titleFr ?: dtc.descriptionFr ?: "Code défaut")
+                dtc.system?.let{Text("Système: $it")}
+                dtc.severity?.let{Text("Sévérité: $it")}
+                dtc.causesFr?.let{Text("Causes: $it")}
+                dtc.stepsFr?.let{Text("Diagnostic: $it")}
+                dtc.repairFr?.let{Text("Réparation: $it")}
+            }},
+            confirmButton={Button(onClick={selectedDtc=null;openDiagnosis(dtc)}){Text("Diagnostic guidé")}},
+            dismissButton={TextButton(onClick={selectedDtc=null}){Text("Fermer")}}
+        )
+    }
 }
 
-@Composable private fun Metric(value:String,label:String,modifier:Modifier)=Card(modifier,shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(10.dp).fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally){Text(value,color=ProfileTeal,fontWeight=FontWeight.Black);Text(label,style=MaterialTheme.typography.labelSmall)}}
-@Composable private fun Section(title:String,icon:androidx.compose.ui.graphics.vector.ImageVector)=Row(Modifier.padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=ProfileTeal);Spacer(Modifier.width(8.dp));Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)}
-@Composable private fun Empty(text:String)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth()){Text(text,Modifier.padding(18.dp),color=MaterialTheme.colorScheme.onSurfaceVariant)}
-@Composable private fun EngineCard(e:UiEngine)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(e.name,fontWeight=FontWeight.Black,style=MaterialTheme.typography.titleMedium);Text(listOfNotNull(e.engineCode,e.fuelType,e.displacementCc?.let{"$it cc"}).joinToString(" • "),color=MaterialTheme.colorScheme.onSurfaceVariant);Text(listOfNotNull(e.powerHp?.let{"%.0f hp".format(it)},e.powerKw?.let{"%.0f kW".format(it)},e.torqueNm?.let{"%.0f Nm".format(it)}).joinToString(" • "),color=ProfileTeal)}}
-@Composable private fun EcuCard(e:ProfileEcu,count:Int)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(20.dp)){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Memory,null,tint=ProfileTeal);Column(Modifier.padding(start=12.dp).weight(1f)){Text(e.name,fontWeight=FontWeight.Black);Text(listOfNotNull(e.manufacturer,e.family,e.ecuType).joinToString(" • "),color=MaterialTheme.colorScheme.onSurfaceVariant)}Text("$count",color=ProfileTeal,fontWeight=FontWeight.Bold)}}
-@Composable private fun DtcCard(d:ProfileDtc,count:Int,onClick:()->Unit)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth().clickable(onClick=onClick),shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text(d.code,color=ProfileTeal,fontWeight=FontWeight.Black,style=MaterialTheme.typography.titleLarge);Spacer(Modifier.width(10.dp));Text(d.severity?:"info",style=MaterialTheme.typography.labelSmall);Spacer(Modifier.weight(1f));Text("$count")};Text(d.titleFr?:d.descriptionFr?:"Code défaut",fontWeight=FontWeight.SemiBold);Text(d.system?:"Système",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)}}
-@Composable private fun SpecCard(s:ProfileSpec)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth()){Row(Modifier.padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(s.key,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));Text(s.valueText?:s.valueNumber?.toString()?:"—");s.unit?.let{Text(" $it")}}}
+@Composable private fun ProfileMetric(value:String,label:String,modifier:Modifier)=Card(modifier,shape=RoundedCornerShape(16.dp)){Column(Modifier.padding(10.dp).fillMaxWidth(),horizontalAlignment=Alignment.CenterHorizontally){Text(value,color=ProfileTeal,fontWeight=FontWeight.Black);Text(label,style=MaterialTheme.typography.labelSmall)}}
+@Composable private fun ProfileSection(title:String,icon:androidx.compose.ui.graphics.vector.ImageVector)=Row(Modifier.padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=ProfileTeal);Spacer(Modifier.width(8.dp));Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)}
+@Composable private fun ProfileEmpty(text:String)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth()){Text(text,Modifier.padding(18.dp),color=MaterialTheme.colorScheme.onSurfaceVariant)}
+@Composable private fun ProfileEngineCard(e:UiEngine)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(e.name,fontWeight=FontWeight.Black,style=MaterialTheme.typography.titleMedium);Text(listOfNotNull(e.engineCode,e.fuelType,e.displacementCc?.let{"$it cc"}).joinToString(" • "),color=MaterialTheme.colorScheme.onSurfaceVariant);Text(listOfNotNull(e.powerHp?.let{"%.0f hp".format(it)},e.powerKw?.let{"%.0f kW".format(it)},e.torqueNm?.let{"%.0f Nm".format(it)}).joinToString(" • "),color=ProfileTeal)}}
+@Composable private fun ProfileEcuCard(e:ProfileEcu,count:Int)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth(),shape=RoundedCornerShape(20.dp)){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Memory,null,tint=ProfileTeal);Column(Modifier.padding(start=12.dp).weight(1f)){Text(e.name,fontWeight=FontWeight.Black);Text(listOfNotNull(e.manufacturer,e.family,e.ecuType).joinToString(" • "),color=MaterialTheme.colorScheme.onSurfaceVariant)}Text("$count",color=ProfileTeal,fontWeight=FontWeight.Bold)}}
+@Composable private fun ProfileDtcCard(d:ProfileDtc,count:Int,onClick:()->Unit)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth().clickable(onClick=onClick),shape=RoundedCornerShape(20.dp)){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(6.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text(d.code,color=ProfileTeal,fontWeight=FontWeight.Black,style=MaterialTheme.typography.titleLarge);Spacer(Modifier.width(10.dp));Text(d.severity?:"info",style=MaterialTheme.typography.labelSmall);Spacer(Modifier.weight(1f));Text("$count")};Text(d.titleFr?:d.descriptionFr?:"Code défaut",fontWeight=FontWeight.SemiBold);Text(d.system?:"Système",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)}}
+@Composable private fun ProfileSpecCard(s:ProfileSpec)=Card(Modifier.padding(horizontal=16.dp).fillMaxWidth()){Row(Modifier.padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween){Text(s.key,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));Text(s.valueText?:s.valueNumber?.toString()?:"—");s.unit?.let{Text(" $it")}}}
