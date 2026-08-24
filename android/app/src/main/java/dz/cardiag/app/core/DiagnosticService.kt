@@ -45,12 +45,12 @@ class DiagnosticService {
 
     private suspend fun ensureUserId(): String {
         supabase.auth.currentUserOrNull()?.let { return it.id }
-        supabase.auth.signInAnonymously()
-        return supabase.auth.currentUserOrNull()?.id
-            ?: error("Unable to create a guest session")
+        runCatching { supabase.auth.signInAnonymously() }
+        return supabase.auth.currentUserOrNull()?.id ?: error("Unable to create a guest session")
     }
 
     suspend fun createSession(vehicleModelId: String?, userVehicleId: String?, complaint: String, language: String): DiagnosticSession {
+        require(language == "ar" || language == "fr") { "language must be ar or fr" }
         val userId = ensureUserId()
         return withTimeout(10_000) {
             supabase.from("diagnostic_sessions").insert(
@@ -73,8 +73,8 @@ class DiagnosticService {
         language: String = "fr"
     ): JsonObject {
         require(language == "ar" || language == "fr") { "language must be ar or fr" }
-        val normalizedCodes = codes.map { it.trim().uppercase() }.filter { it.isNotBlank() }.distinct()
-        require(normalizedCodes.isNotEmpty()) { "At least one DTC is required" }
+        val normalizedCodes = codes.map { it.trim().uppercase() }.filter { it.matches(Regex("[PBCU][0-3][0-9A-F]{3}")) }.distinct()
+        require(normalizedCodes.isNotEmpty()) { "At least one valid DTC is required" }
         val payload = buildJsonObject {
             put("session_id", sessionId)
             put("codes", JsonArray(normalizedCodes.map { JsonPrimitive(it) }))
@@ -86,22 +86,19 @@ class DiagnosticService {
         var last: Throwable? = null
         repeat(3) { attempt ->
             try {
-                return withTimeout(30_000) {
-                    val response = supabase.functions.invoke(function = "diagnose_ai", body = payload)
+                return withTimeout(45_000) {
+                    val response = supabase.functions.invoke(function = "diagnose", body = payload)
                     val body = response.body<JsonObject>()
-                    if (body["error"] != null || body["ok"]?.toString() == "false") {
-                        throw IllegalStateException("Diagnostic AI error: $body")
-                    }
+                    if (body["error"] != null || body["ok"]?.toString() == "false") throw IllegalStateException(body["error"]?.toString() ?: "Diagnostic service error")
                     body
                 }
             } catch (e: Throwable) {
                 last = e
-                Log.e("CarDiag-Diagnostic", "diagnose_ai attempt ${attempt + 1} failed: ${e.message}", e)
-                if (attempt < 2) delay(700L * (attempt + 1))
+                Log.e("CarDiag-Diagnostic", "diagnose attempt ${attempt + 1} failed: ${e.message}", e)
+                if (attempt < 2) delay(800L * (attempt + 1))
             }
         }
-        val detail = last?.message?.takeIf { it.isNotBlank() }
-        throw IllegalStateException(if (detail != null) "Diagnostic AI unavailable: $detail" else "Diagnostic AI unavailable", last)
+        throw IllegalStateException("Diagnostic AI unavailable: ${last?.message ?: "unknown error"}", last)
     }
 
     suspend fun runDiagnostic(
