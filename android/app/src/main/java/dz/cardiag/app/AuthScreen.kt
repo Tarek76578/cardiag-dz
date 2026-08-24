@@ -21,7 +21,11 @@ import dz.cardiag.app.core.AuthService
 import kotlinx.coroutines.launch
 
 @Composable
-fun AuthScreen(onAuthenticated: () -> Unit, arabic: Boolean = false) {
+fun AuthScreen(
+    onAuthenticated: () -> Unit,
+    onContinueAsGuest: () -> Unit,
+    arabic: Boolean = false
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var signUpMode by remember { mutableStateOf(false) }
@@ -37,7 +41,7 @@ fun AuthScreen(onAuthenticated: () -> Unit, arabic: Boolean = false) {
     ) {
         Text("CarDiag DZ", style = MaterialTheme.typography.headlineLarge)
         Text(title, style = MaterialTheme.typography.headlineMedium)
-        Text(if (arabic) "حسابك يحفظ سياراتك وسجل التشخيص بأمان." else "Votre compte protège vos véhicules et votre historique de diagnostic.")
+        Text(if (arabic) "الحساب اختياري. استخدمه لحفظ سياراتك وسجل التشخيص." else "Le compte est facultatif. Il permet de sauvegarder vos véhicules et votre historique.")
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -75,6 +79,9 @@ fun AuthScreen(onAuthenticated: () -> Unit, arabic: Boolean = false) {
         }
         TextButton(onClick = { signUpMode = !signUpMode; message = "" }, enabled = !loading) {
             Text(if (signUpMode) if (arabic) "لدي حساب بالفعل" else "J'ai déjà un compte" else if (arabic) "إنشاء حساب جديد" else "Créer un compte")
+        }
+        TextButton(onClick = onContinueAsGuest, enabled = !loading) {
+            Text(if (arabic) "متابعة كضيف" else "Continuer en invité")
         }
         if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error)
     }
