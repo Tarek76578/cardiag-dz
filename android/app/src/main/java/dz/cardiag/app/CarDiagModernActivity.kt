@@ -149,7 +149,7 @@ private fun CarDiagModernApp() {
                 }
             ) { padding ->
                 when (tab) {
-                    0 -> MainHome(padding, { selected = it }, { tab = 1 })
+                    0 -> MainHome(padding, { selected = it }, { openGuided(context, selected) })
                     1 -> MainDiagnostic(padding, context)
                     2 -> MainGarage(padding) { selected = it }
                     3 -> MainHistory(padding, context)
