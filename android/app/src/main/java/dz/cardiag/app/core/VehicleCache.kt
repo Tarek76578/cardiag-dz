@@ -7,7 +7,7 @@ import kotlinx.serialization.json.Json
 
 object VehicleCache {
     private const val PREFS = "cardiag_cache"
-    private const val KEY_MODELS = "vehicle_models"
+    private const val KEY_MODELS = "vehicle_models_v2"
     private val json = Json { ignoreUnknownKeys = true }
 
     fun read(context: Context): List<VehicleModel> = runCatching {
