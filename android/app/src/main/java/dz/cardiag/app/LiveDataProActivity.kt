@@ -16,6 +16,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dz.cardiag.app.core.CorrelationFinding
+import dz.cardiag.app.core.CorrelationObservation
+import dz.cardiag.app.core.DiagnosticCorrelation
 import dz.cardiag.app.core.DiagnosticMeasurementInsert
 import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.ObdService
@@ -48,13 +51,16 @@ class LiveDataProActivity : ComponentActivity() {
     private val obd = ObdService()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { LiveDataProScreen(obd) }
+        val initialDtc = intent.getStringExtra("dtc_code")
+        val modelId = intent.getStringExtra("model_id")
+        val modelName = intent.getStringExtra("model_name") ?: "Véhicule"
+        setContent { LiveDataProScreen(obd, initialDtc, modelId, modelName) }
     }
     override fun onDestroy() { obd.disconnect(); super.onDestroy() }
 }
 
 @Composable
-private fun LiveDataProScreen(obd: ObdService) {
+private fun LiveDataProScreen(obd: ObdService, initialDtc: String?, modelId: String?, modelName: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
@@ -64,6 +70,7 @@ private fun LiveDataProScreen(obd: ObdService) {
     var values by remember { mutableStateOf<Map<String, LiveValue>>(emptyMap()) }
     var busy by remember { mutableStateOf(false) }
     var sessionId by remember { mutableStateOf<String?>(null) }
+    var findings by remember { mutableStateOf<List<CorrelationFinding>>(emptyList()) }
 
     fun refreshDevices() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
@@ -90,7 +97,7 @@ private fun LiveDataProScreen(obd: ObdService) {
                 connected = true
                 status = it
                 loadPidCatalog()
-                runCatching { sessionId = DiagnosticService().createSession(null, null, "OBD Live Data Pro", "fr").id }
+                runCatching { sessionId = DiagnosticService().createSession(modelId, null, "OBD Live Data Pro — $modelName", "fr").id }
                     .onFailure { status = "OBD connecté; session Supabase non créée: ${it.message}" }
             }.onFailure { status = it.message ?: "Échec de connexion" }
             busy = false
@@ -119,7 +126,7 @@ private fun LiveDataProScreen(obd: ObdService) {
 
     fun persistSnapshot() {
         scope.launch {
-            val id = sessionId ?: runCatching { DiagnosticService().createSession(null, null, "OBD Live Data Pro", "fr").id }.getOrNull()
+            val id = sessionId ?: runCatching { DiagnosticService().createSession(modelId, null, "OBD Live Data Pro — $modelName", "fr").id }.getOrNull()
             if (id == null) { status = "Impossible de créer la session Supabase"; return@launch }
             busy = true
             runCatching {
@@ -129,6 +136,43 @@ private fun LiveDataProScreen(obd: ObdService) {
                 DiagnosticService().saveMeasurements(id, rows)
             }.onSuccess { status = "${values.values.count { it.value != null }} mesures enregistrées • session ${id.take(8)}…" }
                 .onFailure { status = "Échec sauvegarde mesures: ${it.message}" }
+            busy = false
+        }
+    }
+
+    fun runCorrelation() {
+        scope.launch {
+            busy = true
+            val code = initialDtc?.trim()?.uppercase()
+            if (code.isNullOrBlank()) {
+                status = "Aucun DTC fourni pour la corrélation"
+                busy = false
+                return@launch
+            }
+            val observations = values.values.filter { it.value != null }.map {
+                CorrelationObservation(it.pid.pid, it.value!!, it.pid.unit, it.pid.min_value, it.pid.max_value)
+            }
+            findings = DiagnosticCorrelation.correlate(code, observations)
+            val id = sessionId ?: runCatching { DiagnosticService().createSession(modelId, null, "DTC $code — $modelName", "fr").id }.getOrNull()
+            if (id != null) {
+                sessionId = id
+                runCatching {
+                    val measurements = values.values.filter { it.value != null }.map { v ->
+                        DiagnosticMeasurementInsert(id, v.pid.id, v.pid.name, v.value, v.raw, v.pid.unit, "obd")
+                    }
+                    DiagnosticService().saveMeasurements(id, measurements)
+                    DiagnosticService().diagnose(
+                        id,
+                        codes = listOf(code),
+                        measurements = kotlinx.serialization.json.buildJsonObject {
+                            values.values.filter { it.value != null }.forEach { v -> put(v.pid.pid, v.value!!) }
+                        },
+                        vehicle = kotlinx.serialization.json.buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName) },
+                        language = "fr"
+                    )
+                }.onSuccess { status = "Corrélation $code terminée • session ${id.take(8)}…" }
+                    .onFailure { status = "Corrélation locale terminée; service diagnostic indisponible: ${it.message}" }
+            } else status = "Corrélation locale terminée; session Supabase indisponible"
             busy = false
         }
     }
@@ -149,6 +193,7 @@ private fun LiveDataProScreen(obd: ObdService) {
                         Text("OBD-II Telemetry", style = MaterialTheme.typography.headlineSmall)
                         Text("PID catalogue + valeurs ECU + plage normale", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(status, style = MaterialTheme.typography.labelLarge)
+                        if (!initialDtc.isNullOrBlank()) Text("DTC ciblé: ${initialDtc.uppercase()}", color = MaterialTheme.colorScheme.primary)
                         sessionId?.let { Text("Session: ${it.take(8)}…", color = MaterialTheme.colorScheme.primary) }
                     }
                 }
@@ -169,6 +214,17 @@ private fun LiveDataProScreen(obd: ObdService) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = ::readAll, enabled = !busy && pids.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Actualiser") }
                         OutlinedButton(onClick = ::persistSnapshot, enabled = !busy && values.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Sauvegarder") }
+                    }
+                }
+                if (!initialDtc.isNullOrBlank()) item {
+                    Button(onClick = ::runCorrelation, enabled = !busy && values.values.any { it.value != null }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Analyser ${initialDtc.uppercase()} avec Live Data")
+                    }
+                }
+                if (findings.isNotEmpty()) item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Corrélation diagnostic", style = MaterialTheme.typography.titleLarge)
+                        findings.forEach { FindingCard(it) }
                     }
                 }
                 items(pids.take(20)) { pid -> PidCard(values[pid.id] ?: LiveValue(pid, null, null)) }
@@ -221,6 +277,21 @@ private fun PidCard(value: LiveValue) {
             }
             Text(if (outOfRange) "⚠ Valeur hors plage normale" else "Normal: ${p.min_value ?: "—"} → ${p.max_value ?: "—"} ${p.unit ?: ""}", color = if (outOfRange) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
             value.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+}
+
+@Composable
+private fun FindingCard(finding: CorrelationFinding) {
+    val color = if (finding.severity == "medium" || finding.severity == "high") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(finding.title, style = MaterialTheme.typography.titleMedium)
+                Text("${finding.confidence}%", color = color)
+            }
+            Text(finding.reason)
+            Text("PID: ${finding.supportingPids.joinToString()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
