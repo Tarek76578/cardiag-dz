@@ -38,8 +38,11 @@ jobs:
           mkdir -p .vehicle-data
           curl -fL --retry 5 --retry-delay 2 -o .vehicle-data/engines.csv https://raw.githubusercontent.com/gor3a/vehicle-makes-models/main/data/csv/engines.csv
           test -s .vehicle-data/engines.csv
+          echo "Source rows:"
           wc -l .vehicle-data/engines.csv
-      - name: Import every generation, year and engine into Supabase
+          echo "CSV header:"
+          head -n 1 .vehicle-data/engines.csv
+      - name: Import complete catalog into Supabase
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -52,11 +55,23 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python tools/vehicle_catalog/validate_catalog.py --scope "${{ inputs.scope || 'all' }}" --dry-run "true"
+      - name: Fail if catalog is empty
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          base=os.environ['SUPABASE_URL'].rstrip('/')
+          key=os.environ['SUPABASE_SERVICE_ROLE_KEY']
+          req=urllib.request.Request(base+'/rest/v1/vehicle_makes?select=id&limit=1',headers={'apikey':key,'Authorization':'Bearer '+key})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
+          if not data: raise SystemExit('Catalog validation failed: vehicle_makes is empty')
+          print('Catalog contains vehicle makes')
+          PY
       - name: Sync Wikimedia Commons vehicle images
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python tools/vehicle_catalog/sync_wikimedia_images.py
-
-# Full catalog import is intentionally triggered by this workflow-file change.
