@@ -62,17 +62,43 @@ fun AuthScreen(
         Button(
             onClick = {
                 scope.launch {
-                    loading = true; message = ""
+                    loading = true
+                    message = ""
                     try {
-                        if (signUpMode) auth.signUp(email, password) else auth.signIn(email, password)
-                        if (auth.currentUser == null) {
-                            message = if (arabic) "تم إنشاء الحساب. تحقق من بريدك ثم سجل الدخول." else "Compte créé. Vérifiez votre email puis connectez-vous."
-                        } else onAuthenticated()
-                    } catch (e: Exception) { message = e.message ?: if (arabic) "فشل تسجيل الدخول" else "Échec de connexion" }
-                    finally { loading = false }
+                        val cleanEmail = email.trim().lowercase()
+                        if (signUpMode) {
+                            auth.signUp(cleanEmail, password)
+                            if (auth.currentUser == null) {
+                                message = if (arabic) {
+                                    "تم إنشاء الحساب. إذا كان تأكيد البريد مفعّلًا في Supabase، افتح رسالة التأكيد ثم ارجع وسجّل الدخول."
+                                } else {
+                                    "Compte créé. Si la confirmation email est activée dans Supabase, confirmez votre adresse puis reconnectez-vous."
+                                }
+                            } else onAuthenticated()
+                        } else {
+                            auth.signIn(cleanEmail, password)
+                            if (auth.currentUser == null) {
+                                message = if (arabic) "تم الدخول لكن لم يتم إنشاء جلسة. حاول مرة أخرى." else "Connexion effectuée mais aucune session n'a été créée. Réessayez."
+                            } else onAuthenticated()
+                        }
+                    } catch (e: Exception) {
+                        val raw = e.message.orEmpty()
+                        message = when {
+                            raw.contains("email", ignoreCase = true) && raw.contains("confirm", ignoreCase = true) ->
+                                if (arabic) "البريد الإلكتروني غير مؤكد. افتح رسالة Supabase وأكد البريد ثم سجّل الدخول." else "Email non confirmé. Ouvrez le message Supabase, confirmez l'adresse puis reconnectez-vous."
+                            raw.contains("invalid login credentials", ignoreCase = true) ->
+                                if (arabic) "البريد أو كلمة المرور غير صحيحة." else "Email ou mot de passe incorrect."
+                            raw.contains("already registered", ignoreCase = true) || raw.contains("user already", ignoreCase = true) ->
+                                if (arabic) "هذا البريد مسجل بالفعل. استخدم تسجيل الدخول." else "Cet email est déjà enregistré. Utilisez Connexion."
+                            else -> raw.ifBlank { if (arabic) "فشل المصادقة." else "Échec de l'authentification." }
+                        }
+                    } finally {
+                        loading = false
+                    }
                 }
             },
-            modifier = Modifier.fillMaxWidth(), enabled = !loading
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
         ) {
             if (loading) CircularProgressIndicator(strokeWidth = 2.dp)
             else Text(title)
