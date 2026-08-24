@@ -30,34 +30,398 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-@Serializable data class UiModel(val id:String,val name:String,val imageUrl:String?=null)
-@Serializable data class ExactVehicle(val id:String,@SerialName("make_id") val makeId:String,val name:String,@SerialName("year_from") val yearFrom:Int?=null,@SerialName("year_to") val yearTo:Int?=null,val generation:String?=null,@SerialName("image_url") val imageUrl:String?=null)
-@Serializable data class ExactMake(val id:String,val name:String)
+@Serializable
+data class UiModel(val id: String, val name: String, val imageUrl: String? = null)
 
-private val DarkBg=Color(0xFF06090B);private val DarkSurface=Color(0xFF0D1418);private val DarkTeal=Color(0xFF48D7C5);private val DarkText=Color(0xFFF5F8F8);private val DarkMuted=Color(0xFF8B9A9F)
-private val LightBg=Color(0xFFF4F7F7);private val LightSurface=Color.White;private val LightTeal=Color(0xFF087F73);private val LightText=Color(0xFF102024);private val LightMuted=Color(0xFF647277)
-private const val PREFS="cardiag_ui";private const val KEY_DARK="dark_mode";private const val KEY_LANG="language"
-private class UiPrefs(context:Context){private val p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);var dark:Boolean get()=p.getBoolean(KEY_DARK,true);set(v){p.edit().putBoolean(KEY_DARK,v).apply()};var lang:String get()=p.getString(KEY_LANG,"fr")?:"fr";set(v){p.edit().putString(KEY_LANG,v).apply()}}
-private data class Copy(val home:String,val diagnostic:String,val garage:String,val history:String,val more:String,val smart:String,val hero:String,val launch:String,val search:String,val catalog:String,val models:String,val makes:String,val scanner:String,val language:String,val appearance:String,val dark:String,val light:String,val account:String,val about:String,val back:String,val noHistory:String,val historyHint:String,val noVehicles:String)
-private val FR=Copy("Accueil","Diagnostic","Garage","Historique","Plus","SMART VEHICLE DIAGNOSTICS","Votre voiture.\nVos données. Votre diagnostic.","Lancer le diagnostic","Rechercher une marque ou un modèle","Catalogue véhicules","MODÈLES","MARQUES","OBD-II • SCANNER","Langue","Apparence","Mode sombre","Mode clair","Compte","À propos","Retour","Aucun diagnostic enregistré","Vos sessions de diagnostic apparaîtront ici.","Aucun véhicule trouvé")
-private val AR=Copy("الرئيسية","التشخيص","المرآب","السجل","المزيد","تشخيص السيارات الذكي","سيارتك.\nبياناتك. تشخيصك.","بدء التشخيص","ابحث عن الماركة أو الموديل","كتالوج السيارات","الموديلات","الماركات","ماسح OBD-II","اللغة","المظهر","الوضع الداكن","الوضع الفاتح","الحساب","حول التطبيق","رجوع","لا توجد تشخيصات محفوظة","ستظهر جلسات التشخيص هنا.","لم يتم العثور على سيارات")
+@Serializable
+data class ExactVehicle(
+    val id: String,
+    @SerialName("make_id") val makeId: String,
+    val name: String,
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
+    val generation: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null
+)
 
-@Composable fun CarDiagExactApp(){
- val context=LocalContext.current;val prefs=remember{UiPrefs(context)};var dark by remember{mutableStateOf(prefs.dark)};var lang by remember{mutableStateOf(prefs.lang)};var tab by remember{mutableIntStateOf(0)};var selected by remember{mutableStateOf<ExactVehicle?>(null)};var languageDialog by remember{mutableStateOf(false)}
- val c=if(lang=="ar")AR else FR;val dir=if(lang=="ar")LayoutDirection.Rtl else LayoutDirection.Ltr;val primary=if(dark)DarkTeal else LightTeal;val bg=if(dark)DarkBg else LightBg;val surface=if(dark)DarkSurface else LightSurface;val text=if(dark)DarkText else LightText;val muted=if(dark)DarkMuted else LightMuted
- MaterialTheme(colorScheme=if(dark)darkColorScheme(primary=primary,background=bg,surface=surface,onSurface=text,onSurfaceVariant=muted)else lightColorScheme(primary=primary,background=bg,surface=surface,onSurface=text,onSurfaceVariant=muted)){CompositionLocalProvider(LocalLayoutDirection provides dir){if(selected!=null){ExactVehicleProfileScreen(model=UiModel(selected!!.id,selected!!.name,selected!!.imageUrl),onBack={selected=null})}else{Scaffold(containerColor=bg,bottomBar={NavigationBar(containerColor=surface){val labels=listOf(c.home,c.diagnostic,c.garage,c.history,c.more);val icons=listOf(Icons.Default.Home,Icons.Default.Build,Icons.Default.Garage,Icons.Default.History,Icons.Default.Settings);labels.forEachIndexed{index,label->NavigationBarItem(selected=tab==index,onClick={tab=index},icon={Icon(imageVector=icons[index],contentDescription=label)},label={Text(label)})}}}){padding->when(tab){0->HomeScreen(padding,c,dark,primary,bg,surface,text,muted){selected=it};1->ActionScreen(padding,c,primary,surface,muted);2->HomeScreen(padding,c,dark,primary,bg,surface,text,muted){selected=it};3->HistoryScreen(padding,c,primary,surface,muted);else->MoreScreen(padding,c,dark,primary,surface,muted,{languageDialog=true}){dark=!dark;prefs.dark=dark}}}}};if(languageDialog)AlertDialog(onDismissRequest={languageDialog=false},title={Text(c.language,fontWeight=FontWeight.Black)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Choice("Français",lang=="fr"){lang="fr";prefs.lang="fr";languageDialog=false};Choice("العربية",lang=="ar"){lang="ar";prefs.lang="ar";languageDialog=false}}},confirmButton={TextButton(onClick={languageDialog=false}){Text(c.back)}})}}}
+@Serializable
+data class ExactMake(val id: String, val name: String)
 
-@Composable private fun Choice(label:String,selected:Boolean,onClick:()->Unit){Surface(Modifier.fillMaxWidth().clickable(onClick=onClick),shape=RoundedCornerShape(16.dp),color=if(selected)MaterialTheme.colorScheme.primary.copy(alpha=.14f)else MaterialTheme.colorScheme.surface){Row(Modifier.padding(15.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f),fontWeight=FontWeight.Bold);if(selected)Text("✓",color=MaterialTheme.colorScheme.primary,fontWeight=FontWeight.Black)}}}
-@Composable private fun Header(title:String,eyebrow:String,primary:Color,muted:Color){Row(Modifier.fillMaxWidth().padding(20.dp),verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(primary.copy(alpha=.14f)),Alignment.Center){Icon(imageVector=Icons.Default.DirectionsCar,contentDescription=null,tint=primary)};Spacer(Modifier.width(12.dp));Column{Text(title,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black);Text(eyebrow,color=muted,style=MaterialTheme.typography.labelSmall,fontWeight=FontWeight.Bold)}}}
+@Serializable
+data class SessionRow(val id: String)
 
-@Composable private fun HomeScreen(padding:PaddingValues,c:Copy,dark:Boolean,primary:Color,bg:Color,surface:Color,text:Color,muted:Color,onVehicle:(ExactVehicle)->Unit){val scope=rememberCoroutineScope();var vehicles by remember{mutableStateOf<List<ExactVehicle>>(emptyList())};var makes by remember{mutableStateOf<List<ExactMake>>(emptyList())};var query by remember{mutableStateOf("")};var loading by remember{mutableStateOf(true)};fun load(){scope.launch{loading=true;vehicles=runCatching{SupabaseClient.client.from("vehicle_models").select(Columns.list("id","make_id","name","year_from","year_to","generation","image_url")).decodeList<ExactVehicle>()}.getOrDefault(emptyList());makes=runCatching{SupabaseClient.client.from("vehicle_makes").select(Columns.list("id","name")).decodeList<ExactMake>()}.getOrDefault(emptyList());loading=false}};LaunchedEffect(Unit){load()};val filtered=vehicles.filter{v->query.isBlank()||v.name.contains(query,true)||makes.firstOrNull{it.id==v.makeId}?.name?.contains(query,true)==true};LazyColumn(Modifier.fillMaxSize().padding(padding),contentPadding=PaddingValues(bottom=30.dp),verticalArrangement=Arrangement.spacedBy(18.dp)){item{Header("CarDiag",c.smart,primary,muted)};item{Box(Modifier.fillMaxWidth().height(320.dp).padding(horizontal=16.dp).clip(RoundedCornerShape(32.dp)).background(Brush.linearGradient(listOf(if(dark)Color(0xFF18383D)else Color(0xFFE0F5F1),surface,bg)))){Column(Modifier.fillMaxSize().padding(24.dp),verticalArrangement=Arrangement.Bottom){Text(c.smart,color=primary,fontWeight=FontWeight.Black);Spacer(Modifier.height(8.dp));Text(c.hero,style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black,color=text);Spacer(Modifier.height(18.dp));Button(onClick={filtered.firstOrNull()?.let(onVehicle)},enabled=filtered.isNotEmpty(),shape=RoundedCornerShape(17.dp)){Icon(imageVector=Icons.Default.Build,contentDescription=null);Spacer(Modifier.width(8.dp));Text(c.launch,fontWeight=FontWeight.Black)}}}};item{Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){OutlinedTextField(value=query,onValueChange={query=it},modifier=Modifier.weight(1f),singleLine=true,shape=RoundedCornerShape(19.dp),leadingIcon={Icon(imageVector=Icons.Default.Search,contentDescription=null,tint=primary)},placeholder={Text(c.search)});IconButton(onClick=::load){Icon(imageVector=Icons.Default.Refresh,contentDescription=c.search,tint=primary)}}};item{Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp)){Stat(vehicles.size.toString(),c.models,Modifier.weight(1f),primary,surface,muted);Stat(makes.size.toString(),c.makes,Modifier.weight(1f),primary,surface,muted);Stat("OBD-II",c.scanner,Modifier.weight(1f),primary,surface,muted)}};item{Text(c.catalog,Modifier.padding(horizontal=20.dp),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)};if(loading)item{Box(Modifier.fillMaxWidth().height(120.dp),Alignment.Center){CircularProgressIndicator(color=primary)}}else if(filtered.isEmpty())item{Text(c.noVehicles,Modifier.padding(24.dp),color=muted)}else items(filtered.take(30),key={it.id}){v->VehicleCard(v,makes.firstOrNull{it.id==v.makeId}?.name?:"Vehicle",primary,surface,muted,onVehicle)}}}
-@Composable private fun Stat(value:String,label:String,modifier:Modifier,primary:Color,surface:Color,muted:Color){Card(modifier,RoundedCornerShape(20.dp),colors=CardDefaults.cardColors(containerColor=surface)){Column(Modifier.fillMaxWidth().padding(14.dp),horizontalAlignment=Alignment.CenterHorizontally){Text(value,color=primary,fontWeight=FontWeight.Black);Text(label,color=muted,style=MaterialTheme.typography.labelSmall,fontWeight=FontWeight.Bold)}}}
-@Composable private fun VehicleCard(v:ExactVehicle,make:String,primary:Color,surface:Color,muted:Color,onClick:(ExactVehicle)->Unit){Card(Modifier.fillMaxWidth().padding(horizontal=16.dp).clickable{onClick(v)},RoundedCornerShape(27.dp),colors=CardDefaults.cardColors(containerColor=surface)){Column{Box(Modifier.fillMaxWidth().height(205.dp)){AsyncImage(model=v.imageUrl,contentDescription=v.name,modifier=Modifier.fillMaxSize(),contentScale=ContentScale.Crop);Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent,Color.Black.copy(alpha=.9f)))));Column(Modifier.align(Alignment.BottomStart).padding(18.dp)){Text(make.uppercase(),color=primary,fontWeight=FontWeight.Black);Text(v.name,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black,color=Color.White);Text(listOfNotNull(v.generation,v.yearFrom?.toString(),v.yearTo?.toString()).joinToString(" • "),color=Color.White.copy(alpha=.8f))}};Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically){Text("Vehicle profile",fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));Text("→",color=primary,fontWeight=FontWeight.Black)}}}}
+private val DarkBg = Color(0xFF06090B)
+private val DarkSurface = Color(0xFF0D1418)
+private val DarkTeal = Color(0xFF48D7C5)
+private val DarkText = Color(0xFFF5F8F8)
+private val DarkMuted = Color(0xFF8B9A9F)
+private val LightBg = Color(0xFFF4F7F7)
+private val LightSurface = Color.White
+private val LightTeal = Color(0xFF087F73)
+private val LightText = Color(0xFF102024)
+private val LightMuted = Color(0xFF647277)
 
-@Composable private fun ActionScreen(padding:PaddingValues,c:Copy,primary:Color,surface:Color,muted:Color){var action by remember{mutableStateOf<String?>(null)};Column(Modifier.fillMaxSize().padding(padding).padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){Header(c.diagnostic,c.smart,primary,muted);ActionCard("OBD-II Scanner",Icons.Default.Build,primary,surface){action="OBD-II Scanner"};ActionCard("Live Data",Icons.Default.Speed,primary,surface){action="Live Data"};ActionCard("DTC & Faults",Icons.Default.Warning,primary,surface){action="DTC & Faults"};ActionCard("VIN Identity",Icons.Default.DirectionsCar,primary,surface){action="VIN Identity"}};if(action!=null)AlertDialog(onDismissRequest={action=null},title={Text(action!!,fontWeight=FontWeight.Black)},text={Text(if(action=="OBD-II Scanner")"Connect an OBD-II adapter to start a real session." else "This diagnostic module is ready for the selected vehicle.",color=muted)},confirmButton={Button(onClick={action=null}){Text("OK")}})}
-@Composable private fun ActionCard(title:String,icon:androidx.compose.ui.graphics.vector.ImageVector,primary:Color,surface:Color,onClick:()->Unit){Card(Modifier.fillMaxWidth().clickable(onClick=onClick),RoundedCornerShape(24.dp),colors=CardDefaults.cardColors(containerColor=surface)){Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically){Icon(imageVector=icon,contentDescription=title,tint=primary);Spacer(Modifier.width(16.dp));Text(title,fontWeight=FontWeight.Black,modifier=Modifier.weight(1f));Icon(imageVector=Icons.Default.ChevronRight,contentDescription=null,tint=primary)}}}
+private const val PREFS = "cardiag_ui"
+private const val KEY_DARK = "dark_mode"
+private const val KEY_LANG = "language"
 
-@Composable private fun HistoryScreen(padding:PaddingValues,c:Copy,primary:Color,surface:Color,muted:Color){val scope=rememberCoroutineScope();var count by remember{mutableIntStateOf(0)};LaunchedEffect(Unit){scope.launch{count=runCatching{SupabaseClient.client.from("diagnostic_sessions").select(Columns.list("id")).decodeList<UiModel>().size}.getOrDefault(0)}};Column(Modifier.fillMaxSize().padding(padding).padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){Header(c.history,c.diagnostic,primary,muted);Card(Modifier.fillMaxWidth(),RoundedCornerShape(24.dp),colors=CardDefaults.cardColors(containerColor=surface)){Column(Modifier.padding(24.dp)){Text(count.toString(),style=MaterialTheme.typography.headlineLarge,fontWeight=FontWeight.Black,color=primary);Text(if(count==0)c.noHistory else "Diagnostic sessions",fontWeight=FontWeight.Bold);Text(c.historyHint,color=muted)}}}}
+private class UiPrefs(context: Context) {
+    private val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    var dark: Boolean
+        get() = p.getBoolean(KEY_DARK, true)
+        set(value) { p.edit().putBoolean(KEY_DARK, value).apply() }
+    var lang: String
+        get() = p.getString(KEY_LANG, "fr") ?: "fr"
+        set(value) { p.edit().putString(KEY_LANG, value).apply() }
+}
 
-@Composable private fun MoreScreen(padding:PaddingValues,c:Copy,dark:Boolean,primary:Color,surface:Color,muted:Color,onLanguage:()->Unit,onTheme:()->Unit){Column(Modifier.fillMaxSize().padding(padding).padding(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){Header(c.more,c.smart,primary,muted);SettingRow(c.language,Icons.Default.Language,surface,primary,onLanguage);SettingRow(if(dark)c.dark else c.light,if(dark)Icons.Default.DarkMode else Icons.Default.LightMode,surface,primary,onTheme);SettingRow(c.account,Icons.Default.Settings,surface,primary){};SettingRow(c.about,Icons.Default.Info,surface,primary){}}}
-@Composable private fun SettingRow(title:String,icon:androidx.compose.ui.graphics.vector.ImageVector,surface:Color,primary:Color,onClick:()->Unit){Card(Modifier.fillMaxWidth().clickable(onClick=onClick),RoundedCornerShape(22.dp),colors=CardDefaults.cardColors(containerColor=surface)){Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically){Icon(imageVector=icon,contentDescription=title,tint=primary);Spacer(Modifier.width(16.dp));Text(title,fontWeight=FontWeight.Bold,modifier=Modifier.weight(1f));Icon(imageVector=Icons.Default.ChevronRight,contentDescription=null,tint=primary)}}}
+private data class Copy(
+    val home: String, val diagnostic: String, val garage: String, val history: String, val more: String,
+    val smart: String, val hero: String, val launch: String, val search: String, val catalog: String,
+    val models: String, val makes: String, val scanner: String, val language: String, val appearance: String,
+    val dark: String, val light: String, val account: String, val about: String, val back: String,
+    val noHistory: String, val historyHint: String, val noVehicles: String
+)
+
+private val FR = Copy(
+    "Accueil", "Diagnostic", "Garage", "Historique", "Plus", "SMART VEHICLE DIAGNOSTICS",
+    "Votre voiture.\nVos données. Votre diagnostic.", "Lancer le diagnostic", "Rechercher une marque ou un modèle",
+    "Catalogue véhicules", "MODÈLES", "MARQUES", "OBD-II • SCANNER", "Langue", "Apparence",
+    "Mode sombre", "Mode clair", "Compte", "À propos", "Retour", "Aucun diagnostic enregistré",
+    "Vos sessions de diagnostic apparaîtront ici.", "Aucun véhicule trouvé"
+)
+
+private val AR = Copy(
+    "الرئيسية", "التشخيص", "المرآب", "السجل", "المزيد", "تشخيص السيارات الذكي",
+    "سيارتك.\nبياناتك. تشخيصك.", "بدء التشخيص", "ابحث عن الماركة أو الموديل", "كتالوج السيارات",
+    "الموديلات", "الماركات", "ماسح OBD-II", "اللغة", "المظهر", "الوضع الداكن", "الوضع الفاتح",
+    "الحساب", "حول التطبيق", "رجوع", "لا توجد تشخيصات محفوظة", "ستظهر جلسات التشخيص هنا.",
+    "لم يتم العثور على سيارات"
+)
+
+@Composable
+fun CarDiagExactApp() {
+    val context = LocalContext.current
+    val prefs = remember { UiPrefs(context) }
+    var dark by remember { mutableStateOf(prefs.dark) }
+    var lang by remember { mutableStateOf(prefs.lang) }
+    var tab by remember { mutableIntStateOf(0) }
+    var selected by remember { mutableStateOf<ExactVehicle?>(null) }
+    var languageDialog by remember { mutableStateOf(false) }
+
+    val c = if (lang == "ar") AR else FR
+    val direction = if (lang == "ar") LayoutDirection.Rtl else LayoutDirection.Ltr
+    val primary = if (dark) DarkTeal else LightTeal
+    val bg = if (dark) DarkBg else LightBg
+    val surface = if (dark) DarkSurface else LightSurface
+    val text = if (dark) DarkText else LightText
+    val muted = if (dark) DarkMuted else LightMuted
+
+    val colors = if (dark) {
+        darkColorScheme(primary = primary, background = bg, surface = surface, onSurface = text, onSurfaceVariant = muted)
+    } else {
+        lightColorScheme(primary = primary, background = bg, surface = surface, onSurface = text, onSurfaceVariant = muted)
+    }
+
+    MaterialTheme(colorScheme = colors) {
+        CompositionLocalProvider(LocalLayoutDirection provides direction) {
+            if (selected != null) {
+                ExactVehicleProfileScreen(
+                    model = UiModel(selected!!.id, selected!!.name, selected!!.imageUrl),
+                    onBack = { selected = null }
+                )
+            } else {
+                Scaffold(
+                    containerColor = bg,
+                    bottomBar = {
+                        NavigationBar(containerColor = surface) {
+                            val labels = listOf(c.home, c.diagnostic, c.garage, c.history, c.more)
+                            val icons = listOf(Icons.Default.Home, Icons.Default.Build, Icons.Default.Garage, Icons.Default.History, Icons.Default.Settings)
+                            labels.forEachIndexed { index, label ->
+                                NavigationBarItem(
+                                    selected = tab == index,
+                                    onClick = { tab = index },
+                                    icon = { Icon(imageVector = icons[index], contentDescription = label) },
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                    }
+                ) { padding ->
+                    when (tab) {
+                        0 -> HomeScreen(padding, c, dark, primary, bg, surface, text, muted) { selected = it }
+                        1 -> ActionScreen(padding, c, primary, surface, muted)
+                        2 -> HomeScreen(padding, c, dark, primary, bg, surface, text, muted) { selected = it }
+                        3 -> HistoryScreen(padding, c, primary, surface, muted)
+                        else -> MoreScreen(
+                            padding, c, dark, primary, surface, muted,
+                            onLanguage = { languageDialog = true },
+                            onTheme = { dark = !dark; prefs.dark = dark }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (languageDialog) {
+            AlertDialog(
+                onDismissRequest = { languageDialog = false },
+                title = { Text(c.language, fontWeight = FontWeight.Black) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Choice("Français", lang == "fr") {
+                            lang = "fr"
+                            prefs.lang = "fr"
+                            languageDialog = false
+                        }
+                        Choice("العربية", lang == "ar") {
+                            lang = "ar"
+                            prefs.lang = "ar"
+                            languageDialog = false
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { languageDialog = false }) { Text(c.back) } }
+            )
+        }
+    }
+}
+
+@Composable
+private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface
+    ) {
+        Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+            if (selected) Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun Header(title: String, eyebrow: String, primary: Color, muted: Color) {
+    Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) { Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = primary) }
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Text(eyebrow, color = muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    padding: PaddingValues, c: Copy, dark: Boolean, primary: Color, bg: Color,
+    surface: Color, text: Color, muted: Color, onVehicle: (ExactVehicle) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var vehicles by remember { mutableStateOf<List<ExactVehicle>>(emptyList()) }
+    var makes by remember { mutableStateOf<List<ExactMake>>(emptyList()) }
+    var query by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(true) }
+
+    fun load() {
+        scope.launch {
+            loading = true
+            vehicles = runCatching {
+                SupabaseClient.client.from("vehicle_models")
+                    .select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url"))
+                    .decodeList<ExactVehicle>()
+            }.getOrDefault(emptyList())
+            makes = runCatching {
+                SupabaseClient.client.from("vehicle_makes")
+                    .select(Columns.list("id", "name"))
+                    .decodeList<ExactMake>()
+            }.getOrDefault(emptyList())
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+    val filtered = vehicles.filter { vehicle ->
+        query.isBlank() || vehicle.name.contains(query, true) ||
+            makes.firstOrNull { it.id == vehicle.makeId }?.name?.contains(query, true) == true
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(bottom = 30.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        item { Header("CarDiag", c.smart, primary, muted) }
+        item {
+            Box(
+                Modifier.fillMaxWidth().height(320.dp).padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(Brush.linearGradient(listOf(if (dark) Color(0xFF18383D) else Color(0xFFE0F5F1), surface, bg)))
+            ) {
+                Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Bottom) {
+                    Text(c.smart, color = primary, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(8.dp))
+                    Text(c.hero, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = text)
+                    Spacer(Modifier.height(18.dp))
+                    Button(
+                        onClick = { filtered.firstOrNull()?.let(onVehicle) },
+                        enabled = filtered.isNotEmpty(),
+                        shape = RoundedCornerShape(17.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Build, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(c.launch, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, modifier = Modifier.weight(1f),
+                    singleLine = true, shape = RoundedCornerShape(19.dp),
+                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = primary) },
+                    placeholder = { Text(c.search) }
+                )
+                IconButton(onClick = { load() }) {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = c.search, tint = primary)
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Stat(vehicles.size.toString(), c.models, Modifier.weight(1f), primary, surface, muted)
+                Stat(makes.size.toString(), c.makes, Modifier.weight(1f), primary, surface, muted)
+                Stat("OBD-II", c.scanner, Modifier.weight(1f), primary, surface, muted)
+            }
+        }
+        item { Text(c.catalog, Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+        if (loading) {
+            item { Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = primary) } }
+        } else if (filtered.isEmpty()) {
+            item { Text(c.noVehicles, Modifier.padding(24.dp), color = muted) }
+        } else {
+            items(filtered.take(30), key = { it.id }) { vehicle ->
+                VehicleCard(vehicle, makes.firstOrNull { it.id == vehicle.makeId }?.name ?: "Vehicle", primary, surface, muted, onVehicle)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Stat(value: String, label: String, modifier: Modifier, primary: Color, surface: Color, muted: Color) {
+    Card(modifier, RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = primary, fontWeight = FontWeight.Black)
+            Text(label, color = muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun VehicleCard(v: ExactVehicle, make: String, primary: Color, surface: Color, muted: Color, onClick: (ExactVehicle) -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable { onClick(v) },
+        RoundedCornerShape(27.dp), colors = CardDefaults.cardColors(containerColor = surface)
+    ) {
+        Column {
+            Box(Modifier.fillMaxWidth().height(205.dp)) {
+                AsyncImage(model = v.imageUrl, contentDescription = v.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)))))
+                Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
+                    Text(make.uppercase(), color = primary, fontWeight = FontWeight.Black)
+                    Text(v.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = Color.White)
+                    Text(listOfNotNull(v.generation, v.yearFrom?.toString(), v.yearTo?.toString()).joinToString(" • "), color = Color.White.copy(alpha = 0.8f))
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Vehicle profile", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("→", color = primary, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionScreen(padding: PaddingValues, c: Copy, primary: Color, surface: Color, muted: Color) {
+    var action by remember { mutableStateOf<String?>(null) }
+    Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Header(c.diagnostic, c.smart, primary, muted)
+        ActionCard("OBD-II Scanner", Icons.Default.Build, primary, surface) { action = "OBD-II Scanner" }
+        ActionCard("Live Data", Icons.Default.Speed, primary, surface) { action = "Live Data" }
+        ActionCard("DTC & Faults", Icons.Default.Warning, primary, surface) { action = "DTC & Faults" }
+        ActionCard("VIN Identity", Icons.Default.DirectionsCar, primary, surface) { action = "VIN Identity" }
+    }
+    if (action != null) {
+        AlertDialog(
+            onDismissRequest = { action = null },
+            title = { Text(action!!, fontWeight = FontWeight.Black) },
+            text = { Text(if (action == "OBD-II Scanner") "Connect an OBD-II adapter to start a real session." else "This diagnostic module is ready for the selected vehicle.", color = muted) },
+            confirmButton = { Button(onClick = { action = null }) { Text("OK") } }
+        )
+    }
+}
+
+@Composable
+private fun ActionCard(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, primary: Color, surface: Color, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = icon, contentDescription = title, tint = primary)
+            Spacer(Modifier.width(16.dp))
+            Text(title, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = primary)
+        }
+    }
+}
+
+@Composable
+private fun HistoryScreen(padding: PaddingValues, c: Copy, primary: Color, surface: Color, muted: Color) {
+    val scope = rememberCoroutineScope()
+    var count by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        scope.launch {
+            count = runCatching {
+                SupabaseClient.client.from("diagnostic_sessions")
+                    .select(Columns.list("id"))
+                    .decodeList<SessionRow>().size
+            }.getOrDefault(0)
+        }
+    }
+    Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Header(c.history, c.diagnostic, primary, muted)
+        Card(Modifier.fillMaxWidth(), RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+            Column(Modifier.padding(24.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = primary)
+                Text(if (count == 0) c.noHistory else "Diagnostic sessions", fontWeight = FontWeight.Bold)
+                Text(c.historyHint, color = muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoreScreen(padding: PaddingValues, c: Copy, dark: Boolean, primary: Color, surface: Color, muted: Color, onLanguage: () -> Unit, onTheme: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Header(c.more, c.smart, primary, muted)
+        SettingRow(c.language, Icons.Default.Language, surface, primary, onLanguage)
+        SettingRow(if (dark) c.dark else c.light, if (dark) Icons.Default.DarkMode else Icons.Default.LightMode, surface, primary, onTheme)
+        SettingRow(c.account, Icons.Default.Settings, surface, primary) { }
+        SettingRow(c.about, Icons.Default.Info, surface, primary) { }
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, surface: Color, primary: Color, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(imageVector = icon, contentDescription = title, tint = primary)
+            Spacer(Modifier.width(16.dp))
+            Text(title, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
+            Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = primary)
+        }
+    }
+}
