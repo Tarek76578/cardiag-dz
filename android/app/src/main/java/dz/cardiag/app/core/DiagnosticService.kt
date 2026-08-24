@@ -29,6 +29,17 @@ data class DiagnosticSessionInsert(
 @Serializable
 data class DiagnosticSession(val id: String, @SerialName("user_id") val userId: String? = null)
 
+@Serializable
+data class DiagnosticMeasurementInsert(
+    @SerialName("session_id") val sessionId: String,
+    @SerialName("pid_id") val pidId: String? = null,
+    val name: String? = null,
+    @SerialName("value_numeric") val valueNumeric: Double? = null,
+    @SerialName("value_text") val valueText: String? = null,
+    val unit: String? = null,
+    val source: String = "obd"
+)
+
 class DiagnosticService {
     private val supabase = SupabaseClient.client
 
@@ -43,14 +54,15 @@ class DiagnosticService {
         val userId = ensureUserId()
         return withTimeout(10_000) {
             supabase.from("diagnostic_sessions").insert(
-                DiagnosticSessionInsert(
-                    userId = userId,
-                    vehicleModelId = vehicleModelId,
-                    userVehicleId = userVehicleId,
-                    complaint = complaint.ifBlank { null },
-                    language = language
-                )
+                DiagnosticSessionInsert(userId, vehicleModelId, userVehicleId, complaint.ifBlank { null }, language)
             ) { select(Columns.list("id", "user_id")) }.decodeSingle()
+        }
+    }
+
+    suspend fun saveMeasurements(sessionId: String, measurements: List<DiagnosticMeasurementInsert>) {
+        if (measurements.isEmpty()) return
+        withTimeout(10_000) {
+            supabase.from("diagnostic_measurements").insert(measurements)
         }
     }
 
@@ -71,16 +83,13 @@ class DiagnosticService {
             put("vehicle", vehicle)
             put("language", language)
         }
-
         var last: Throwable? = null
         repeat(3) { attempt ->
             try {
                 return withTimeout(25_000) {
                     val response = supabase.functions.invoke(function = "diagnose", body = payload)
                     val body = response.body<JsonObject>()
-                    if (body["error"] != null) {
-                        throw IllegalStateException("Diagnostic function error: $body")
-                    }
+                    if (body["error"] != null) throw IllegalStateException("Diagnostic function error: $body")
                     body
                 }
             } catch (e: Throwable) {
@@ -89,13 +98,8 @@ class DiagnosticService {
                 if (attempt < 2) delay(500L * (attempt + 1))
             }
         }
-
         val detail = last?.message?.takeIf { it.isNotBlank() }
-        throw IllegalStateException(
-            if (detail != null) "Diagnostic service unavailable: $detail"
-            else "Diagnostic service unavailable",
-            last
-        )
+        throw IllegalStateException(if (detail != null) "Diagnostic service unavailable: $detail" else "Diagnostic service unavailable", last)
     }
 
     suspend fun runDiagnostic(
