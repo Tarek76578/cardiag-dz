@@ -1,4 +1,5 @@
 name: CarDiag DZ Android
+run-name: CarDiag DZ Android - ${{ github.run_number }}
 
 on:
   push:
