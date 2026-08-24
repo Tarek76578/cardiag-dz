@@ -39,9 +39,9 @@ jobs:
       - name: Verify canonical catalog through Supabase REST
         run: |
           python - <<'PY'
-          import json, urllib.request
-          base='https://knripjpkmvdmqtstkcmo.supabase.co'
-          key='${{ secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtucmlwanBrbXZkbXF0c3RrY21vIiwiaWF0IjoxNzg3NDMwNDMzLCJleHAiOjIxMDMwMDY0MzB9.1AKcbWMdzy0r2knTq0Ols8Oaw5zr2mTVaBjBqeAHWCY' }}'
+          import json, os, urllib.request
+          base=os.environ['SUPABASE_URL']
+          key=os.environ['SUPABASE_ANON_KEY']
           req=urllib.request.Request(base+'/rest/v1/vehicle_catalog_canonical?select=id&limit=1',headers={'apikey':key,'Authorization':'Bearer '+key})
           with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
           if not data: raise SystemExit('Canonical catalog is empty')
