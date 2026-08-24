@@ -30,7 +30,7 @@ jobs:
           cache: gradle
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
@@ -94,10 +94,10 @@ jobs:
 
       - name: Assemble release APK and AAB
         working-directory: android
-        run: ./gradlew --no-daemon assembleRelease bundleRelease --stacktrace
+        run: ./gradlew --no-daemon assembleRelease bundleRelease --stacktrace --warning-mode all
 
       - name: Upload debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cardiag-dz-debug
           path: android/app/build/outputs/apk/debug/*.apk
@@ -105,7 +105,7 @@ jobs:
           retention-days: 14
 
       - name: Upload release APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cardiag-dz-release-apk
           path: android/app/build/outputs/apk/release/*.apk
@@ -113,7 +113,7 @@ jobs:
           retention-days: 14
 
       - name: Upload release AAB
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cardiag-dz-release-aab
           path: android/app/build/outputs/bundle/release/*.aab
