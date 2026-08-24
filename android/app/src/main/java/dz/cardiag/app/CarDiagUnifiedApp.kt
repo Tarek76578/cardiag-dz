@@ -2,7 +2,6 @@ package dz.cardiag.app
 
 import android.content.Intent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,6 +29,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 private data class UnifiedMake(val id: String, val name: String)
+
 @Serializable
 private data class UnifiedModel(
     val id: String,
@@ -59,7 +59,7 @@ fun CarDiagUnifiedApp() {
                     bottomBar = { UnifiedBottomBar(tab, arabic) { tab = it } }
                 ) { padding ->
                     when (tab) {
-                        UnifiedTab.HOME -> UnifiedHome(padding, arabic) { selectedModel = it; tab = UnifiedTab.CARS }
+                        UnifiedTab.HOME -> UnifiedHome(padding, arabic) { tab = UnifiedTab.CARS }
                         UnifiedTab.CARS -> UnifiedCars(padding, arabic) { selectedModel = it }
                         UnifiedTab.DIAGNOSTIC -> UnifiedDiagnostic(padding, arabic)
                         UnifiedTab.GARAGE -> UnifiedGarage(padding, arabic) { tab = UnifiedTab.CARS }
@@ -77,13 +77,13 @@ private fun UnifiedBottomBar(tab: UnifiedTab, arabic: Boolean, onTab: (UnifiedTa
     val icons = listOf(Icons.Default.Home, Icons.Default.DirectionsCar, Icons.Default.Build, Icons.Default.Garage, Icons.Default.MoreHoriz)
     NavigationBar {
         UnifiedTab.values().forEachIndexed { index, item ->
-            NavigationBarItem(tab == item, { onTab(item) }, { Icon(icons[index], labels[index]) }, label = { Text(labels[index]) })
+            NavigationBarItem(selected = tab == item, onClick = { onTab(item) }, icon = { Icon(icons[index], labels[index]) }, label = { Text(labels[index]) })
         }
     }
 }
 
 @Composable
-private fun UnifiedHome(padding: PaddingValues, arabic: Boolean, onModel: (UnifiedModel) -> Unit) {
+private fun UnifiedHome(padding: PaddingValues, arabic: Boolean, onCars: () -> Unit) {
     val context = LocalContext.current
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -92,23 +92,17 @@ private fun UnifiedHome(padding: PaddingValues, arabic: Boolean, onModel: (Unifi
                     Text("CarDiag", style = MaterialTheme.typography.headlineLarge, color = Color.White)
                     Text(if (arabic) "تشخيص السيارات الذكي" else "SMART VEHICLE DIAGNOSTICS", style = MaterialTheme.typography.titleMedium, color = Color.White)
                     Text(if (arabic) "السيارة أولاً • التشخيص ثانياً • AI عندما تحتاجه" else "Vehicle first • diagnostics second • AI when you need it", color = Color.White.copy(alpha = .85f))
-                    Button({ context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = MaterialTheme.colorScheme.primary)) {
+                    Button(onClick = { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = MaterialTheme.colorScheme.primary)) {
                         Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(8.dp)); Text(if (arabic) "تشخيص AI" else "AI Diagnosis")
                     }
                 }
             }
         }
         item { SectionTitle(if (arabic) "ابدأ" else "Start") }
-        item { UnifiedAction(if (arabic) "اختيار سيارة" else "Choose a vehicle", if (arabic) "تصفح الماركات والموديلات والمحركات" else "Browse makes, models and engines", Icons.Default.DirectionsCar) { onModelOrCars(context, onModel) } }
+        item { UnifiedAction(if (arabic) "اختيار سيارة" else "Choose a vehicle", if (arabic) "تصفح الماركات والموديلات والمحركات" else "Browse makes, models and engines", Icons.Default.DirectionsCar, onCars) }
         item { UnifiedAction(if (arabic) "التشخيص" else "Diagnostic", if (arabic) "OBD-II • Live Data • DTC • VIN • AI" else "OBD-II • Live Data • DTC • VIN • AI", Icons.Default.Build) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
         item { UnifiedAction(if (arabic) "المرآب" else "Garage", if (arabic) "سياراتك وملفاتها" else "Your vehicles and profiles", Icons.Default.Garage) { } }
     }
-}
-
-private fun onModelOrCars(context: android.content.Context, onModel: (UnifiedModel) -> Unit) {
-    // Home action intentionally opens the automotive catalog through the main navigation.
-    // The callback is retained for a shared action signature.
-    onModel(UnifiedModel("", "", ""))
 }
 
 @Composable
@@ -125,7 +119,7 @@ private fun UnifiedCars(padding: PaddingValues, arabic: Boolean, onModel: (Unifi
     val filtered = models.filter { m -> query.isBlank() || m.name.contains(query, true) || makes.firstOrNull { it.id == m.makeId }?.name?.contains(query, true) == true }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { SectionTitle(if (arabic) "كتالوج السيارات" else "Vehicle Catalog", if (arabic) "ماركة → موديل → جيل → محرك" else "Make → Model → Generation → Engine") }
-        item { OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp), placeholder = { Text(if (arabic) "ابحث عن سيارة أو ماركة" else "Search make or model") }, leadingIcon = { Icon(Icons.Default.Search, null) }) }
+        item { OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(16.dp), placeholder = { Text(if (arabic) "ابحث عن سيارة أو ماركة" else "Search make or model") }, leadingIcon = { Icon(Icons.Default.Search, null) }) }
         if (loading) item { Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
         items(filtered.take(100), key = { it.id }) { model ->
             val make = makes.firstOrNull { it.id == model.makeId }?.name ?: "Vehicle"
@@ -157,14 +151,14 @@ private fun UnifiedVehicleScreen(model: UnifiedModel, arabic: Boolean, onBack: (
         item {
             Box(Modifier.fillMaxWidth().height(250.dp).background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primary.copy(.85f), MaterialTheme.colorScheme.background)))) {
                 AsyncImage(model.imageUrl, model.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                IconButton(onBack, Modifier.padding(16.dp)) { Icon(Icons.Default.ArrowBack, if (arabic) "رجوع" else "Back", tint = Color.White) }
+                IconButton(onClick = onBack, modifier = Modifier.padding(16.dp)) { Icon(Icons.Default.ArrowBack, if (arabic) "رجوع" else "Back", tint = Color.White) }
             }
         }
         item { Column(Modifier.padding(horizontal = 20.dp)) { Text(model.name, style = MaterialTheme.typography.headlineMedium); Text(listOfNotNull(model.generation, model.yearFrom?.toString(), model.yearTo?.toString()).joinToString(" • "), color = MaterialTheme.colorScheme.onSurfaceVariant) } }
         item { SectionTitle(if (arabic) "تشخيص السيارة" else "Vehicle Diagnostics") }
         item { Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button({ context.startActivity(Intent(context, ObdScannerActivity::class.java)) }, Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.BluetoothConnected, null); Spacer(Modifier.width(5.dp)); Text("OBD") }
-            FilledTonalButton({ context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(5.dp)); Text("AI") }
+            Button(onClick = { context.startActivity(Intent(context, ObdScannerActivity::class.java)) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.BluetoothConnected, null); Spacer(Modifier.width(5.dp)); Text("OBD") }
+            FilledTonalButton(onClick = { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(5.dp)); Text("AI") }
         } }
         item { UnifiedAction("Live Data", if (arabic) "بيانات الحساسات مباشرة" else "Live sensor data", Icons.Default.Speed) { context.startActivity(Intent(context, LiveDataProActivity::class.java)) } }
         item { UnifiedAction("DTC & Faults", if (arabic) "الأكواد والأعطال" else "Codes and faults", Icons.Default.Warning) { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java)) } }
@@ -185,7 +179,7 @@ private fun InfoGrid(model: UnifiedModel, arabic: Boolean) {
 }
 
 @Composable
-private fun InfoCard(title: String, value: String, modifier: Modifier = Modifier) { Card(modifier, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(14.dp)) { Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.titleMedium) } } }
+private fun InfoCard(title: String, value: String, modifier: Modifier = Modifier) { Card(modifier = modifier, shape = RoundedCornerShape(16.dp)) { Column(Modifier.padding(14.dp)) { Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(value, style = MaterialTheme.typography.titleMedium) } } }
 
 @Composable
 private fun UnifiedDiagnostic(padding: PaddingValues, arabic: Boolean) {
@@ -196,7 +190,7 @@ private fun UnifiedDiagnostic(padding: PaddingValues, arabic: Boolean) {
         item { UnifiedAction("Live Data", if (arabic) "قراءة الحساسات في الوقت الحقيقي" else "Read sensors in real time", Icons.Default.Speed) { context.startActivity(Intent(context, LiveDataProActivity::class.java)) } }
         item { UnifiedAction("DTC & Faults", if (arabic) "رموز الأعطال وتحليلها" else "Fault codes and analysis", Icons.Default.Warning) { context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java)) } }
         item { UnifiedAction("VIN Identity", if (arabic) "تحديد هوية السيارة" else "Identify the vehicle", Icons.Default.DirectionsCar) { context.startActivity(Intent(context, ObdScannerActivity::class.java)) } }
-        item { Card(shape = RoundedCornerShape(22.dp)) { Column(Modifier.padding(18.dp)) { Text("AI Diagnosis", style = MaterialTheme.typography.titleLarge); Text(if (arabic) "حلل الأعراض بدون OBD" else "Analyze symptoms without an OBD device", color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(12.dp)); FilledTonalButton({ context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(8.dp)); Text(if (arabic) "ابدأ تشخيص AI" else "Start AI Diagnosis") } } } }
+        item { Card(shape = RoundedCornerShape(22.dp)) { Column(Modifier.padding(18.dp)) { Text("AI Diagnosis", style = MaterialTheme.typography.titleLarge); Text(if (arabic) "حلل الأعراض بدون OBD" else "Analyze symptoms without an OBD device", color = MaterialTheme.colorScheme.onSurfaceVariant); Spacer(Modifier.height(12.dp)); FilledTonalButton(onClick = { context.startActivity(Intent(context, AiSymptomDiagnosisActivity::class.java)) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(8.dp)); Text(if (arabic) "ابدأ تشخيص AI" else "Start AI Diagnosis") } } } }
     }
 }
 
@@ -204,7 +198,7 @@ private fun UnifiedDiagnostic(padding: PaddingValues, arabic: Boolean) {
 private fun UnifiedGarage(padding: PaddingValues, arabic: Boolean, onAdd: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { SectionTitle(if (arabic) "المرآب" else "Garage", if (arabic) "سياراتك وملفاتها" else "Your vehicles and profiles") }
-        item { UnifiedAction(if (arabic) "إضافة سيارة" else "Add a vehicle", if (arabic) "اختر السيارة من الكتالوج" else "Choose a vehicle from the catalog", Icons.Default.AddCircle) { onAdd() } }
+        item { UnifiedAction(if (arabic) "إضافة سيارة" else "Add a vehicle", if (arabic) "اختر السيارة من الكتالوج" else "Choose a vehicle from the catalog", Icons.Default.AddCircle, onAdd) }
         item { UnifiedAction(if (arabic) "سجل التشخيص" else "Diagnostic History", if (arabic) "الجلسات والنتائج السابقة" else "Previous sessions and results", Icons.Default.History) { } }
         item { Text(if (arabic) "بعد إضافة سيارة، ستظهر هنا كسيارتك النشطة." else "After adding a vehicle, it will appear here as your active vehicle.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
@@ -225,7 +219,7 @@ private fun UnifiedMenu(padding: PaddingValues, arabic: Boolean, dark: Boolean, 
 }
 
 @Composable
-private fun SettingRow(title: String, checked: Boolean, onChange: () -> Unit) { Card(shape = RoundedCornerShape(18.dp)) { Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Switch(checked, { onChange() }) } } }
+private fun SettingRow(title: String, checked: Boolean, onChange: () -> Unit) { Card(shape = RoundedCornerShape(18.dp)) { Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium); Switch(checked = checked, onCheckedChange = { onChange() }) } } }
 
 @Composable
 private fun SectionTitle(title: String, subtitle: String? = null) { Column(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) { Text(title, style = MaterialTheme.typography.headlineSmall); if (subtitle != null) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
