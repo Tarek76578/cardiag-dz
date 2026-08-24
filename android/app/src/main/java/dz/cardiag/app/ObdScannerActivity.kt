@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.ObdService
 import kotlinx.coroutines.launch
 
@@ -22,13 +23,15 @@ class ObdScannerActivity : ComponentActivity() {
     private val obd = ObdService()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ObdScannerScreen(obd) }
+        setContent {
+            ObdScannerScreen(obd, intent.getStringExtra("model_id"), intent.getStringExtra("model_name"), intent.getStringExtra("dtc_code"))
+        }
     }
     override fun onDestroy() { obd.disconnect(); super.onDestroy() }
 }
 
 @Composable
-private fun ObdScannerScreen(obd: ObdService) {
+private fun ObdScannerScreen(obd: ObdService, modelId: String?, modelName: String?, targetDtc: String?) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
@@ -99,7 +102,7 @@ private fun ObdScannerScreen(obd: ObdService) {
                 if (devices.isEmpty()) item { Text("Aucun appareil appairé. Appairez d'abord votre ELM327 dans les réglages Bluetooth Android.") }
             } else {
                 item { Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("ECU connecté", style = MaterialTheme.typography.titleLarge); Text("Bluetooth Classic • ELM327 • OBD-II"); OutlinedButton(onClick = { obd.disconnect(); connected = false; status = "Déconnecté" }, modifier = Modifier.fillMaxWidth()) { Text("Déconnecter") } } } }
-                item { Button(onClick = { context.startActivity(Intent(context, LiveDataProActivity::class.java)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Ouvrir Live Data Pro →") } }
+                item { Button(onClick = { context.startActivity(Intent(context, LiveDataProActivity::class.java).apply { putExtra("model_id", modelId); putExtra("model_name", modelName ?: "Véhicule"); putExtra("dtc_code", targetDtc ?: dtcs.firstOrNull()) }) }, modifier = Modifier.fillMaxWidth(), enabled = !busy) { Text("Ouvrir Live Data Pro →") } }
                 item { Text("Données live rapides", style = MaterialTheme.typography.titleLarge) }
                 item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { LiveCard("RPM", rpm?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("°C", coolant?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)); LiveCard("km/h", speed?.let { "%.0f".format(it) } ?: "—", Modifier.weight(1f)) } }
                 item { Button(onClick = ::readLive, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Actualiser Live Data") } }
@@ -107,7 +110,7 @@ private fun ObdScannerScreen(obd: ObdService) {
                 if (dtcs.isNotEmpty()) item { Text("DTC: ${dtcs.joinToString(" • ")}", style = MaterialTheme.typography.titleMedium) }
                 if (dtcs.isEmpty()) item { Text("Aucun DTC lu dans cette session.") }
                 vinRaw?.let { item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("VIN / ECU response", style = MaterialTheme.typography.titleMedium); Text(it) } } } }
-                item { Button(onClick = { scope.launch { busy = true; status = "Création de la session…"; runCatching { dz.cardiag.app.core.DiagnosticService().createSession(null, null, "OBD live scan", "fr") }.onSuccess { status = "Session diagnostic ${it.id} créée dans Supabase" }.onFailure { status = it.message ?: "Impossible de créer la session" }; busy = false } }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Enregistrer la session") } }
+                item { Button(onClick = { scope.launch { busy = true; status = "Création de la session…"; runCatching { DiagnosticService().createSession(modelId, null, "OBD live scan — ${modelName ?: "Véhicule"}", "fr") }.onSuccess { status = "Session diagnostic ${it.id} créée dans Supabase" }.onFailure { status = it.message ?: "Impossible de créer la session" }; busy = false } }, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Enregistrer la session") } }
             }
         }
     }
