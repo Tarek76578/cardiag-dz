@@ -19,6 +19,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".ModernMainActivity" android:exported="false" />
+        <activity android:name=".GuidedDiagnosisActivity" android:exported="false" />
     </application>
 </manifest>
