@@ -9,7 +9,7 @@ import androidx.activity.compose.setContent
 class CarDiagModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CarDiagPremiumApp() }
+        setContent { CarDiagExactApp() }
     }
 }
 
