@@ -1,6 +1,7 @@
 package dz.cardiag.app
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -348,21 +349,29 @@ private fun VehicleCard(v: ExactVehicle, make: String, primary: Color, surface: 
 
 @Composable
 private fun ActionScreen(padding: PaddingValues, c: Copy, primary: Color, surface: Color, muted: Color) {
-    var action by remember { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Header(c.diagnostic, c.smart, primary, muted)
-        ActionCard("OBD-II Scanner", Icons.Default.Build, primary, surface) { action = "OBD-II Scanner" }
-        ActionCard("Live Data", Icons.Default.Speed, primary, surface) { action = "Live Data" }
-        ActionCard("DTC & Faults", Icons.Default.Warning, primary, surface) { action = "DTC & Faults" }
-        ActionCard("VIN Identity", Icons.Default.DirectionsCar, primary, surface) { action = "VIN Identity" }
+    val context = LocalContext.current
+
+    fun open(activity: Class<*>) {
+        context.startActivity(Intent(context, activity))
     }
-    if (action != null) {
-        AlertDialog(
-            onDismissRequest = { action = null },
-            title = { Text(action!!, fontWeight = FontWeight.Black) },
-            text = { Text(if (action == "OBD-II Scanner") "Connect an OBD-II adapter to start a real session." else "This diagnostic module is ready for the selected vehicle.", color = muted) },
-            confirmButton = { Button(onClick = { action = null }) { Text("OK") } }
-        )
+
+    Column(
+        Modifier.fillMaxSize().padding(padding).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Header(c.diagnostic, c.smart, primary, muted)
+        ActionCard("OBD-II Scanner", Icons.Default.Build, primary, surface) {
+            open(ObdScannerActivity::class.java)
+        }
+        ActionCard("Live Data", Icons.Default.Speed, primary, surface) {
+            open(LiveDataProActivity::class.java)
+        }
+        ActionCard("DTC & Faults", Icons.Default.Warning, primary, surface) {
+            open(GuidedDiagnosisActivity::class.java)
+        }
+        ActionCard("VIN Identity", Icons.Default.DirectionsCar, primary, surface) {
+            open(ObdScannerActivity::class.java)
+        }
     }
 }
 
