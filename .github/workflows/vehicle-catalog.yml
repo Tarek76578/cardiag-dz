@@ -50,7 +50,7 @@ jobs:
           VEHICLE_ENGINES_CSV: ${{ github.workspace }}/.vehicle-data/engines.csv
           CATALOG_SCOPE: ${{ inputs.scope || 'all' }}
         run: python tools/vehicle_catalog/import_engines_v2.py --scope "$CATALOG_SCOPE"
-      - name: Validate catalog after import
+      - name: Validate canonical catalog
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -64,10 +64,10 @@ jobs:
           import json, os, urllib.request
           base=os.environ['SUPABASE_URL'].rstrip('/')
           key=os.environ['SUPABASE_SERVICE_ROLE_KEY']
-          req=urllib.request.Request(base+'/rest/v1/vehicle_makes?select=id&limit=1',headers={'apikey':key,'Authorization':'Bearer '+key})
+          req=urllib.request.Request(base+'/rest/v1/vehicle_catalog_canonical?select=id&limit=1',headers={'apikey':key,'Authorization':'Bearer '+key})
           with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
-          if not data: raise SystemExit('Catalog validation failed: vehicle_makes is empty')
-          print('Catalog contains vehicle makes')
+          if not data: raise SystemExit('Canonical catalog is empty')
+          print('Canonical catalog contains data')
           PY
       - name: Sync Wikimedia Commons vehicle images
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
