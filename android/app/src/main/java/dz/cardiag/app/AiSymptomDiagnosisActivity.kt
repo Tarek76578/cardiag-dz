@@ -37,30 +37,79 @@ private fun AiSymptomDiagnosisScreen(modelId: String?, modelName: String) {
     var error by remember { mutableStateOf<String?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("AI Diagnosis") }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             item {
                 Text(modelName, style = MaterialTheme.typography.headlineSmall)
                 Text("Diagnostic sans OBD • analyse des symptômes", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            item { OutlinedTextField(complaint, { complaint = it; error = null }, Modifier.fillMaxWidth(), minLines = 4, label = { Text("Quel est le problème ?") }, placeholder = { Text("Ex. Le moteur tremble au ralenti et démarre difficilement") }) }
-            item { OutlinedTextField(whenHappens, { whenHappens = it }, Modifier.fillMaxWidth(), minLines = 2, label = { Text("Quand cela arrive ?") }, placeholder = { Text("À froid, à chaud, en accélération, au ralenti…") }) }
-            item { OutlinedTextField(engineState, { engineState = it }, Modifier.fillMaxWidth(), minLines = 2, label = { Text("Que fait le moteur ?") }, placeholder = { Text("Perte de puissance, bruit, cale, fumée…") }) }
             item {
-                Button(onClick = {
-                    scope.launch {
-                        loading = true; error = null; result = null
-                        runCatching {
-                            DiagnosticService().runDiagnostic(
-                                vehicleModelId = modelId, userVehicleId = null, complaint = complaint.trim(), language = "fr", codes = emptyList(),
-                                symptoms = buildJsonObject { put("source", "symptom_only"); put("when_happens", whenHappens); put("engine_state", engineState) },
-                                measurements = buildJsonObject {},
-                                vehicle = buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName); put("complaint", complaint.trim()) }
-                            )
-                        }.onSuccess { response -> result = response["diagnosis"] as? JsonObject }
-                         .onFailure { error = it.message ?: "Erreur du moteur AI" }
-                        loading = false
-                    }
-                }, enabled = complaint.isNotBlank() && !loading, Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = complaint,
+                    onValueChange = { complaint = it; error = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    label = { Text("Quel est le problème ?") },
+                    placeholder = { Text("Ex. Le moteur tremble au ralenti et démarre difficilement") }
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = whenHappens,
+                    onValueChange = { whenHappens = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    label = { Text("Quand cela arrive ?") },
+                    placeholder = { Text("À froid, à chaud, en accélération, au ralenti…") }
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = engineState,
+                    onValueChange = { engineState = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    label = { Text("Que fait le moteur ?") },
+                    placeholder = { Text("Perte de puissance, bruit, cale, fumée…") }
+                )
+            }
+            item {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            loading = true
+                            error = null
+                            result = null
+                            runCatching {
+                                DiagnosticService().runDiagnostic(
+                                    vehicleModelId = modelId,
+                                    userVehicleId = null,
+                                    complaint = complaint.trim(),
+                                    language = "fr",
+                                    codes = emptyList(),
+                                    symptoms = buildJsonObject {
+                                        put("source", "symptom_only")
+                                        put("when_happens", whenHappens)
+                                        put("engine_state", engineState)
+                                    },
+                                    measurements = buildJsonObject {},
+                                    vehicle = buildJsonObject {
+                                        put("model_id", modelId ?: "")
+                                        put("model_name", modelName)
+                                        put("complaint", complaint.trim())
+                                    }
+                                )
+                            }.onSuccess { response -> result = response["diagnosis"] as? JsonObject }
+                                .onFailure { error = it.message ?: "Erreur du moteur AI" }
+                            loading = false
+                        }
+                    },
+                    enabled = complaint.isNotBlank() && !loading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(if (loading) "Analyse en cours…" else "Analyser avec CarDiag AI")
                 }
             }
@@ -84,12 +133,22 @@ private fun ProfessionalReport(d: JsonObject) {
 
 @Composable
 private fun ReportCard(title: String, body: String) {
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(body, style = MaterialTheme.typography.bodyLarge) } }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(body, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
 }
 
 @Composable
 private fun ReportList(title: String, d: JsonObject, key: String) {
     val values = d[key]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
     if (values.isEmpty()) return
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium); values.forEachIndexed { i, value -> Text("${i + 1}. $value", style = MaterialTheme.typography.bodyLarge) } } }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            values.forEachIndexed { i, value -> Text("${i + 1}. $value", style = MaterialTheme.typography.bodyLarge) }
+        }
+    }
 }
