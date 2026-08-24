@@ -13,11 +13,12 @@
         android:label="CarDiag DZ"
         android:supportsRtl="true"
         android:theme="@style/Theme.CarDiagDZ">
-        <activity android:name=".ModernMainActivity" android:exported="true">
+        <activity android:name=".CarDiagModernActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".ModernMainActivity" android:exported="false" />
     </application>
 </manifest>
