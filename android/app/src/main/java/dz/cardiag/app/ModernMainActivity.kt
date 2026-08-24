@@ -79,7 +79,7 @@ class ModernMainActivity : ComponentActivity() {
     val direction = if (ar) LayoutDirection.Rtl else LayoutDirection.Ltr
     val scope = rememberCoroutineScope()
     CompositionLocalProvider(LocalLayoutDirection provides direction) { CarDiagTheme(dark) {
-        if (showAuth) AuthScreen(onAuthenticated = { authenticated = true; showAuth = false }, onContinueAsGuest = { showAuth = false }, arabic = ar)
+        if (showAuth) AuthScreen(onAuthenticated = { authenticated = true; showAuth = false }, onContinueAsGuest = { authenticated = true; showAuth = false }, arabic = ar)
         else MainShell(ar, dark, authenticated, { value -> dark = value; context.getSharedPreferences("cardiag_settings", Context.MODE_PRIVATE).edit().putBoolean("dark", value).apply() }, setLanguage, requestBluetoothPermissions, { showAuth = true }, { scope.launch { runCatching { auth.signOut() }; authenticated = false } })
     } }
 }
@@ -109,18 +109,28 @@ class ModernMainActivity : ComponentActivity() {
 }
 
 @Composable private fun VehicleImage(vehicle: VehicleModel, modifier: Modifier = Modifier) = AsyncImage(model = vehicle.imageUrl, contentDescription = vehicle.name, modifier = modifier.semantics { contentDescription = vehicle.name }, contentScale = ContentScale.Crop, placeholder = painterResource(R.drawable.cardiag_car_fallback), error = painterResource(R.drawable.cardiag_car_fallback))
+
 @Composable private fun HomeScreen(padding: PaddingValues, ar: Boolean, diagnose: () -> Unit, garage: () -> Unit) {
-    val context = LocalContext.current; var models by remember { mutableStateOf(VehicleCache.read(context)) }; var loading by remember { mutableStateOf(models.isEmpty()) }; var error by remember { mutableStateOf<String?>(null) }; val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var models by remember { mutableStateOf(VehicleCache.read(context)) }
+    var loading by remember { mutableStateOf(models.isEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     suspend fun refresh() { loading = true; error = null; runCatching { SupabaseClient.client.from("vehicle_models").select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url")).decodeList<VehicleModel>() }.onSuccess { fresh -> models = fresh; VehicleCache.write(context, fresh) }.onFailure { if (models.isEmpty()) error = it.message }; loading = false }
-    LaunchedEffect(Unit) { refresh() }; val online = NetworkStatus.isOnline(context)
+    LaunchedEffect(Unit) { refresh() }
+    val online = NetworkStatus.isOnline(context)
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!online) item { OfflineBanner(ar) }
         item { Card(shape = RoundedCornerShape(30.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Box(Modifier.fillMaxWidth().height(255.dp)) { val featured = models.firstOrNull(); if (featured != null) VehicleImage(featured, Modifier.fillMaxSize()) else Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface)))); Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f))))); Column(Modifier.align(Alignment.BottomStart).padding(22.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(if (ar) "تشخيص ذكي لسيارتك" else "Diagnostic intelligent", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Text(if (ar) "اعرف المشكلة قبل تغيير القطع" else "Comprenez le problème avant de remplacer une pièce", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black); Button(onClick = diagnose) { Icon(Icons.Default.Build, null); Spacer(Modifier.width(6.dp)); Text(if (ar) "ابدأ التشخيص" else "Lancer le diagnostic") } } } } }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { QuickAction(Icons.Default.Bluetooth, "OBD", if (ar) "فحص المحول" else "Scanner OBD", Modifier.weight(1f), diagnose); QuickAction(Icons.Default.DirectionsCar, "VIN", if (ar) "هوية السيارة" else "Identité VIN", Modifier.weight(1f), garage) } }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) { QuickAction(Icons.Default.History, "DTC", if (ar) "رموز الأعطال" else "Codes défaut", Modifier.weight(1f), diagnose); QuickAction(Icons.Default.Add, "Garage", if (ar) "أضف سيارتك" else "Ajouter une voiture", Modifier.weight(1f), garage) } }
-        item { SectionTitle(if (ar) "الموديلات" else "Modèles") }; if (loading) items(3) { SkeletonCard() }; items(models.take(8)) { CarCard(it) }; if (!loading && models.isEmpty()) item { EmptyState(if (ar) "لا توجد بيانات متاحة" else "Aucune donnée disponible", error ?: if (ar) "تحقق من الاتصال ثم أعد المحاولة." else "Vérifiez votre connexion puis réessayez.") { scope.launch { refresh() } } }
+        item { SectionTitle(if (ar) "الموديلات" else "Modèles") }
+        if (loading) items(3) { SkeletonCard() }
+        items(models) { model -> CarCard(model) { diagnose() } }
+        if (!loading && models.isEmpty()) item { EmptyState(if (ar) "لا توجد بيانات متاحة" else "Aucune donnée disponible", error ?: if (ar) "تحقق من الاتصال ثم أعد المحاولة." else "Vérifiez votre connexion puis réessayez.") { scope.launch { refresh() } } }
     }
 }
+
 @Composable private fun QuickAction(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, modifier: Modifier, click: () -> Unit) { Card(modifier.clickable(onClick = click), shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary); Text(title, fontWeight = FontWeight.Black); Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
 @Composable private fun SectionTitle(text: String) { Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
 @Composable private fun CarCard(vehicle: VehicleModel, click: () -> Unit = {}) { Card(Modifier.fillMaxWidth().clickable(onClick = click), shape = RoundedCornerShape(22.dp)) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { VehicleImage(vehicle, Modifier.size(132.dp, 92.dp).clip(RoundedCornerShape(20.dp))); Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(vehicle.name, fontWeight = FontWeight.Black); Text(listOfNotNull(vehicle.yearFrom, vehicle.yearTo).joinToString("–").ifBlank { vehicle.generation.orEmpty() }, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(if (vehicle.imageUrl.isNullOrBlank()) "Illustration" else "Photo", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) } } } }
@@ -142,6 +152,7 @@ class ModernMainActivity : ComponentActivity() {
     }
     if (showDevices) AlertDialog(onDismissRequest = { showDevices = false }, title = { Text(if (ar) "اختيار محول OBD" else "Choisir l'adaptateur OBD") }, text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) { items(devices) { device -> ListItem(headlineContent = { Text(device.name ?: "ELM327") }, supportingContent = { Text(device.address) }, leadingContent = { Icon(Icons.Default.Bluetooth, null) }, modifier = Modifier.clickable { showDevices = false; connecting = true; scope.launch { try { status = obd.connect(device); dtc = obd.readTroubleCodes(); live = mapOf("RPM" to (obd.readRpm()?.let { "%.0f rpm".format(it) } ?: "—"), "Coolant" to (obd.readCoolantTemperature()?.let { "%.1f °C".format(it) } ?: "—"), "Speed" to (obd.readVehicleSpeedKmh()?.let { "%.0f km/h".format(it) } ?: "—")) } catch (e: Exception) { status = e.message ?: if (ar) "فشل اتصال OBD" else "Erreur OBD" } finally { connecting = false } } }) } } }, confirmButton = { TextButton(onClick = { showDevices = false }) { Text(if (ar) "إلغاء" else "Annuler") } })
 }
+
 @Composable private fun DiagnosisResultCard(result: JsonObject, ar: Boolean) { Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(if (ar) "نتيجة منظمة" else "Résultat structuré", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); result.entries.take(12).forEach { (key, value) -> Text("$key: $value") } } } }
 
 @Composable private fun GarageScreen(padding: PaddingValues, ar: Boolean, authenticated: Boolean, openAuth: () -> Unit, selectedVehicle: UserVehicle?, onSelectVehicle: (UserVehicle) -> Unit) {
