@@ -1,5 +1,6 @@
 package dz.cardiag.app.core
 
+import android.util.Log
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.from
@@ -70,19 +71,31 @@ class DiagnosticService {
             put("vehicle", vehicle)
             put("language", language)
         }
+
         var last: Throwable? = null
         repeat(3) { attempt ->
             try {
                 return withTimeout(25_000) {
                     val response = supabase.functions.invoke(function = "diagnose", body = payload)
-                    response.body<JsonObject>()
+                    val body = response.body<JsonObject>()
+                    if (body["error"] != null) {
+                        throw IllegalStateException("Diagnostic function error: $body")
+                    }
+                    body
                 }
             } catch (e: Throwable) {
                 last = e
+                Log.e("CarDiag-Diagnostic", "diagnose attempt ${attempt + 1} failed: ${e.message}", e)
                 if (attempt < 2) delay(500L * (attempt + 1))
             }
         }
-        throw IllegalStateException("Diagnostic service unavailable", last)
+
+        val detail = last?.message?.takeIf { it.isNotBlank() }
+        throw IllegalStateException(
+            if (detail != null) "Diagnostic service unavailable: $detail"
+            else "Diagnostic service unavailable",
+            last
+        )
     }
 
     suspend fun runDiagnostic(
