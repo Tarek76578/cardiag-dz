@@ -3,21 +3,9 @@ package dz.cardiag.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -30,92 +18,39 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class DtcGuide(
-    val code: String,
-    val system: String? = null,
-    val category: String? = null,
-    val severity: String? = null,
-    val description: String? = null,
-    val causes: String? = null,
-    @SerialName("diagnostic_steps") val diagnosticSteps: String? = null,
-    @SerialName("repair_summary") val repairSummary: String? = null
+    val id:String?=null,
+    val code:String,
+    val system:String?=null,
+    val category:String?=null,
+    val severity:String?=null,
+    @SerialName("description_fr") val descriptionFr:String?=null,
+    @SerialName("causes_fr") val causesFr:String?=null,
+    @SerialName("diagnostic_steps_fr") val diagnosticStepsFr:String?=null,
+    @SerialName("repair_summary_fr") val repairSummaryFr:String?=null
 )
 
-class GuidedDiagnosisActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent { GuidedDiagnosisScreen() }
-    }
+class GuidedDiagnosisActivity:ComponentActivity(){
+ override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);val modelId=intent.getStringExtra("model_id");val modelName=intent.getStringExtra("model_name")?:"Véhicule";val initialCode=intent.getStringExtra("dtc_code")?:"P0301";setContent{GuidedDiagnosisScreen(modelId,modelName,initialCode)}}
 }
 
-@Composable
-private fun GuidedDiagnosisScreen() {
-    val scope = rememberCoroutineScope()
-    var code by remember { mutableStateOf("P0301") }
-    var guide by remember { mutableStateOf<DtcGuide?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    fun load() {
-        scope.launch {
-            loading = true
-            error = null
-            runCatching {
-                SupabaseClient.client.from("diagnostic_codes")
-                    .select(Columns.list("code", "system", "category", "severity", "description", "causes", "diagnostic_steps", "repair_summary")) {
-                        filter { eq("code", code.trim().uppercase()) }
-                    }
-                    .decodeList<DtcGuide>()
-                    .firstOrNull()
-            }.onSuccess { guide = it; if (it == null) error = "DTC not found" }
-                .onFailure { error = it.message ?: "Unable to load DTC" }
-            loading = false
-        }
-    }
-
-    Scaffold(topBar = { TopAppBar(title = { Text("Guided Diagnosis") }) }) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            item {
-                Text("DTC → Symptoms → Tests → Diagnosis", style = MaterialTheme.typography.titleLarge)
-                Text("Start with a fault code, then follow the diagnostic path.")
-            }
-            item {
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { code = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("DTC code") },
-                    singleLine = true
-                )
-            }
-            item {
-                Button(onClick = ::load, enabled = code.isNotBlank() && !loading) {
-                    Text(if (loading) "Loading…" else "Start diagnosis")
-                }
-            }
-            if (loading) item { CircularProgressIndicator() }
-            error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
-            guide?.let { d ->
-                item { DtcCard("${d.code} • ${d.system ?: "Unknown system"}", d.description ?: "No description") }
-                item { DtcCard("Severity / Category", listOfNotNull(d.severity, d.category).joinToString(" • ").ifBlank { "Not specified" }) }
-                item { DtcCard("Likely causes", d.causes ?: "Not specified") }
-                item { DtcCard("Diagnostic steps", d.diagnosticSteps ?: "Not specified") }
-                item { DtcCard("Repair summary", d.repairSummary ?: "Not specified") }
-                item { Text("Next: connect the selected vehicle and compare live OBD PIDs against this diagnostic path.") }
-            }
-        }
-    }
+@Composable private fun GuidedDiagnosisScreen(modelId:String?,modelName:String,initialCode:String){
+ val scope=rememberCoroutineScope();var code by remember{mutableStateOf(initialCode)};var guide by remember{mutableStateOf<DtcGuide?>(null)};var loading by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)}
+ fun load(){scope.launch{loading=true;error=null;runCatching{SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id","code","system","category","severity","description_fr","causes_fr","diagnostic_steps_fr","repair_summary_fr")){filter{eq("code",code.trim().uppercase())}}.decodeList<DtcGuide>().firstOrNull()}.onSuccess{guide=it;if(it==null)error="Code DTC introuvable"}.onFailure{error=it.message?:"Impossible de charger le DTC"};loading=false}}
+ LaunchedEffect(initialCode){load()}
+ Scaffold(topBar={TopAppBar(title={Text("Diagnostic guidé")})}){padding->LazyColumn(Modifier.fillMaxSize().padding(padding),contentPadding=PaddingValues(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
+  item{Text(modelName,style=MaterialTheme.typography.titleLarge);Text(if(modelId!=null)"Véhicule sélectionné • contexte actif" else "Aucun véhicule sélectionné",color=MaterialTheme.colorScheme.onSurfaceVariant)}
+  item{OutlinedTextField(value=code,onValueChange={code=it.uppercase()},modifier=Modifier.fillMaxWidth(),label={Text("Code DTC")},singleLine=true)}
+  item{Button(onClick=::load,enabled=code.isNotBlank()&&!loading,modifier=Modifier.fillMaxWidth()){Text(if(loading)"Chargement…"else"Lancer le diagnostic")}}
+  if(loading)item{LinearProgressIndicator(Modifier.fillMaxWidth())};error?.let{item{Text(it,color=MaterialTheme.colorScheme.error)}}
+  guide?.let{d->
+   item{DtcCard("${d.code} • ${d.system?:"Système inconnu"}",d.descriptionFr?:"Description non disponible")}
+   item{DtcCard("Sévérité / catégorie",listOfNotNull(d.severity,d.category).joinToString(" • ").ifBlank{"Non renseigné"})}
+   item{DtcCard("Causes probables",d.causesFr?:"Non renseignées")}
+   item{DtcCard("Étapes de diagnostic",d.diagnosticStepsFr?:"Non renseignées")}
+   item{DtcCard("Réparation",d.repairSummaryFr?:"Non renseignée")}
+   item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Prochaine étape",style=MaterialTheme.typography.titleMedium);Text("Connecter l'OBD, lire les PID compatibles avec ce moteur, comparer les valeurs et enregistrer la session de diagnostic.")}}}
+  }
+ }}
 }
 
-@Composable
-private fun DtcCard(title: String, body: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(body)
-        }
-    }
-}
+@Composable private fun DtcCard(title:String,body:String){Card(Modifier.fillMaxWidth()){Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(title,style=MaterialTheme.typography.titleMedium);Text(body)}}}
