@@ -27,6 +27,7 @@ import coil.compose.AsyncImage
 import dz.cardiag.app.core.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -50,6 +51,27 @@ data class ExactMake(val id: String, val name: String)
 
 @Serializable
 data class SessionRow(val id: String)
+
+@Serializable
+data class GarageVehicle(
+    val id: String,
+    @SerialName("model_id") val modelId: String,
+    @SerialName("make_id") val makeId: String,
+    val nickname: String? = null,
+    val vin: String? = null,
+    val mileage: Int? = null,
+    val year: Int? = null,
+    @SerialName("is_primary") val isPrimary: Boolean = false
+)
+
+@Serializable
+data class GarageVehicleInsert(
+    @SerialName("user_id") val userId: String,
+    @SerialName("make_id") val makeId: String,
+    @SerialName("model_id") val modelId: String,
+    val nickname: String? = null,
+    @SerialName("is_primary") val isPrimary: Boolean = false
+)
 
 private val DarkBg = Color(0xFF06090B)
 private val DarkSurface = Color(0xFF0D1418)
@@ -152,7 +174,7 @@ fun CarDiagExactApp() {
                     when (tab) {
                         0 -> HomeScreen(padding, c, dark, primary, bg, surface, text, muted) { selected = it }
                         1 -> ActionScreen(padding, c, primary, surface, muted)
-                        2 -> HomeScreen(padding, c, dark, primary, bg, surface, text, muted) { selected = it }
+                        2 -> GarageScreen(padding, c, primary, surface, muted) { selected = it }
                         3 -> HistoryScreen(padding, c, primary, surface, muted)
                         else -> MoreScreen(
                             padding, c, dark, primary, surface, muted,
@@ -344,6 +366,178 @@ private fun VehicleCard(v: ExactVehicle, make: String, primary: Color, surface: 
                 Text("→", color = primary, fontWeight = FontWeight.Black)
             }
         }
+    }
+}
+
+@Composable
+private fun GarageScreen(
+    padding: PaddingValues,
+    c: Copy,
+    primary: Color,
+    surface: Color,
+    muted: Color,
+    onVehicle: (ExactVehicle) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var garage by remember { mutableStateOf<List<GarageVehicle>>(emptyList()) }
+    var models by remember { mutableStateOf<List<ExactVehicle>>(emptyList()) }
+    var makes by remember { mutableStateOf<List<ExactMake>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var showCatalog by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun load() {
+        scope.launch {
+            loading = true
+            error = null
+            val user = AuthService().currentUser
+            if (user == null) {
+                loading = false
+                error = if (c == AR) "سجّل الدخول لإدارة سياراتك" else "Connectez-vous pour gérer votre garage"
+                return@launch
+            }
+            garage = runCatching {
+                SupabaseClient.client.from("user_vehicles")
+                    .select(Columns.list("id", "model_id", "make_id", "nickname", "vin", "mileage", "year", "is_primary"))
+                    .decodeList<GarageVehicle>()
+            }.getOrElse {
+                error = it.message ?: "Garage unavailable"
+                emptyList()
+            }
+            models = runCatching {
+                SupabaseClient.client.from("vehicle_models")
+                    .select(Columns.list("id", "make_id", "name", "year_from", "year_to", "generation", "image_url"))
+                    .decodeList<ExactVehicle>()
+            }.getOrDefault(emptyList())
+            makes = runCatching {
+                SupabaseClient.client.from("vehicle_makes")
+                    .select(Columns.list("id", "name"))
+                    .decodeList<ExactMake>()
+            }.getOrDefault(emptyList())
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    Column(
+        Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Header(c.garage, c.smart, primary, muted)
+        Button(
+            onClick = { showCatalog = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (c == AR) "إضافة سيارة" else "Ajouter un véhicule", fontWeight = FontWeight.Black)
+        }
+
+        if (loading) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = primary)
+            }
+        } else if (error != null) {
+            Card(Modifier.fillMaxWidth(), RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = primary)
+                    Text(error!!, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (c == AR) "سجّل الدخول بحسابك ثم أعد فتح المرآب." else "Connectez-vous avec votre compte puis rouvrez le Garage.",
+                        color = muted
+                    )
+                    TextButton(onClick = { load() }) { Text(if (c == AR) "إعادة المحاولة" else "Réessayer") }
+                }
+            }
+        } else if (garage.isEmpty()) {
+            Card(Modifier.fillMaxWidth(), RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = surface)) {
+                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Garage, contentDescription = null, tint = primary, modifier = Modifier.size(44.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text(if (c == AR) "مرآبك فارغ" else "Votre garage est vide", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(if (c == AR) "أضف سيارتك لحفظ VIN والكيلومترات وربط التشخيص بها." else "Ajoutez votre voiture pour conserver le VIN, le kilométrage et lier les diagnostics.", color = muted)
+                }
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 30.dp)) {
+                items(garage, key = { it.id }) { gv ->
+                    val model = models.firstOrNull { it.id == gv.modelId }
+                    val make = makes.firstOrNull { it.id == gv.makeId }?.name ?: ""
+                    Card(
+                        Modifier.fillMaxWidth().clickable { model?.let(onVehicle) },
+                        RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = surface)
+                    ) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AsyncImage(
+                                model = model?.imageUrl,
+                                contentDescription = model?.name,
+                                modifier = Modifier.size(92.dp).clip(RoundedCornerShape(18.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(gv.nickname ?: model?.name ?: "Vehicle", fontWeight = FontWeight.Black)
+                                Text(listOf(make, model?.name).filter { it.isNotBlank() }.distinct().joinToString(" • "), color = muted)
+                                gv.vin?.takeIf { it.isNotBlank() }?.let { Text("VIN • $it", color = primary, style = MaterialTheme.typography.labelSmall) }
+                                gv.mileage?.let { Text("$it km", color = muted, style = MaterialTheme.typography.labelSmall) }
+                            }
+                            if (gv.isPrimary) Icon(Icons.Default.Star, contentDescription = null, tint = primary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCatalog) {
+        AlertDialog(
+            onDismissRequest = { showCatalog = false },
+            title = { Text(if (c == AR) "اختر سيارة" else "Choisir un véhicule", fontWeight = FontWeight.Black) },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 420.dp)) {
+                    items(models.take(40), key = { it.id }) { model ->
+                        val make = makes.firstOrNull { it.id == model.makeId }?.name ?: ""
+                        Surface(
+                            Modifier.fillMaxWidth().clickable {
+                                scope.launch {
+                                    val user = AuthService().currentUser
+                                    if (user != null) {
+                                        runCatching {
+                                            SupabaseClient.client.from("user_vehicles").insert(
+                                                GarageVehicleInsert(
+                                                    userId = user.id,
+                                                    makeId = model.makeId,
+                                                    modelId = model.id,
+                                                    nickname = model.name,
+                                                    isPrimary = garage.isEmpty()
+                                                )
+                                            )
+                                            showCatalog = false
+                                            load()
+                                        }.onFailure { error = it.message ?: "Impossible d'ajouter le véhicule" }
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AsyncImage(model = model.imageUrl, contentDescription = model.name, modifier = Modifier.size(58.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(make, color = primary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    Text(model.name, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCatalog = false }) { Text(c.back) } }
+        )
     }
 }
 
