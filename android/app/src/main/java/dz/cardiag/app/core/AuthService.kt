@@ -10,6 +10,12 @@ class AuthService {
     val currentUser: UserInfo?
         get() = auth.currentSessionOrNull()?.user
 
+    suspend fun ensureGuest(): UserInfo {
+        currentUser?.let { return it }
+        auth.signInAnonymously()
+        return auth.currentSessionOrNull()?.user ?: error("Guest session could not be created")
+    }
+
     suspend fun signUp(email: String, password: String) {
         val normalized = email.trim()
         require(normalized.contains("@")) { "Valid email is required" }
