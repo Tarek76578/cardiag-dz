@@ -1,6 +1,7 @@
 package dz.cardiag.app.core
 
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -28,7 +29,7 @@ class VehicleRepository {
         val safeModel = modelName.trim().replace("'", "''")
         val yearFilter = year?.let { ",model_year.eq.$it" } ?: ""
         return supabase.from("vehicle_catalog_canonical")
-            .select("id,make_name,model_name,model_year,engine_name,engine_year,engine_displacement,engine_cylinders,engine_power_hp,transmission,drivetrain,fuel_type&model_name=eq.$safeModel$yearFilter")
+            .select(Columns.raw("id,make_name,model_name,model_year,engine_name,engine_year,engine_displacement,engine_cylinders,engine_power_hp,transmission,drivetrain,fuel_type&model_name=eq.$safeModel$yearFilter"))
             .decodeList()
     }
 }
