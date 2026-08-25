@@ -58,11 +58,15 @@ jobs:
           ]
           hits = []
           for raw in files:
-              if not raw or any(raw.startswith(x) or raw.endswith(x) for x in excluded): continue
+              if not raw or any(raw.startswith(x) or raw.endswith(x) for x in excluded):
+                  continue
               path = pathlib.Path(raw.decode("utf-8", "replace"))
-              try: text = path.read_text(encoding="utf-8")
-              except (UnicodeDecodeError, OSError): continue
-              if any(p.search(text) for p in patterns): hits.append(str(path))
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              if any(p.search(text) for p in patterns):
+                  hits.append(str(path))
           if hits:
               print("Potential committed secret detected:")
               print("\n".join(sorted(set(hits))))
@@ -87,11 +91,10 @@ jobs:
           retention-days: 14
 
   runtime:
-    name: Android emulator runtime tests (non-blocking)
+    name: Android emulator runtime tests
     runs-on: ubuntu-latest
     needs: build
-    continue-on-error: true
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -117,11 +120,11 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -wipe-data -gpu swiftshader_indirect
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -no-metrics
           disable-animations: true
-          disable-linux-hw-accel: true
+          disable-linux-hw-accel: false
           force-avd-creation: true
-          emulator-boot-timeout: 600
+          emulator-boot-timeout: 900
           cores: 2
           script: |
             adb wait-for-device
