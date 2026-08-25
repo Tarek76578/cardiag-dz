@@ -9,7 +9,7 @@ import androidx.activity.compose.setContent
 class CarDiagModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CarDiagUnifiedApp() }
+        setContent { CarDiagFunctionalApp() }
     }
 }
 
@@ -25,5 +25,6 @@ fun openGuided(context: Context, modelId: String? = null, modelName: String? = n
     context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java).apply {
         putExtra("model_id", modelId)
         putExtra("model_name", modelName ?: "Véhicule")
+        putExtra("source", "vehicle_profile")
     })
 }
