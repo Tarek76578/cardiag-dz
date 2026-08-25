@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_cardiag_launcher"
@@ -13,7 +14,10 @@
         android:label="CarDiag DZ"
         android:supportsRtl="true"
         android:theme="@style/Theme.CarDiagDZ">
-        <activity android:name=".CarDiagModernActivity" android:exported="true">
+
+        <activity
+            android:name=".CarDiagModernActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -22,6 +26,6 @@
         <activity android:name=".GuidedDiagnosisActivity" android:exported="false" />
         <activity android:name=".ObdScannerActivity" android:exported="false" />
         <activity android:name=".LiveDataProActivity" android:exported="false" />
-            <activity android:name=".AiSymptomDiagnosisActivity" />
+        <activity android:name=".AiSymptomDiagnosisActivity" android:exported="false" />
     </application>
 </manifest>
