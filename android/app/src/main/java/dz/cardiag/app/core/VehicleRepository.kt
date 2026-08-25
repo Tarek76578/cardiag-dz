@@ -27,7 +27,9 @@ class VehicleRepository {
     private val supabase = SupabaseClient.client
 
     suspend fun getModelYearVehicles(modelName: String, year: Int? = null): List<CanonicalVehicleRow> {
-        require(modelName.isNotBlank())
+        val normalizedName = modelName.trim()
+        require(normalizedName.isNotBlank())
+
         return supabase.from("vehicle_catalog_canonical").select(
             Columns.list(
                 "id", "make_name", "model_name", "model_year", "engine_name", "engine_year",
@@ -36,7 +38,9 @@ class VehicleRepository {
             )
         ) {
             filter {
-                eq("model_name", modelName.trim())
+                // Model names can differ only by casing between vehicle_models and the canonical catalog.
+                // ilike with no wildcards is an exact, case-insensitive match.
+                ilike("model_name", normalizedName)
                 year?.let { eq("model_year", it) }
             }
         }.decodeList()
