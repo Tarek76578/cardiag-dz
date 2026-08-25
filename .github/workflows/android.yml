@@ -19,9 +19,10 @@ env:
   SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
 
 jobs:
-  verify:
+  build:
+    name: Build, unit tests and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,7 +37,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
 
@@ -95,6 +96,41 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug --stacktrace --warning-mode all
 
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: cardiag-dz-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  runtime:
+    name: Android emulator runtime tests
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Make Gradle executable
+        working-directory: android
+        run: chmod +x ./gradlew
+
       - name: Run instrumentation tests on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -108,22 +144,42 @@ jobs:
           script: |
             adb wait-for-device
             adb shell getprop ro.build.version.sdk
+            cd android
             ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace --warning-mode all
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
 
+  release:
+    name: Release APK and AAB
+    runs-on: ubuntu-latest
+    needs: runtime
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Make Gradle executable
+        working-directory: android
+        run: chmod +x ./gradlew
+
       - name: Assemble release APK and AAB
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease bundleRelease --stacktrace --warning-mode all
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v6
-        with:
-          name: cardiag-dz-debug
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Upload release APK
         uses: actions/upload-artifact@v6
