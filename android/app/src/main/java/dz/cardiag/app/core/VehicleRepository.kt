@@ -16,7 +16,6 @@ data class CanonicalVehicleRow(
     @SerialName("engine_displacement") val displacementCc: Double? = null,
     @SerialName("engine_cylinders") val cylinders: Double? = null,
     @SerialName("engine_power_hp") val powerHp: Double? = null,
-    @SerialName("engine_power_kw") val powerKw: Double? = null,
     @SerialName("engine_torque_nm") val torqueNm: Double? = null,
     val transmission: String? = null,
     val drivetrain: String? = null,
@@ -33,7 +32,7 @@ class VehicleRepository {
         return supabase.from("vehicle_catalog_canonical").select(
             Columns.list(
                 "id", "make_name", "model_name", "model_year", "engine_name", "engine_year",
-                "engine_displacement", "engine_cylinders", "engine_power_hp", "engine_power_kw",
+                "engine_displacement", "engine_cylinders", "engine_power_hp",
                 "engine_torque_nm", "transmission", "drivetrain", "fuel_type"
             )
         ) {
