@@ -26,10 +26,17 @@ class VehicleRepository {
 
     suspend fun getModelYearVehicles(modelName: String, year: Int? = null): List<CanonicalVehicleRow> {
         require(modelName.isNotBlank())
-        val safeModel = modelName.trim().replace("'", "''")
-        val yearFilter = year?.let { ",model_year.eq.$it" } ?: ""
-        return supabase.from("vehicle_catalog_canonical")
-            .select(Columns.raw("id,make_name,model_name,model_year,engine_name,engine_year,engine_displacement,engine_cylinders,engine_power_hp,transmission,drivetrain,fuel_type&model_name=eq.$safeModel$yearFilter"))
-            .decodeList()
+        return supabase.from("vehicle_catalog_canonical").select(
+            Columns.list(
+                "id", "make_name", "model_name", "model_year", "engine_name", "engine_year",
+                "engine_displacement", "engine_cylinders", "engine_power_hp", "transmission",
+                "drivetrain", "fuel_type"
+            )
+        ) {
+            filter {
+                eq("model_name", modelName.trim())
+                year?.let { eq("model_year", it) }
+            }
+        }.decodeList()
     }
 }
