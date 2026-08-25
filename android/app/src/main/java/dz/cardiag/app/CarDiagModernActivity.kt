@@ -9,11 +9,16 @@ import androidx.activity.compose.setContent
 class CarDiagModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CarDiagFunctionalApp() }
+        setContent { CarDiagExactApp() }
     }
 }
 
-fun openObd(context: Context, modelId: String? = null, modelName: String? = null, dtc: String? = null) {
+fun openObd(
+    context: Context,
+    modelId: String? = null,
+    modelName: String? = null,
+    dtc: String? = null,
+) {
     context.startActivity(Intent(context, ObdScannerActivity::class.java).apply {
         putExtra("model_id", modelId)
         putExtra("model_name", modelName ?: "Véhicule")
