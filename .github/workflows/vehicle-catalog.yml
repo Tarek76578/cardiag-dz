@@ -20,8 +20,8 @@ permissions:
   contents: read
 
 env:
-  SUPABASE_URL: https://knripjpkmvdmqtstkcmo.supabase.co
-  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtucmlwanBrbXZkbXF0c3RrY21vIiwiaWF0IjoxNzg3NDMwNDMzLCJleHAiOjIxMDMwMDY0MzB9.1AKcbWMdzy0r2knTq0Ols8Oaw5zr2mTVaBjBqeAHWCY' }}
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
 jobs:
   catalog:
@@ -32,6 +32,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Require Supabase configuration
+        run: |
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_ANON_KEY"
+          case "$SUPABASE_URL" in
+            https://*) ;;
+            *) echo 'SUPABASE_URL must use HTTPS'; exit 1 ;;
+          esac
       - name: Import complete canonical catalog
         env:
           CATALOG_SCOPE: ${{ inputs.scope || 'all' }}
@@ -54,10 +62,11 @@ jobs:
           if not data:
               raise SystemExit('Canonical catalog is empty')
           print('Canonical catalog is populated')
+          PY
       - name: Verify canonical catalog counts
         run: |
           python - <<'PY'
-          import json, os, urllib.request
+          import os, urllib.request
           base=os.environ['SUPABASE_URL'].rstrip('/')
           key=os.environ['SUPABASE_ANON_KEY']
           url=base+'/rest/v1/vehicle_catalog_canonical?select=id&limit=1'
