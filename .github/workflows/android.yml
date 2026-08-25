@@ -123,6 +123,9 @@ jobs:
             adb wait-for-device
             adb shell getprop ro.build.version.sdk
             cd "$GITHUB_WORKSPACE/android"
+            echo "Gradle working directory: $PWD"
+            test -f ./gradlew
+            chmod +x ./gradlew
             ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
