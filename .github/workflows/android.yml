@@ -92,9 +92,9 @@ jobs:
 
   runtime:
     name: Android emulator runtime tests
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     needs: build
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -107,22 +107,21 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "platform-tools platforms;android-30 platforms;android-35 platforms;android-36 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x ./gradlew
-      - name: Run instrumentation tests on Android Emulator
+      - name: Run instrumentation tests on hardware-accelerated Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          api-level: 35
           target: google_apis
-          arch: x86_64
-          profile: pixel_2
+          arch: arm64-v8a
+          profile: pixel_6
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -no-metrics
           disable-animations: true
-          disable-linux-hw-accel: false
           force-avd-creation: true
           emulator-boot-timeout: 900
           cores: 2
@@ -131,8 +130,6 @@ jobs:
             adb devices
             adb shell getprop ro.build.version.sdk
             cd "$GITHUB_WORKSPACE/android"
-            test -f ./gradlew
-            chmod +x ./gradlew
             ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
