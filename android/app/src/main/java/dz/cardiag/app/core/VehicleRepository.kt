@@ -7,16 +7,15 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class CanonicalVehicleRow(
-    val id: String,
+    val id: Long,
     @SerialName("make_name") val makeName: String,
     @SerialName("model_name") val modelName: String,
-    @SerialName("model_year") val modelYear: Int,
+    @SerialName("model_year") val modelYear: Int? = null,
     @SerialName("engine_name") val engineName: String? = null,
     @SerialName("engine_year") val engineYear: Int? = null,
     @SerialName("engine_displacement") val displacementCc: Double? = null,
-    @SerialName("engine_cylinders") val cylinders: Double? = null,
+    @SerialName("engine_cylinders") val cylinders: Int? = null,
     @SerialName("engine_power_hp") val powerHp: Double? = null,
-    @SerialName("engine_torque_nm") val torqueNm: Double? = null,
     val transmission: String? = null,
     val drivetrain: String? = null,
     @SerialName("fuel_type") val fuelType: String? = null
@@ -33,12 +32,10 @@ class VehicleRepository {
             Columns.list(
                 "id", "make_name", "model_name", "model_year", "engine_name", "engine_year",
                 "engine_displacement", "engine_cylinders", "engine_power_hp",
-                "engine_torque_nm", "transmission", "drivetrain", "fuel_type"
+                "transmission", "drivetrain", "fuel_type"
             )
         ) {
             filter {
-                // Model names can differ only by casing between vehicle_models and the canonical catalog.
-                // ilike with no wildcards is an exact, case-insensitive match.
                 ilike("model_name", normalizedName)
                 year?.let { eq("model_year", it) }
             }
