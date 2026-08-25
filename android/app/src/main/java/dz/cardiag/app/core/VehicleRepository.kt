@@ -2,91 +2,92 @@ package dz.cardiag.app.core
 
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class VehicleModelYearRow(
     val id: String,
-    val modelId: String,
-    val generationId: String? = null,
-    val modelYear: Int,
+    @SerialName("model_id") val modelId: String,
+    @SerialName("generation_id") val generationId: String? = null,
+    @SerialName("model_year") val modelYear: Int,
     val market: String? = null,
-    val dataStatus: String? = null
+    @SerialName("data_status") val dataStatus: String? = null
 )
 
 @Serializable
 data class VehicleGenerationRow(
     val id: String,
-    val modelId: String,
+    @SerialName("model_id") val modelId: String,
     val name: String,
     val code: String? = null,
-    val yearFrom: Int? = null,
-    val yearTo: Int? = null,
-    val bodyType: String? = null,
-    val platformCode: String? = null,
-    val descriptionFr: String? = null,
-    val descriptionAr: String? = null,
-    val imageUrl: String? = null
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
+    @SerialName("body_type") val bodyType: String? = null,
+    @SerialName("platform_code") val platformCode: String? = null,
+    @SerialName("description_fr") val descriptionFr: String? = null,
+    @SerialName("description_ar") val descriptionAr: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null
 )
 
 @Serializable
 data class VehicleEngineRow(
     val id: String,
-    val generationId: String,
+    @SerialName("generation_id") val generationId: String,
     val name: String,
-    val engineCode: String? = null,
-    val fuelType: String = "unknown",
-    val displacementCc: Int? = null,
+    @SerialName("engine_code") val engineCode: String? = null,
+    @SerialName("fuel_type") val fuelType: String = "unknown",
+    @SerialName("displacement_cc") val displacementCc: Int? = null,
     val cylinders: Int? = null,
     val aspiration: String? = null,
-    val injectionType: String? = null,
-    val powerHp: Double? = null,
-    val powerKw: Double? = null,
-    val torqueNm: Double? = null,
-    val transmissionTypes: List<String> = emptyList(),
-    val yearFrom: Int? = null,
-    val yearTo: Int? = null,
-    val notesFr: String? = null,
-    val notesAr: String? = null
+    @SerialName("injection_type") val injectionType: String? = null,
+    @SerialName("power_hp") val powerHp: Double? = null,
+    @SerialName("power_kw") val powerKw: Double? = null,
+    @SerialName("torque_nm") val torqueNm: Double? = null,
+    @SerialName("transmission_types") val transmissionTypes: List<String> = emptyList(),
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
+    @SerialName("notes_fr") val notesFr: String? = null,
+    @SerialName("notes_ar") val notesAr: String? = null
 )
 
 @Serializable
 data class VehicleTrimRow(
     val id: String,
-    val generationId: String,
-    val engineId: String? = null,
+    @SerialName("generation_id") val generationId: String,
+    @SerialName("engine_id") val engineId: String? = null,
     val name: String,
     val code: String? = null,
     val drivetrain: String? = null,
     val transmission: String? = null,
     val doors: Int? = null,
     val seats: Int? = null,
-    val yearFrom: Int? = null,
-    val yearTo: Int? = null,
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
     val market: String? = null
 )
 
 @Serializable
 data class VehicleSpecificationRow(
     val id: String,
-    val generationId: String,
-    val engineId: String? = null,
-    val trimId: String? = null,
+    @SerialName("generation_id") val generationId: String,
+    @SerialName("engine_id") val engineId: String? = null,
+    @SerialName("trim_id") val trimId: String? = null,
     val key: String,
-    val valueText: String? = null,
-    val valueNumber: Double? = null,
+    @SerialName("value_text") val valueText: String? = null,
+    @SerialName("value_number") val valueNumber: Double? = null,
     val unit: String? = null
 )
 
 @Serializable
 data class VehicleEcuRow(
     val id: String,
-    val generationId: String,
-    val engineId: String? = null,
-    val ecuId: String,
+    @SerialName("generation_id") val generationId: String,
+    @SerialName("engine_id") val engineId: String? = null,
+    @SerialName("ecu_id") val ecuId: String,
     val required: Boolean = true,
-    val yearFrom: Int? = null,
-    val yearTo: Int? = null,
+    @SerialName("year_from") val yearFrom: Int? = null,
+    @SerialName("year_to") val yearTo: Int? = null,
     val notes: String? = null
 )
 
@@ -96,8 +97,8 @@ data class EcuModuleRow(
     val manufacturer: String? = null,
     val name: String,
     val family: String? = null,
-    val ecuType: String = "other",
-    val partNumbers: List<String> = emptyList(),
+    @SerialName("ecu_type") val ecuType: String = "other",
+    @SerialName("part_numbers") val partNumbers: List<String> = emptyList(),
     val protocols: List<String> = emptyList()
 )
 
@@ -125,8 +126,7 @@ class VehicleRepository {
         ) { filter { eq("model_id", modelId) } }.decodeList<VehicleGenerationRow>()
         val generationById = generations.associateBy { it.id }
 
-        val result = mutableListOf<VehicleYearProfile>()
-        for (year in years.distinctBy { it.modelYear }) {
+        return years.distinctBy { it.modelYear }.map { year ->
             val generation = year.generationId?.let(generationById::get)
             val generationId = year.generationId
             val engines = if (generationId == null) emptyList() else supabase.from("vehicle_engines").select(
@@ -145,16 +145,14 @@ class VehicleRepository {
                 Columns.list("id", "generation_id", "engine_id", "ecu_id", "required", "year_from", "year_to", "notes")
             ) { filter { eq("generation_id", generationId) } }.decodeList<VehicleEcuRow>()
             val ecus = ecuLinks.mapNotNull { link ->
-                val ecu = runCatching {
+                runCatching {
                     supabase.from("ecu_modules").select(
                         Columns.list("id", "manufacturer", "name", "family", "ecu_type", "part_numbers", "protocols")
                     ) { filter { eq("id", link.ecuId) } }.decodeSingle<EcuModuleRow>()
-                }.getOrNull()
-                ecu?.let { link to it }
+                }.getOrNull()?.let { link to it }
             }
 
-            result += VehicleYearProfile(year.modelYear, generation, engines, trims, specifications, ecus)
-        }
-        return result.sortedByDescending { it.year }
+            VehicleYearProfile(year.modelYear, generation, engines, trims, specifications, ecus)
+        }.sortedByDescending { it.year }
     }
 }
