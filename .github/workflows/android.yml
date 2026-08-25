@@ -26,36 +26,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
-
       - name: Verify repository integrity
         run: |
           test -f android/gradlew
           test -f android/app/build.gradle.kts
           test -f android/app/src/main/AndroidManifest.xml
           git diff --check
-
       - name: Check tracked source files for committed secrets
         run: |
           python3 <<'PY'
-          import pathlib
-          import re
-          import subprocess
-          import sys
-
+          import pathlib, re, subprocess, sys
           files = subprocess.check_output(["git", "ls-files", "-z"], text=False).split(b"\0")
           excluded = (b".github/workflows/", b".git/", b".md")
           patterns = [
@@ -66,36 +58,26 @@ jobs:
           ]
           hits = []
           for raw in files:
-              if not raw or any(raw.startswith(x) or raw.endswith(x) for x in excluded):
-                  continue
+              if not raw or any(raw.startswith(x) or raw.endswith(x) for x in excluded): continue
               path = pathlib.Path(raw.decode("utf-8", "replace"))
-              try:
-                  text = path.read_text(encoding="utf-8")
-              except (UnicodeDecodeError, OSError):
-                  continue
-              for pattern in patterns:
-                  if pattern.search(text):
-                      hits.append(str(path))
-                      break
+              try: text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError): continue
+              if any(p.search(text) for p in patterns): hits.append(str(path))
           if hits:
               print("Potential committed secret detected:")
               print("\n".join(sorted(set(hits))))
               sys.exit(1)
           print("No committed secret values detected in tracked source files.")
           PY
-
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x ./gradlew
-
       - name: Verify Gradle wrapper
         working-directory: android
         run: ./gradlew --version
-
       - name: Unit test, lint and assemble debug APK
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
-
       - name: Upload debug APK
         uses: actions/upload-artifact@v6
         with:
@@ -112,25 +94,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
-
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x ./gradlew
-
       - name: Run instrumentation tests on Android Emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -144,7 +122,7 @@ jobs:
           script: |
             adb wait-for-device
             adb shell getprop ro.build.version.sdk
-            cd android
+            cd "$GITHUB_WORKSPACE/android"
             ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -158,29 +136,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
-
       - name: Make Gradle executable
         working-directory: android
         run: chmod +x ./gradlew
-
       - name: Assemble release APK and AAB
         working-directory: android
         run: ./gradlew --no-daemon assembleRelease bundleRelease --stacktrace
-
       - name: Upload release APK
         uses: actions/upload-artifact@v6
         with:
@@ -188,7 +161,6 @@ jobs:
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
-
       - name: Upload release AAB
         uses: actions/upload-artifact@v6
         with:
