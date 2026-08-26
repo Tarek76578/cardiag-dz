@@ -24,21 +24,24 @@ data class VehicleYearProfile(val year:Int,val generation:VehicleGenerationRow?,
 
 class VehicleRepository {
     private val supabase = SupabaseClient.client
+    private val profileCache = mutableMapOf<String,List<VehicleYearProfile>>()
     private fun containsYear(from:Int?,to:Int?,year:Int)=(from==null||year>=from)&&(to==null||year<=to)
 
     private suspend fun resolveModelId(modelId:String):String {
-        val hasYears=runCatching{supabase.from("vehicle_model_years").select(Columns.list("id")){filter{eq("model_id",modelId)};limit(1)}.decodeList<VehicleModelYearRow>()}.getOrDefault(emptyList()).isNotEmpty()
-        if(hasYears)return modelId
         val identity=runCatching{supabase.from("vehicle_models").select(Columns.list("id","make_id","name")){filter{eq("id",modelId)}}.decodeSingle<VehicleModelIdentityRow>()}.getOrNull()?:return modelId
         val candidates=runCatching{supabase.from("vehicle_models").select(Columns.list("id","make_id","name")){filter{eq("make_id",identity.makeId);eq("name",identity.name)}}.decodeList<VehicleModelIdentityRow>()}.getOrDefault(emptyList())
-        var best=modelId;var bestCount=0
-        for(c in candidates){val count=runCatching{supabase.from("vehicle_model_years").select(Columns.list("id")){filter{eq("model_id",c.id)}}.decodeList<VehicleModelYearRow>().size}.getOrDefault(0);if(count>bestCount){bestCount=count;best=c.id}}
-        return best
+        if(candidates.size<=1)return modelId
+        val ids=candidates.map{it.id}
+        val yearRows=runCatching{supabase.from("vehicle_model_years").select(Columns.list("id","model_id","generation_id","model_year","market","data_status")){filter{inList("model_id",ids)}}.decodeList<VehicleModelYearRow>()}.getOrDefault(emptyList())
+        val best=yearRows.groupingBy{it.modelId}.eachCount().maxByOrNull{it.value}?.key
+        return best?:modelId
     }
 
     suspend fun getVehicleProfile(modelId:String):List<VehicleYearProfile>{
         require(modelId.isNotBlank())
+        profileCache[modelId]?.let{return it}
         val resolved=resolveModelId(modelId)
+        profileCache[resolved]?.let{profileCache[modelId]=it;return it}
         val years=supabase.from("vehicle_model_years").select(Columns.list("id","model_id","generation_id","model_year","market","data_status")){filter{eq("model_id",resolved)}}.decodeList<VehicleModelYearRow>()
         if(years.isEmpty())return emptyList()
         val generations=supabase.from("vehicle_generations").select(Columns.list("id","model_id","name","code","year_from","year_to","body_type","platform_code","description_fr","description_ar","image_url")){filter{eq("model_id",resolved)}}.decodeList<VehicleGenerationRow>()
@@ -52,11 +55,12 @@ class VehicleRepository {
         val dLinks=supabase.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability","notes_fr","notes_ar")){filter{eq("model_id",resolved)}}.decodeList<DiagnosticCodeVehicleRow>()
         val codeIds=dLinks.map{it.codeId}.distinct()
         val codes=if(codeIds.isEmpty())emptyList() else supabase.from("diagnostic_codes").select(Columns.list("id","code","system","title_fr","title_ar","description_fr","description_ar","severity","category","causes_fr","causes_ar","diagnostic_steps_fr","diagnostic_steps_ar","repair_summary_fr","repair_summary_ar")){filter{inList("id",codeIds)}}.decodeList<DiagnosticCodeRow>()
-        val engineLinks=supabase.from("vehicle_year_engines").select(Columns.list("model_year_id","engine_id","market","data_status")){filter{inList("model_year_id",years.map{it.id})}}.decodeList<VehicleYearEngineRow>().groupBy{it.modelYearId}
-        val trimLinks=supabase.from("vehicle_year_trim_links").select(Columns.list("model_year_id","trim_id")){filter{inList("model_year_id",years.map{it.id})}}.decodeList<YearTrimLinkRow>().groupBy{it.modelYearId}
-        val specLinks=supabase.from("vehicle_year_specification_links").select(Columns.list("model_year_id","specification_id")){filter{inList("model_year_id",years.map{it.id})}}.decodeList<YearSpecLinkRow>().groupBy{it.modelYearId}
-        val ecuLinks=supabase.from("vehicle_year_ecu_links").select(Columns.list("model_year_id","ecu_id")){filter{inList("model_year_id",years.map{it.id})}}.decodeList<YearEcuLinkRow>().groupBy{it.modelYearId}
-        return years.sortedByDescending{it.modelYear}.map{year->
+        val yearIds=years.map{it.id}
+        val engineLinks=supabase.from("vehicle_year_engines").select(Columns.list("model_year_id","engine_id","market","data_status")){filter{inList("model_year_id",yearIds)}}.decodeList<VehicleYearEngineRow>().groupBy{it.modelYearId}
+        val trimLinks=supabase.from("vehicle_year_trim_links").select(Columns.list("model_year_id","trim_id")){filter{inList("model_year_id",yearIds)}}.decodeList<YearTrimLinkRow>().groupBy{it.modelYearId}
+        val specLinks=supabase.from("vehicle_year_specification_links").select(Columns.list("model_year_id","specification_id")){filter{inList("model_year_id",yearIds)}}.decodeList<YearSpecLinkRow>().groupBy{it.modelYearId}
+        val ecuLinks=supabase.from("vehicle_year_ecu_links").select(Columns.list("model_year_id","ecu_id")){filter{inList("model_year_id",yearIds)}}.decodeList<YearEcuLinkRow>().groupBy{it.modelYearId}
+        val result=years.sortedByDescending{it.modelYear}.map{year->
             val generation=year.generationId?.let{id->generations.firstOrNull{it.id==id&&containsYear(it.yearFrom,it.yearTo,year.modelYear)}}?:generations.firstOrNull{containsYear(it.yearFrom,it.yearTo,year.modelYear)}
             val gid=generation?.id
             val directIds=engineLinks[year.id].orEmpty().map{it.engineId}.toSet()
@@ -73,6 +77,9 @@ class VehicleRepository {
             val diagnostics=dLinks.filter{(it.generationId==null||it.generationId==gid)&&(it.engineId==null||it.engineId in engineIds)}.mapNotNull{link->codes.firstOrNull{it.id==link.codeId}}.distinctBy{it.id}
             VehicleYearProfile(year.modelYear,generation,engines,trims,specs,ecus,diagnostics)
         }
+        profileCache[resolved]=result
+        profileCache[modelId]=result
+        return result
     }
 
     @Serializable private data class VehicleYearIdRow(val id:String,@SerialName("model_year") val modelYear:Int)
