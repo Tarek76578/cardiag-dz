@@ -6,10 +6,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
+/** Production launcher for the unified CarDiag experience. */
 class CarDiagModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CarDiagExactApp() }
+        setContent { ProfessionalDashboard() }
     }
 }
 
