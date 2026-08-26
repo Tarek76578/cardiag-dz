@@ -8,22 +8,37 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/** CarDiag automotive palette: deep blue-black, not bright blue. */
+/**
+ * CarDiag premium automotive design system.
+ * Blue is the single product accent; green/orange/red are reserved for status.
+ */
 object CarDiagColors {
-    val Primary = Color(0xFF1B2733)
-    val PrimaryStrong = Color(0xFF263746)
-    val Accent = Color(0xFF8FA9BF)
-    val AccentBright = Color(0xFFB8CBD9)
-    val DarkBackground = Color(0xFF070B0F)
-    val DarkSurface = Color(0xFF0D141B)
-    val DarkSurfaceElevated = Color(0xFF131D26)
-    val DarkBorder = Color(0xFF22303C)
-    val LightBackground = Color(0xFFEFF3F6)
+    // Brand / accent
+    val Primary = Color(0xFF2563EB)
+    val PrimaryStrong = Color(0xFF1D4ED8)
+    val Accent = Color(0xFF38BDF8)
+    val AccentBright = Color(0xFF7DD3FC)
+
+    // Dark automotive surfaces
+    val DarkBackground = Color(0xFF070A0F)
+    val DarkSurface = Color(0xFF0E141D)
+    val DarkSurfaceElevated = Color(0xFF151E2A)
+    val DarkBorder = Color(0xFF243244)
+    val DarkOnSurface = Color(0xFFF1F5F9)
+    val DarkMuted = Color(0xFFB8C4D1)
+
+    // Light mode
+    val LightBackground = Color(0xFFEFF3F7)
     val LightSurface = Color(0xFFF8FAFC)
-    val LightBorder = Color(0xFFD3DDE5)
-    val Success = Color(0xFF39B982)
-    val Warning = Color(0xFFE6A23C)
-    val Critical = Color(0xFFE85B68)
+    val LightSurfaceVariant = Color(0xFFE8EEF5)
+    val LightBorder = Color(0xFFD7E0EA)
+    val LightOnSurface = Color(0xFF111827)
+    val LightMuted = Color(0xFF526174)
+
+    // Diagnostic status semantics — never use these as decorative accents.
+    val Success = Color(0xFF22C55E)
+    val Warning = Color(0xFFF59E0B)
+    val Critical = Color(0xFFEF4444)
 }
 
 object CarDiagShapes {
@@ -48,29 +63,43 @@ fun CarDiagTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     val colors = if (darkTheme) darkColorScheme(
         primary = CarDiagColors.Primary,
         onPrimary = Color.White,
+        primaryContainer = CarDiagColors.PrimaryStrong,
+        onPrimaryContainer = Color.White,
         secondary = CarDiagColors.Accent,
-        onSecondary = Color.White,
+        onSecondary = Color(0xFF041018),
+        secondaryContainer = Color(0xFF123B55),
+        onSecondaryContainer = Color(0xFFD7F2FF),
         tertiary = CarDiagColors.AccentBright,
+        onTertiary = Color(0xFF061018),
         background = CarDiagColors.DarkBackground,
-        onBackground = Color(0xFFE7EDF2),
+        onBackground = CarDiagColors.DarkOnSurface,
         surface = CarDiagColors.DarkSurface,
-        onSurface = Color(0xFFE7EDF2),
+        onSurface = CarDiagColors.DarkOnSurface,
         surfaceVariant = CarDiagColors.DarkSurfaceElevated,
-        onSurfaceVariant = Color(0xFFA9B7C2),
+        onSurfaceVariant = CarDiagColors.DarkMuted,
         outline = CarDiagColors.DarkBorder,
-        error = CarDiagColors.Critical
+        error = CarDiagColors.Critical,
+        onError = Color.White
     ) else lightColorScheme(
-        primary = CarDiagColors.Primary,
+        primary = CarDiagColors.PrimaryStrong,
         onPrimary = Color.White,
-        secondary = Color(0xFF40596D),
+        primaryContainer = Color(0xFFDCE8FF),
+        onPrimaryContainer = Color(0xFF08245F),
+        secondary = Color(0xFF334155),
         onSecondary = Color.White,
+        secondaryContainer = Color(0xFFE2E8F0),
+        onSecondaryContainer = Color(0xFF172033),
+        tertiary = Color(0xFF0284C7),
+        onTertiary = Color.White,
         background = CarDiagColors.LightBackground,
+        onBackground = CarDiagColors.LightOnSurface,
         surface = CarDiagColors.LightSurface,
-        onSurface = Color(0xFF17212A),
-        surfaceVariant = Color(0xFFE5EBF0),
-        onSurfaceVariant = Color(0xFF52616D),
+        onSurface = CarDiagColors.LightOnSurface,
+        surfaceVariant = CarDiagColors.LightSurfaceVariant,
+        onSurfaceVariant = CarDiagColors.LightMuted,
         outline = CarDiagColors.LightBorder,
-        error = Color(0xFFB4233C)
+        error = Color(0xFFDC2626),
+        onError = Color.White
     )
     MaterialTheme(colorScheme = colors, content = content)
 }
