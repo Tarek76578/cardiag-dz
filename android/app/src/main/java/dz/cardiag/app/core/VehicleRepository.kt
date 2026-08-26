@@ -1,5 +1,6 @@
 package dz.cardiag.app.core
 
+import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.serialization.SerialName
@@ -41,7 +42,11 @@ class VehicleRepository {
             val specLinks = runCatching{supabase.from("vehicle_year_specification_links").select(Columns.list("model_year_id","specification_id")){filter{eq("model_year_id",year.id)}}.decodeList<YearSpecLinkRow>()}.getOrDefault(emptyList())
             val specifications = specLinks.mapNotNull{link->runCatching{supabase.from("vehicle_specifications").select(Columns.list("id","generation_id","engine_id","trim_id","key","value_text","value_number","unit")){filter{eq("id",link.specificationId)}}.decodeSingle<VehicleSpecificationRow>()}.getOrNull()}.filter{generationId==null || it.generationId==generationId}.filter{it.engineId==null || it.engineId in engineIds}.filter{it.trimId==null || it.trimId in trimIds}
             val ecuLinks = runCatching{supabase.from("vehicle_year_ecu_links").select(Columns.list("model_year_id","ecu_id")){filter{eq("model_year_id",year.id)}}.decodeList<YearEcuLinkRow>()}.getOrDefault(emptyList())
-            val ecus = ecuLinks.mapNotNull{link->runCatching{supabase.from("vehicle_ecus").select(Columns.list("id","generation_id","engine_id","ecu_id","required","year_from","year_to","notes")){filter{eq("id",link.ecuId)}}.decodeSingle<VehicleEcuRow>()}.getOrNull()}.mapNotNull{ecu->runCatching{supabase.from("ecu_modules").select(Columns.list("id","manufacturer","name","family","ecu_type","part_numbers","protocols")){filter{eq("id",ecu.ecuId)}}.decodeSingle<EcuModuleRow>().getOrNull()?.let{ecu to it}}
+            val ecus = ecuLinks.mapNotNull { link ->
+                val ecu = runCatching { supabase.from("vehicle_ecus").select(Columns.list("id","generation_id","engine_id","ecu_id","required","year_from","year_to","notes")){filter{eq("id",link.ecuId)}}.decodeSingle<VehicleEcuRow>() }.getOrNull() ?: return@mapNotNull null
+                val module = runCatching { supabase.from("ecu_modules").select(Columns.list("id","manufacturer","name","family","ecu_type","part_numbers","protocols")){filter{eq("id",ecu.ecuId)}}.decodeSingle<EcuModuleRow>() }.getOrNull() ?: return@mapNotNull null
+                ecu to module
+            }
             val dLinks = supabase.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability","notes_fr","notes_ar")){filter{eq("model_id",modelId)}}.decodeList<DiagnosticCodeVehicleRow>().filter{(it.generationId==null || it.generationId==generationId) && (it.engineId==null || it.engineId in engineIds)}
             val diagnostics = dLinks.mapNotNull{link->runCatching{supabase.from("diagnostic_codes").select(Columns.list("id","code","system","title_fr","title_ar","description_fr","description_ar","severity","category","causes_fr","causes_ar","diagnostic_steps_fr","diagnostic_steps_ar","repair_summary_fr","repair_summary_ar")){filter{eq("id",link.codeId)}}.decodeSingle<DiagnosticCodeRow>()}.getOrNull()}.distinctBy{it.id}
             VehicleYearProfile(year.modelYear,generation,engines,trims,specifications,ecus,diagnostics)
