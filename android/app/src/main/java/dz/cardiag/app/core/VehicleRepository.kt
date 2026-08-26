@@ -18,6 +18,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class EcuModuleRow(val id:String,val manufacturer:String?=null,val name:String,val family:String?=null,@SerialName("ecu_type") val ecuType:String="other",@SerialName("part_numbers") val partNumbers:List<String> = emptyList(),val protocols:List<String> = emptyList())
 @Serializable data class DiagnosticCodeVehicleRow(val id:String,@SerialName("code_id") val codeId:String,@SerialName("model_id") val modelId:String?=null,@SerialName("generation_id") val generationId:String?=null,@SerialName("engine_id") val engineId:String?=null,@SerialName("ecu_id") val ecuId:String?=null,val applicability:String="confirmed",@SerialName("notes_fr") val notesFr:String?=null,@SerialName("notes_ar") val notesAr:String?=null)
 @Serializable data class DiagnosticCodeRow(val id:String,val code:String,val system:String?=null,@SerialName("title_fr") val titleFr:String?=null,@SerialName("title_ar") val titleAr:String?=null,@SerialName("description_fr") val descriptionFr:String?=null,@SerialName("description_ar") val descriptionAr:String?=null,val severity:String?=null,val category:String?=null,@SerialName("causes_fr") val causesFr:String?=null,@SerialName("causes_ar") val causesAr:String?=null,@SerialName("diagnostic_steps_fr") val diagnosticStepsFr:String?=null,@SerialName("diagnostic_steps_ar") val diagnosticStepsAr:String?=null,@SerialName("repair_summary_fr") val repairSummaryFr:String?=null,@SerialName("repair_summary_ar") val repairSummaryAr:String?=null)
+@Serializable private data class VehicleModelIdentityRow(val id:String,@SerialName("make_id") val makeId:String,val name:String)
 
 data class VehicleYearProfile(val year:Int,val generation:VehicleGenerationRow?,val engines:List<VehicleEngineRow>,val trims:List<VehicleTrimRow>,val specifications:List<VehicleSpecificationRow>,val ecus:List<Pair<VehicleEcuRow,EcuModuleRow>>,val diagnostics:List<DiagnosticCodeRow>)
 
@@ -25,10 +26,26 @@ class VehicleRepository {
     private val supabase = SupabaseClient.client
     private fun containsYear(from:Int?,to:Int?,year:Int) = (from==null || year>=from) && (to==null || year<=to)
 
+    private suspend fun resolveModelId(modelId:String):String {
+        val initial = runCatching { supabase.from("vehicle_model_years").select(Columns.list("id")){filter{eq("model_id",modelId)};limit(1)}.decodeList<Map<String,String>>() }.getOrDefault(emptyList())
+        if (initial.isNotEmpty()) return modelId
+        val identity = runCatching { supabase.from("vehicle_models").select(Columns.list("id","make_id","name")){filter{eq("id",modelId)}}.decodeSingle<VehicleModelIdentityRow>() }.getOrNull() ?: return modelId
+        val candidates = runCatching { supabase.from("vehicle_models").select(Columns.list("id","make_id","name")){filter{eq("make_id",identity.makeId);eq("name",identity.name)}}.decodeList<VehicleModelIdentityRow>() }.getOrDefault(emptyList())
+        var bestId = modelId
+        var bestCount = 0
+        for (candidate in candidates) {
+            val count = runCatching { supabase.from("vehicle_model_years").select(Columns.list("id")){filter{eq("model_id",candidate.id)}}.decodeList<Map<String,String>>().size }.getOrDefault(0)
+            if (count > bestCount) { bestCount = count; bestId = candidate.id }
+        }
+        return bestId
+    }
+
     suspend fun getVehicleProfile(modelId:String):List<VehicleYearProfile> {
         require(modelId.isNotBlank())
-        val years = supabase.from("vehicle_model_years").select(Columns.list("id","model_id","generation_id","model_year","market","data_status")){filter{eq("model_id",modelId)}}.decodeList<VehicleModelYearRow>()
-        val generations = supabase.from("vehicle_generations").select(Columns.list("id","model_id","name","code","year_from","year_to","body_type","platform_code","description_fr","description_ar","image_url")){filter{eq("model_id",modelId)}}.decodeList<VehicleGenerationRow>()
+        val resolvedModelId = resolveModelId(modelId)
+        val years = supabase.from("vehicle_model_years").select(Columns.list("id","model_id","generation_id","model_year","market","data_status")){filter{eq("model_id",resolvedModelId)}}.decodeList<VehicleModelYearRow>()
+        if (years.isEmpty()) return emptyList()
+        val generations = supabase.from("vehicle_generations").select(Columns.list("id","model_id","name","code","year_from","year_to","body_type","platform_code","description_fr","description_ar","image_url")){filter{eq("model_id",resolvedModelId)}}.decodeList<VehicleGenerationRow>()
         return years.sortedByDescending{it.modelYear}.map { year ->
             val generation = year.generationId?.let{id->generations.firstOrNull{it.id==id && containsYear(it.yearFrom,it.yearTo,year.modelYear)}} ?: generations.firstOrNull{containsYear(it.yearFrom,it.yearTo,year.modelYear)}
             val generationId = generation?.id
@@ -46,7 +63,7 @@ class VehicleRepository {
                 val module = runCatching { supabase.from("ecu_modules").select(Columns.list("id","manufacturer","name","family","ecu_type","part_numbers","protocols")){filter{eq("id",ecu.ecuId)}}.decodeSingle<EcuModuleRow>() }.getOrNull() ?: return@mapNotNull null
                 ecu to module
             }
-            val dLinks = supabase.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability","notes_fr","notes_ar")){filter{eq("model_id",modelId)}}.decodeList<DiagnosticCodeVehicleRow>().filter{(it.generationId==null || it.generationId==generationId) && (it.engineId==null || it.engineId in engineIds)}
+            val dLinks = supabase.from("diagnostic_code_vehicles").select(Columns.list("id","code_id","model_id","generation_id","engine_id","ecu_id","applicability","notes_fr","notes_ar")){filter{eq("model_id",resolvedModelId)}}.decodeList<DiagnosticCodeVehicleRow>().filter{(it.generationId==null || it.generationId==generationId) && (it.engineId==null || it.engineId in engineIds)}
             val diagnostics = dLinks.mapNotNull{link->runCatching{supabase.from("diagnostic_codes").select(Columns.list("id","code","system","title_fr","title_ar","description_fr","description_ar","severity","category","causes_fr","causes_ar","diagnostic_steps_fr","diagnostic_steps_ar","repair_summary_fr","repair_summary_ar")){filter{eq("id",link.codeId)}}.decodeSingle<DiagnosticCodeRow>()}.getOrNull()}.distinctBy{it.id}
             VehicleYearProfile(year.modelYear,generation,engines,trims,specifications,ecus,diagnostics)
         }
