@@ -1,0 +1,115 @@
+name: Advanced UI Patch Release APK (no Gradle build)
+
+on:
+  push:
+    branches: [advanced-dex-patch-ui]
+    paths:
+      - 'tools/patch_release_advanced.py'
+      - '.github/workflows/apk-patch-advanced.yml'
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Source GitHub Actions run ID'
+        required: true
+        default: '32936420867'
+      artifact_id:
+        description: 'Release APK artifact ID'
+        required: true
+        default: '9595092166'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  advanced-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patch tooling
+        uses: actions/checkout@v5
+
+      - name: Resolve source artifact
+        id: source
+        env:
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          INPUT_ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          echo "run_id=${INPUT_RUN_ID:-32936420867}" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=${INPUT_ARTIFACT_ID:-9595092166}" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact Release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --location \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            -o release-artifact.zip
+          unzip -q release-artifact.zip -d source-artifact
+          APK="$(find source-artifact -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          cp "$APK" source-release.apk
+
+      - name: Verify Compose Release identity
+        run: |
+          set -euo pipefail
+          unzip -p source-release.apk classes.dex > classes.dex
+          python3 - <<'PY'
+          from pathlib import Path
+          b = Path('classes.dex').read_bytes()
+          sig = bytes.fromhex('33 27 1b ff 00 00 00 00 71 20 e3 53 10 00 0b 00 68 00 be 2b 18 00')
+          assert b.find(sig) >= 0, 'Refusing unknown APK: verified CarDiag theme signature missing.'
+          for name in ('CarDiagExactApp','HomeScreen','ExactVehicleProfileScreen','GuidedDiagnosisScreen'):
+              assert name.encode() in b, f'missing expected Compose symbol: {name}'
+          print('Verified requested CarDiag Compose Release APK.')
+          PY
+
+      - name: Install apktool
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y apktool
+          apktool --version
+
+      - name: Decode APK to smali
+        run: |
+          set -euo pipefail
+          apktool d --force --no-res "$PWD/source-release.apk" -o decoded
+          find decoded -type f -name '*.smali' | wc -l
+
+      - name: Apply advanced Compose UI patch
+        run: |
+          set -euo pipefail
+          python3 tools/patch_release_advanced.py decoded
+
+      - name: Rebuild APK with apktool (no Gradle)
+        run: |
+          set -euo pipefail
+          apktool b decoded -o patched-unsigned.apk
+
+      - name: Align and sign patched APK
+        run: |
+          set -euo pipefail
+          SDK_BUILD_TOOLS="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$SDK_BUILD_TOOLS/zipalign" -f -p 4 patched-unsigned.apk patched-aligned.apk
+          keytool -genkeypair -v -keystore cardiag-advanced-patch.jks \
+            -storepass changeit -keypass changeit -alias cardiag-advanced-patch \
+            -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname 'CN=CarDiag Advanced UI Patch, O=CarDiag, C=DZ'
+          "$SDK_BUILD_TOOLS/apksigner" sign \
+            --ks cardiag-advanced-patch.jks --ks-pass pass:changeit \
+            --key-pass pass:changeit --ks-key-alias cardiag-advanced-patch \
+            --out cardiag-advanced-ui-patched.apk patched-aligned.apk
+          "$SDK_BUILD_TOOLS/apksigner" verify --verbose cardiag-advanced-ui-patched.apk
+
+      - name: Upload advanced patched APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: cardiag-advanced-ui-patched-no-gradle
+          path: cardiag-advanced-ui-patched.apk
+          if-no-files-found: error
+          retention-days: 14
