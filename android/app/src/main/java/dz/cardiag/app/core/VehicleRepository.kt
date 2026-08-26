@@ -1,5 +1,6 @@
 package dz.cardiag.app.core
 
+import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.serialization.SerialName
@@ -20,7 +21,7 @@ import kotlinx.serialization.Serializable
 @Serializable private data class YearSpecLinkRow(@SerialName("model_year_id") val modelYearId:String,@SerialName("specification_id") val specificationId:String)
 @Serializable private data class YearEcuLinkRow(@SerialName("model_year_id") val modelYearId:String,@SerialName("ecu_id") val ecuId:String)
 
- data class VehicleYearProfile(val year:Int,val generation:VehicleGenerationRow?,val engines:List<VehicleEngineRow>,val trims:List<VehicleTrimRow>,val specifications:List<VehicleSpecificationRow>,val ecus:List<Pair<VehicleEcuRow,EcuModuleRow>>,val diagnostics:List<DiagnosticCodeRow>)
+data class VehicleYearProfile(val year:Int,val generation:VehicleGenerationRow?,val engines:List<VehicleEngineRow>,val trims:List<VehicleTrimRow>,val specifications:List<VehicleSpecificationRow>,val ecus:List<Pair<VehicleEcuRow,EcuModuleRow>>,val diagnostics:List<DiagnosticCodeRow>)
 
 class VehicleRepository {
     private val supabase=SupabaseClient.client
