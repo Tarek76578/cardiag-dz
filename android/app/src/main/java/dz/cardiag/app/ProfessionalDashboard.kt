@@ -2,7 +2,6 @@ package dz.cardiag.app
 
 import android.content.Context
 import android.content.Intent
-import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,15 +34,8 @@ fun ProfessionalDashboard() {
     var dark by remember { mutableStateOf(prefs.getBoolean(DARK_MODE, true)) }
     val vehicleName = prefs.getString(VEHICLE_NAME, null)
     val vehicleEngine = prefs.getString(VEHICLE_ENGINE, null)
-
-    fun setArabic(value: Boolean) {
-        arabic = value
-        prefs.edit().putBoolean(ARABIC, value).apply()
-    }
-    fun setDark(value: Boolean) {
-        dark = value
-        prefs.edit().putBoolean(DARK_MODE, value).apply()
-    }
+    fun setArabic(value: Boolean) { arabic = value; prefs.edit().putBoolean(ARABIC, value).apply() }
+    fun setDark(value: Boolean) { dark = value; prefs.edit().putBoolean(DARK_MODE, value).apply() }
 
     CarDiagTheme(darkTheme = dark) {
         CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides if (arabic) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
@@ -70,7 +62,7 @@ fun ProfessionalDashboard() {
                             }
                         }
                     }
-                    item { VehicleStatusCard(vehicleName, vehicleEngine, arabic) { open(context, VehicleCatalogActivity::class.java) } }
+                    item { VehicleStatusCard(vehicleName, vehicleEngine, arabic) { open(context, ObdScannerActivity::class.java) } }
                     item { Text(if (arabic) "أدوات التشخيص" else "Diagnostic tools", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold) }
                     item { ToolGrid(arabic) { activity -> open(context, activity) } }
                     item {
