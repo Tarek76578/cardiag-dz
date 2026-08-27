@@ -2,6 +2,7 @@ package dz.cardiag.app
 
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,22 +24,34 @@ import dz.cardiag.app.ui.theme.CarDiagTheme
 private const val PROFESSIONAL_PREFS = "cardiag_professional"
 private const val VEHICLE_NAME = "vehicle_name"
 private const val VEHICLE_ENGINE = "vehicle_engine"
+private const val DARK_MODE = "dark_mode"
+private const val ARABIC = "arabic"
 
 @Composable
 fun ProfessionalDashboard() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences(PROFESSIONAL_PREFS, Context.MODE_PRIVATE) }
-    var arabic by remember { mutableStateOf(false) }
-    var dark by remember { mutableStateOf(true) }
+    var arabic by remember { mutableStateOf(prefs.getBoolean(ARABIC, false)) }
+    var dark by remember { mutableStateOf(prefs.getBoolean(DARK_MODE, true)) }
     val vehicleName = prefs.getString(VEHICLE_NAME, null)
     val vehicleEngine = prefs.getString(VEHICLE_ENGINE, null)
+
+    fun setArabic(value: Boolean) {
+        arabic = value
+        prefs.edit().putBoolean(ARABIC, value).apply()
+    }
+    fun setDark(value: Boolean) {
+        dark = value
+        prefs.edit().putBoolean(DARK_MODE, value).apply()
+    }
+
     CarDiagTheme(darkTheme = dark) {
         CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides if (arabic) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
             Scaffold(
                 topBar = {
                     TopAppBar(
                         title = { Column { Text("CarDiag", fontWeight = FontWeight.Black); Text(if (arabic) "تشخيص ذكي للسيارات" else "Smart Vehicle Diagnostics", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-                        actions = { IconButton(onClick = { dark = !dark }) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = null) } }
+                        actions = { IconButton(onClick = { setDark(!dark) }) { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, contentDescription = if (arabic) "الوضع الفاتح" else "Light mode") } }
                     )
                 }
             ) { padding ->
@@ -57,13 +70,13 @@ fun ProfessionalDashboard() {
                             }
                         }
                     }
-                    item { VehicleStatusCard(vehicleName, vehicleEngine, arabic) { open(context, CarDiagModernActivity::class.java) } }
+                    item { VehicleStatusCard(vehicleName, vehicleEngine, arabic) { open(context, VehicleCatalogActivity::class.java) } }
                     item { Text(if (arabic) "أدوات التشخيص" else "Diagnostic tools", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold) }
                     item { ToolGrid(arabic) { activity -> open(context, activity) } }
                     item {
                         Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(10.dp)); Text(if (arabic) "CarDiag AI" else "CarDiag AI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold) }
+                                Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary); Spacer(Modifier.width(10.dp)); Text("CarDiag AI", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold) }
                                 Text(if (arabic) "حلّل الأعراض والأعطال واحصل على خطوات فحص منظمة." else "Analyze symptoms and faults with structured diagnostic guidance.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 OutlinedButton(onClick = { open(context, AiSymptomDiagnosisActivity::class.java) }, modifier = Modifier.fillMaxWidth()) { Text(if (arabic) "تشخيص الأعراض" else "SYMPTOM DIAGNOSIS") }
                             }
@@ -71,8 +84,8 @@ fun ProfessionalDashboard() {
                     }
                     item {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            AssistChip(onClick = { arabic = !arabic }, label = { Text(if (arabic) "Français" else "العربية") }, leadingIcon = { Icon(Icons.Default.Language, null) })
-                            AssistChip(onClick = { dark = !dark }, label = { Text(if (dark) "Light" else "Dark") }, leadingIcon = { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, null) })
+                            AssistChip(onClick = { setArabic(!arabic) }, label = { Text(if (arabic) "Français" else "العربية") }, leadingIcon = { Icon(Icons.Default.Language, null) })
+                            AssistChip(onClick = { setDark(!dark) }, label = { Text(if (dark) "Light" else "Dark") }, leadingIcon = { Icon(if (dark) Icons.Default.LightMode else Icons.Default.DarkMode, null) })
                         }
                     }
                 }
