@@ -26,6 +26,8 @@ jobs:
           cd repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore(agent): bootstrap autonomous cycle"
+          printf 'bootstrap=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > agent-bootstrap.trigger
+          git add agent-bootstrap.trigger
+          git commit -m "ci(agent): bootstrap autonomous cycle"
           git push origin HEAD:main
-          echo "Bootstrap commit pushed; the Agent push trigger will start the autonomous engineer."
+          echo "Bootstrap trigger committed; the Agent path-filtered push trigger should start the autonomous engineer."
