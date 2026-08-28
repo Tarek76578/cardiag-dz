@@ -2,6 +2,7 @@ package dz.cardiag.app.core.diagnostics
 
 import android.content.Context
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.builtins.ListSerializer
 import java.util.UUID
 
 interface ScanRepository {
@@ -18,10 +19,7 @@ class OfflineFirstScanRepository(context: Context) : ScanRepository {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     override suspend fun saveScan(scan: ScanResult) {
-        val ids = mutableListOf<String>().apply { addAll(readIds("scan_ids")) }
-        if (!ids.contains(scan.sessionId)) ids.add(0, scan.sessionId)
-        while (ids.size > 50) ids.removeLast()
-        prefs.edit().putString("scan:${scan.sessionId}", json.encodeToString(ScanResult.serializer(), scan)).putStringSet("scan_ids", ids.toSet()).apply()
+        saveItem("scan", "scan_ids", scan.sessionId, json.encodeToString(ScanResult.serializer(), scan))
     }
 
     override suspend fun getScan(sessionId: String): ScanResult? = prefs.getString("scan:$sessionId", null)?.let { runCatching { json.decodeFromString(ScanResult.serializer(), it) }.getOrNull() }
@@ -29,17 +27,24 @@ class OfflineFirstScanRepository(context: Context) : ScanRepository {
     override suspend fun latestScans(limit: Int): List<ScanResult> = readIds("scan_ids").take(limit.coerceAtLeast(0)).mapNotNull { getScan(it) }
 
     override suspend fun saveReport(report: DiagnosticReport) {
-        val ids = mutableListOf<String>().apply { addAll(readIds("report_ids")) }
-        if (!ids.contains(report.reportId)) ids.add(0, report.reportId)
-        while (ids.size > 50) ids.removeLast()
-        prefs.edit().putString("report:${report.reportId}", json.encodeToString(DiagnosticReport.serializer(), report)).putStringSet("report_ids", ids.toSet()).apply()
+        saveItem("report", "report_ids", report.reportId, json.encodeToString(DiagnosticReport.serializer(), report))
     }
 
     override suspend fun getReport(reportId: String): DiagnosticReport? = prefs.getString("report:$reportId", null)?.let { runCatching { json.decodeFromString(DiagnosticReport.serializer(), it) }.getOrNull() }
 
     override suspend fun latestReports(limit: Int): List<DiagnosticReport> = readIds("report_ids").take(limit.coerceAtLeast(0)).mapNotNull { getReport(it) }
 
-    private fun readIds(key: String): List<String> = prefs.getStringSet(key, emptySet()).orEmpty().sortedByDescending { it }
+    private fun saveItem(prefix: String, indexKey: String, id: String, payload: String) {
+        val ids = readIds(indexKey).filterNot { it == id }.toMutableList()
+        ids.add(0, id)
+        val removed = ids.drop(50)
+        ids.subList(50.coerceAtMost(ids.size), ids.size).clear()
+        val editor = prefs.edit().putString("$prefix:$id", payload).putString("$indexKey", json.encodeToString(ListSerializer(String.serializer()), ids))
+        removed.forEach { editor.remove("$prefix:$it") }
+        editor.apply()
+    }
+
+    private fun readIds(key: String): List<String> = prefs.getString(key, null)?.let { runCatching { json.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull() }.orEmpty()
 
     companion object {
         fun newSessionId(): String = UUID.randomUUID().toString()
