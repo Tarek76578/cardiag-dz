@@ -16,6 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: Validate manual trigger
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          echo "CARdiag_AGENT_TRIGGER_OK"
+
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
@@ -69,13 +75,13 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md first and inspect the entire repository before making changes.
+          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md and inspect the entire repository before making changes.
 
 MISSION: continuously improve the actual CarDiag product, not merely write a report.
 
 PHASE 1 — DEEP AUDIT: inspect Android/Kotlin/Compose architecture, navigation/state, crashes, lifecycle, permissions, Bluetooth/OBD/ELM327 handling, VIN/DTC/live data, vehicle catalog/data integrity, Arabic RTL, French localization, accessibility, adaptive layouts, UI consistency, loading/empty/error states, performance, battery, privacy, Supabase/auth/RLS security, secrets, dependencies, Gradle, tests, runtime coverage, release configuration and CI.
 
-PHASE 2 — RESEARCH: use fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative OBD/automotive references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record URLs and access dates. Never fabricate automotive facts, prices, services, compatibility, DTC meanings or test results.
+PHASE 2 — RESEARCH: use fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative OBD/automotive references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record source URLs and access dates in market-audit.md. Never fabricate automotive facts, prices, services, compatibility, DTC meanings or test results.
 
 PHASE 3 — PRIORITIZE: rank findings by severity, user impact, security risk, correctness and release impact. Fix the highest-value VERIFIED problems that can safely be fixed in this run. Do not make cosmetic or speculative changes merely to create commits.
 
@@ -101,6 +107,8 @@ At the end, leave all safe verified improvements in the working tree."
           set -euo pipefail
           git diff --check
           test -f AGENTS.md
+          test -f agent-state.md || true
+          test -f market-audit.md || true
 
       - name: Commit autonomous improvements
         run: |
