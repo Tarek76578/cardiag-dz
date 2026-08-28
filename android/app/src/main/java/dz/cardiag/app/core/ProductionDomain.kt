@@ -28,6 +28,24 @@ data class ObdConnectionState(
 )
 
 @Serializable
+data class ReadinessStatus(
+    val milOn: Boolean? = null,
+    val monitorsReady: Boolean? = null,
+    val raw: String = ""
+)
+
+@Serializable
+data class DiagnosticFinding(
+    val code: String,
+    val severity: String,
+    val score: Int,
+    val confidence: Double,
+    val causes: List<String> = emptyList(),
+    val tests: List<String> = emptyList(),
+    val recommendations: List<String> = emptyList()
+)
+
+@Serializable
 data class LivePidValue(
     val pid: String,
     val label: String,
