@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dz.cardiag.app.core.DiagnosticService
 import dz.cardiag.app.core.SupabaseClient
@@ -24,7 +25,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 @Serializable
-data class DtcGuide(@SerialName("id") val id: String? = null,val code: String,val system: String? = null,val category: String? = null,val severity: String? = null,@SerialName("description_fr") val descriptionFr: String? = null,@SerialName("causes_fr") val causesFr: String? = null,@SerialName("diagnostic_steps_fr") val diagnosticStepsFr: String? = null,@SerialName("repair_summary_fr") val repairSummaryFr: String? = null)
+data class DtcGuide(@SerialName("id") val id: String? = null, val code: String, val system: String? = null, val category: String? = null, val severity: String? = null, @SerialName("description_fr") val descriptionFr: String? = null, @SerialName("causes_fr") val causesFr: String? = null, @SerialName("diagnostic_steps_fr") val diagnosticStepsFr: String? = null, @SerialName("repair_summary_fr") val repairSummaryFr: String? = null)
 
 class GuidedDiagnosisActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,10 +53,9 @@ private fun GuidedDiagnosisScreen(modelId: String?, modelName: String, initialCo
         if (!normalized.matches(Regex("[PBCU][0-3][0-9A-F]{3}"))) { errorMessage = "Entrez un code DTC valide, par exemple P0301."; return }
         scope.launch {
             loading = true; errorMessage = null; guide = null; aiResult = null
-            runCatching {
-                SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id","code","system","category","severity","description_fr","causes_fr","diagnostic_steps_fr","repair_summary_fr")) { filter { eq("code", normalized) } }.decodeList<DtcGuide>().firstOrNull()
-            }.onSuccess { result -> guide = result; if (result == null) errorMessage = "Code $normalized introuvable dans la base DTC." }
-             .onFailure { errorMessage = "Impossible de charger le DTC: ${it.message ?: "erreur réseau"}" }
+            runCatching { SupabaseClient.client.from("diagnostic_codes").select(Columns.list("id", "code", "system", "category", "severity", "description_fr", "causes_fr", "diagnostic_steps_fr", "repair_summary_fr")) { filter { eq("code", normalized) } }.decodeList<DtcGuide>().firstOrNull() }
+                .onSuccess { result -> guide = result; if (result == null) errorMessage = "Code $normalized introuvable dans la base DTC." }
+                .onFailure { errorMessage = "Impossible de charger le DTC: ${it.message ?: "erreur réseau"}" }
             loading = false
         }
     }
@@ -65,54 +65,34 @@ private fun GuidedDiagnosisScreen(modelId: String?, modelName: String, initialCo
         if (guide == null) { errorMessage = "Chargez d'abord un DTC valide."; return }
         scope.launch {
             aiLoading = true; errorMessage = null; aiResult = null
-            runCatching {
-                DiagnosticService().runDiagnostic(
-                    vehicleModelId = modelId,
-                    userVehicleId = null,
-                    complaint = "Guided DTC $normalized",
-                    language = "fr",
-                    codes = listOf(normalized),
-                    symptoms = buildJsonObject { put("source", "guided_dtc") },
-                    measurements = buildJsonObject {},
-                    vehicle = buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName) }
-                )
-            }.onSuccess { aiResult = it.toString() }
-             .onFailure { errorMessage = it.message ?: "Erreur du moteur AI." }
+            runCatching { DiagnosticService().runDiagnostic(modelId, null, "Guided DTC $normalized", "fr", listOf(normalized), buildJsonObject { put("source", "guided_dtc") }, buildJsonObject {}, buildJsonObject { put("model_id", modelId ?: ""); put("model_name", modelName) }) }
+                .onSuccess { aiResult = it.toString() }
+                .onFailure { errorMessage = it.message ?: "Erreur du moteur AI." }
             aiLoading = false
         }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Diagnostic guidé") }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding),contentPadding=PaddingValues(18.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-            item { Text(modelName, style=MaterialTheme.typography.titleLarge); Text(if(modelId!=null) "Véhicule sélectionné • contexte actif" else "Diagnostic sans OBD", color=MaterialTheme.colorScheme.onSurfaceVariant) }
-            item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) { Text("Diagnostic sans OBD",style=MaterialTheme.typography.titleMedium); Text("La base DTC et CarDiag AI peuvent expliquer un défaut sans ELM327. L'OBD devient nécessaire pour les mesures réelles.",color=MaterialTheme.colorScheme.onSurfaceVariant) } } }
-            item { OutlinedTextField(value=code,onValueChange={code=it.uppercase();guide=null;aiResult=null;errorMessage=null},modifier=Modifier.fillMaxWidth(),label={Text("Code DTC")},placeholder={Text("Ex. P0301")},singleLine=true) }
-            item { Button(onClick=::loadGuide,enabled=code.isNotBlank()&&!loading&&!aiLoading,modifier=Modifier.fillMaxWidth()) { Text(if(loading) "Chargement…" else "Rechercher le DTC") } }
-            item { OutlinedButton(onClick={context.startActivity(Intent(context,ObdScannerActivity::class.java).apply{putExtra("model_id",modelId);putExtra("model_name",modelName);putExtra("dtc_code",code.ifBlank{null})})},enabled=!loading&&!aiLoading,modifier=Modifier.fillMaxWidth()) { Text("Passer au diagnostic OBD / Live Data") } }
+    Scaffold(topBar = { TopAppBar(title = { Text("Diagnostic guidé", fontWeight = FontWeight.ExtraBold) }) }) { padding ->
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item { HeaderCard(modelName, modelId != null) }
+            item { OutlinedTextField(value = code, onValueChange = { code = it.uppercase(); guide = null; aiResult = null; errorMessage = null }, modifier = Modifier.fillMaxWidth(), label = { Text("Code DTC") }, placeholder = { Text("Ex. P0301") }, singleLine = true, supportingText = { Text("Format: P/B/C/U + 4 caractères") }) }
+            item { Button(onClick = ::loadGuide, enabled = code.isNotBlank() && !loading && !aiLoading, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) { Text(if (loading) "Chargement…" else "Rechercher le DTC") } }
+            item { OutlinedButton(onClick = { context.startActivity(Intent(context, ObdScannerActivity::class.java).apply { putExtra("model_id", modelId); putExtra("model_name", modelName); putExtra("dtc_code", code.ifBlank { null }) }) }, enabled = !loading && !aiLoading, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) { Text("Passer au diagnostic OBD / Live Data") } }
             if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            errorMessage?.let { message -> item { Text(message,color=MaterialTheme.colorScheme.error) } }
+            errorMessage?.let { message -> item { Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) { Text(message, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer) } } }
             guide?.let { d ->
-                item { DtcCard("${d.code} • ${d.system ?: "Système inconnu"}",d.descriptionFr ?: "Description non disponible") }
-                item { DtcCard("Sévérité / catégorie",listOfNotNull(d.severity,d.category).joinToString(" • ").ifBlank{"Non renseigné"}) }
-                item { DtcCard("Causes probables",d.causesFr ?: "Non renseignées") }
-                item { DtcCard("Étapes de diagnostic",d.diagnosticStepsFr ?: "Non renseignées") }
-                item { DtcCard("Réparation",d.repairSummaryFr ?: "Non renseignée") }
-                item { Button(onClick=::runAi,enabled=!aiLoading&&!loading,modifier=Modifier.fillMaxWidth()) { Text(if(aiLoading) "Analyse AI en cours…" else "Analyser avec CarDiag AI") } }
+                item { DtcCard("${d.code} • ${d.system ?: "Système inconnu"}", d.descriptionFr ?: "Description non disponible", true) }
+                item { DtcCard("Sévérité / catégorie", listOfNotNull(d.severity, d.category).joinToString(" • ").ifBlank { "Non renseigné" }) }
+                item { DtcCard("Causes probables", d.causesFr ?: "Non renseignées") }
+                item { DtcCard("Étapes de diagnostic", d.diagnosticStepsFr ?: "Non renseignées") }
+                item { DtcCard("Réparation", d.repairSummaryFr ?: "Non renseignée") }
+                item { Button(onClick = ::runAi, enabled = !aiLoading && !loading, modifier = Modifier.fillMaxWidth()) { Text(if (aiLoading) "Analyse AI en cours…" else "Analyser avec CarDiag AI") } }
             }
             aiResult?.let { raw -> item { AiResultCard(raw) } }
         }
     }
 }
 
-@Composable private fun DtcCard(title:String,body:String) { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) { Text(title,style=MaterialTheme.typography.titleMedium); Text(body) } } }
-@Composable private fun AiResultCard(raw:String) {
-    val diagnosis = runCatching { Json.parseToJsonElement(raw).jsonObject["diagnosis"]?.jsonObject }.getOrNull()
-    val summary = diagnosis?.get("summary")?.toString()?.trim('"') ?: "Analyse AI reçue."
-    val severity = diagnosis?.get("severity")?.toString()?.trim('"') ?: "unknown"
-    val confidence = diagnosis?.get("confidence")?.toString()?.trim('"') ?: "-"
-    val causes = diagnosis?.get("likely_causes")?.toString() ?: "[]"
-    val tests = diagnosis?.get("recommended_tests")?.toString() ?: "[]"
-    val repairs = diagnosis?.get("repair_guidance")?.toString() ?: "[]"
-    val safety = diagnosis?.get("safety_notes")?.toString() ?: "[]"
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(9.dp)) { Text("CarDiag AI",style=MaterialTheme.typography.titleLarge); Text(summary,style=MaterialTheme.typography.bodyLarge); Text("Sévérité: $severity • Confiance: $confidence"); Text("Causes probables: $causes"); Text("Tests recommandés: $tests"); Text("Conseils de réparation: $repairs"); Text("Sécurité: $safety",color=MaterialTheme.colorScheme.error); Text("لا تستبدل قطعة اعتمادًا على AI وحده؛ أكّد التشخيص بقياسات واختبارات فعلية.",color=MaterialTheme.colorScheme.onSurfaceVariant) } }
-}
+@Composable private fun HeaderCard(modelName: String, hasVehicle: Boolean) { Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("DIAGNOSTIC", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Text(modelName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black); Text(if (hasVehicle) "Contexte véhicule actif" else "Mode diagnostic sans véhicule", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+@Composable private fun DtcCard(title: String, body: String, emphasized: Boolean = false) { Card(Modifier.fillMaxWidth(), colors = if (emphasized) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else CardDefaults.cardColors()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold); Text(body, style = MaterialTheme.typography.bodyLarge) } } }
+@Composable private fun AiResultCard(raw: String) { val diagnosis = runCatching { Json.parseToJsonElement(raw).jsonObject["diagnosis"]?.jsonObject }.getOrNull(); val summary = diagnosis?.get("summary")?.toString()?.trim('"') ?: "Analyse AI reçue."; val severity = diagnosis?.get("severity")?.toString()?.trim('"') ?: "unknown"; val confidence = diagnosis?.get("confidence")?.toString()?.trim('"') ?: "-"; val causes = diagnosis?.get("likely_causes")?.toString() ?: "[]"; val tests = diagnosis?.get("recommended_tests")?.toString() ?: "[]"; val repairs = diagnosis?.get("repair_guidance")?.toString() ?: "[]"; val safety = diagnosis?.get("safety_notes")?.toString() ?: "[]"; Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) { Text("CarDiag AI", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black); Text(summary, style = MaterialTheme.typography.bodyLarge); Text("Sévérité: $severity • Confiance: $confidence"); Text("Causes probables: $causes"); Text("Tests recommandés: $tests"); Text("Conseils de réparation: $repairs"); Text("Sécurité: $safety", color = MaterialTheme.colorScheme.error); Text("لا تستبدل قطعة اعتمادًا على AI وحده؛ أكّد التشخيص بقياسات واختبارات فعلية.", color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
