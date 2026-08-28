@@ -68,15 +68,16 @@ jobs:
             adb shell settings put global window_animation_scale 0
             adb shell settings put global transition_animation_scale 0
             adb shell settings put global animator_duration_scale 0
-            adb install -r android/app/build/outputs/apk/debug/*.apk
-            adb shell pm list packages | grep -i cardiag
-            adb shell monkey -p com.cardiag.dz 1 || adb shell monkey -p $(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | tail -n 1 | cut -d/ -f1) 1
+            APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -n 1)
+            adb install -r "$APK"
+            PACKAGE="dz.cardiag.app.debug"
+            adb shell pm path "$PACKAGE"
+            adb shell monkey -p "$PACKAGE" 1
             sleep 8
             adb shell dumpsys activity activities | grep -E "mResumedActivity|ResumedActivity" || true
-            adb shell pidof com.cardiag.dz || true
-            adb logcat -d -t 500 | grep -Ei "FATAL EXCEPTION|AndroidRuntime|CarDiag" > runtime-log.txt || true
-            if grep -q "FATAL EXCEPTION\|AndroidRuntime" runtime-log.txt; then
-              cat runtime-log.txt
+            adb logcat -d -t 1000 > runtime-full-log.txt
+            if grep -Eq "FATAL EXCEPTION|AndroidRuntime: FATAL" runtime-full-log.txt; then
+              grep -E -A25 -B5 "FATAL EXCEPTION|AndroidRuntime: FATAL" runtime-full-log.txt || true
               exit 1
             fi
             adb exec-out screencap -p > cardiag-runtime.png
@@ -87,7 +88,7 @@ jobs:
         with:
           name: cardiag-runtime-evidence
           path: |
-            runtime-log.txt
+            runtime-full-log.txt
             cardiag-runtime.png
           if-no-files-found: ignore
           retention-days: 14
