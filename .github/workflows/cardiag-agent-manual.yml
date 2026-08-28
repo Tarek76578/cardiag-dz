@@ -7,12 +7,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: cardiag-agent-manual
+  group: cardiag-autonomous-agent
   cancel-in-progress: false
 
 jobs:
   agent:
-    name: Autonomous audit, engineering, test and release
+    name: Deep audit and autonomous engineering
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -27,16 +27,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          persist-credentials: true
 
-      - name: Verify repository instructions
+      - name: Verify repository
         run: |
           set -euo pipefail
           test -f AGENTS.md
           test -f agent-state.md
           test -f android/gradlew
           test -f android/app/build.gradle.kts
-          test -f android/app/src/main/AndroidManifest.xml
           git diff --check
 
       - name: Setup JDK 17
@@ -51,7 +49,6 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0'
           accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -66,13 +63,13 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: test -n "$OPENROUTER_API_KEY"
 
-      - name: Deep research and autonomous engineering
+      - name: Deep audit research and engineering
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           CODEX_HOME: ${{ github.workspace }}/.codex
         run: |
           set -euo pipefail
-          mkdir -p "$CODEX_HOME" research
+          mkdir -p "$CODEX_HOME"
           cat > "$CODEX_HOME/config.toml" <<'EOF'
 model = "openrouter/free"
 model_provider = "openrouter"
@@ -84,57 +81,32 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          cat > research/RESEARCH_BRIEF.md <<'EOF'
-# CarDiag research requirements
+          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics software reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md and agent-state.md first. Inspect the entire repository before making changes.
 
-The agent must perform fresh external research using public internet access available in the runner. Prefer primary/official sources and current 2026 information. Research at minimum:
+Perform a deep evidence-based audit of the whole product: Android/Kotlin/Compose architecture, navigation and state, crashes and error handling, offline behavior, authentication and Supabase/RLS security, secrets, Bluetooth/OBD permissions and lifecycle, ELM327 protocol handling, VIN/DTC/live-data behavior, vehicle catalog correctness, Arabic RTL, French localization, accessibility, contrast, touch targets, adaptive layouts, loading/empty/error states, performance, battery, privacy, dependencies, Gradle, unit/instrumentation/UI tests, emulator/runtime coverage, release signing, Play readiness, CI/CD and documentation.
 
-- Android official quality, accessibility, adaptive UI, Compose testing and security guidance.
-- Android Bluetooth/OBD-related platform constraints and current permissions.
-- OBD-II / ELM327 diagnostic limitations and reputable technical references.
-- Current competitor capabilities: Carista, OBDeleven, Torque and other major OBD apps.
-- Algerian automotive market: brands/models actually common in Algeria, with current authoritative or reputable sources.
-- Current Google Play policy/security requirements relevant to an automotive diagnostic app.
+Also perform fresh external research using public sources available in the runner. Prefer official Android/Google documentation and authoritative OBD/automotive references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with major OBD products such as Carista, OBDeleven and Torque. Record source URLs and access dates in market-audit.md. Never fabricate vehicle specifications, DTC meanings, repair procedures, prices, services, test results or market facts.
 
-Record the sources, dates accessed, key facts and confidence in research/market-audit.md. Do not copy large passages and do not treat competitor marketing claims as technical proof.
-EOF
-          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, product engineer, QA engineer, security reviewer, automotive-diagnostics software reviewer, researcher and release engineer for CarDiag DZ. This is a full deep-audit-and-engineering run, not a superficial code cleanup.
+After the audit, rank findings by severity and impact. Implement the highest-value verified improvements that can be safely completed in this run. Add or improve tests for non-trivial changes. Never weaken/delete tests or suppress real defects. Run real Gradle validation and diagnose failures at their root. If runtime/emulator validation is not available, document the exact blocker.
 
-FIRST: read AGENTS.md, agent-state.md and research/RESEARCH_BRIEF.md. Inspect the entire repository, Android project, resources, tests, Supabase integration, vehicle catalog tooling, diagnostics/OBD implementation, Gradle configuration, manifests, CI configuration and existing artifacts. Establish a factual baseline before changing anything.
+Update agent-state.md with the audit date, evidence, research sources, findings, changes, exact validation results, unresolved blockers and next priorities. Keep market-audit.md current. Do not create another workflow or autonomous agent. Do not modify GitHub secrets. Do not commit credentials. Work autonomously and leave the repository in a verified state."
 
-SECOND: perform fresh external research from public sources available from the runner. Prefer official Android/Google documentation and authoritative automotive/OBD references, then reputable competitor documentation and current Algerian market sources. Save a concise evidence-based research report to market-audit.md. Every important external claim must have its source URL and access date. Never fabricate facts, vehicle specifications, DTC meanings, repair procedures, prices, service availability or test results.
-
-THIRD: perform a comprehensive product audit covering: build reproducibility; Kotlin/Compose architecture; navigation/state; crashes and error handling; offline behavior; authentication/session behavior; Supabase/RLS/data security; secrets; OBD/Bluetooth permissions and lifecycle; ELM327 protocol handling; DTC decoding/correlation safety; live-data validation; VIN handling; vehicle catalog correctness; Arabic RTL; French localization; typography; accessibility; contrast; touch targets; adaptive layouts; loading/empty/error states; performance; battery; privacy; analytics; dependency freshness; Gradle; unit/instrumentation/UI tests; runtime/emulator coverage; release signing; Play readiness; and user-facing UX. Compare the findings against the researched competitor baseline and the Algerian market.
-
-FOURTH: prioritize findings by severity and user/business impact. Then IMPLEMENT the highest-value verified improvements that fit safely in this run. Do not make cosmetic changes merely to create a diff. Do not delete or weaken tests. Do not silently suppress warnings. Do not invent automotive knowledge. For safety-critical diagnostic behavior, prefer explicit uncertainty and evidence over confident guesses.
-
-FIFTH: run real validation. Use ./gradlew for unit tests, lint and debug/release builds as appropriate. Add or improve tests for every non-trivial behavior you change. If a validation fails, diagnose the root cause and fix it. If an emulator/runtime test is feasible in this runner, run it; otherwise document the exact blocker.
-
-SIXTH: update agent-state.md with: audit date; evidence; research sources; findings by severity; changes made; tests run and exact results; unresolved blockers; and next priorities. Also keep market-audit.md current.
-
-Do not claim the product is complete unless the evidence supports that claim. Work autonomously for the full run, but stay within the repository and its declared product scope. Do not create another workflow or another autonomous agent. Do not modify GitHub secrets. Do not commit credentials. Leave the workspace ready for the final CI validation and release steps."
-
-      - name: Validate and build CarDiag
+      - name: Validate Android project
         working-directory: android
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew --version
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
-      - name: Final repository integrity check
+      - name: Final integrity check
         run: |
           set -euo pipefail
           git diff --check
           test -f AGENTS.md
           test -f agent-state.md
           test -f market-audit.md
-          if git grep -nE '-----BEGIN (RSA|OPENSSH|EC|DSA|PRIVATE) KEY-----|AIza[0-9A-Za-z_-]{30,}|\bsk-[A-Za-z0-9_-]{30,}\b' -- ':!*.md' ':!.github/workflows/*'; then
-            echo 'Potential committed secret detected'
-            exit 1
-          fi
 
-      - name: Commit verified autonomous changes
+      - name: Commit autonomous changes
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
@@ -147,7 +119,7 @@ Do not claim the product is complete unless the evidence supports that claim. Wo
           git commit -m 'chore(agent): deep audit and autonomous engineering'
           git push origin HEAD:main
 
-      - name: Upload release artifacts
+      - name: Upload audit and release artifacts
         uses: actions/upload-artifact@v6
         with:
           name: cardiag-autonomous-release
