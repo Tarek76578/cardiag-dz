@@ -17,13 +17,13 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
 
-codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check 'You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ.
+PROMPT='You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ.
 
 Read AGENTS.md and agent-state.md first. Inspect the entire repository before changing anything.
 
 MISSION: continuously improve the real CarDiag DZ product with evidence-based, production-quality engineering. Do not create cosmetic or speculative commits.
 
-AUDIT deeply: Android/Kotlin/Compose architecture; navigation/state/lifecycle; permissions; Bluetooth/OBD/ELM327; VIN/DTC/live data; vehicle catalog and data integrity; Arabic RTL; French localization; accessibility; adaptive layouts; loading/empty/error states; performance; memory/battery; privacy; Supabase/auth/RLS; secrets; dependencies; Gradle; tests; runtime coverage; release configuration; and CI/CD.
+AUDIT deeply: Android/Kotlin/Compose architecture; navigation/state/lifecycle; permissions; Bluetooth/OBD/ELM327; VIN/DTC/live data; vehicle catalog and data integrity; Arabic RTL; French localization; accessibility; adaptive layouts; UI consistency; loading/empty/error states; performance; memory/battery; privacy; Supabase/auth/RLS; secrets; dependencies; Gradle; tests; runtime coverage; release configuration; and CI/CD.
 
 RESEARCH: use fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative OBD references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record source URLs and access dates in market-audit.md. Never fabricate compatibility, prices, DTC meanings, automotive facts, service availability, or test results.
 
@@ -38,3 +38,26 @@ DOCUMENT: update agent-state.md with date, scope, evidence, research, findings, 
 GIT: review the complete diff for accidental changes and secrets. Commit only safe verified improvements. Push production-quality changes to main when validation passes. Do not modify the manual trigger workflow from inside this agent. Do not create another workflow or another agent.
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
+
+# Free OpenRouter models can temporarily return HTTP 429. Retry the same
+# engineering cycle with exponential backoff instead of failing immediately.
+# Keep the total retry window bounded so a permanently broken configuration
+# still fails visibly in CI.
+max_attempts="${OPENROUTER_MAX_ATTEMPTS:-5}"
+delay="${OPENROUTER_INITIAL_DELAY:-20}"
+
+for attempt in $(seq 1 "$max_attempts"); do
+  echo "Starting autonomous Codex cycle (attempt $attempt/$max_attempts)"
+  if codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT"; then
+    exit 0
+  fi
+
+  if [ "$attempt" -eq "$max_attempts" ]; then
+    echo "Autonomous Codex cycle failed after $max_attempts attempts." >&2
+    exit 1
+  fi
+
+  echo "Codex failed; waiting ${delay}s before retrying transient provider errors..." >&2
+  sleep "$delay"
+  delay=$((delay * 2))
+done
