@@ -6,20 +6,23 @@ on:
     workflows: ["CarDiag DZ Android"]
     types: [completed]
 
-concurrency:
-  group: cardiag-autonomous-engineer
-  cancel-in-progress: false
-
 permissions:
   contents: write
-  actions: read
+  actions: write
   pull-requests: write
   issues: write
 
+concurrency:
+  group: cardiag-agent-main
+  cancel-in-progress: false
+
+env:
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENROUTER_MODEL: openrouter/free
+
 jobs:
   agent:
-    name: Autonomous engineering cycle
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -28,86 +31,74 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          persist-credentials: true
 
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
           cache: gradle
-          cache-dependency-path: android/**/*.gradle*
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Verify Android project
-        working-directory: android
-        run: |
-          test -f ./gradlew
-          chmod +x ./gradlew
-          ./gradlew --version
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
       - name: Baseline validation
-        continue-on-error: true
         working-directory: android
-        run: ./gradlew test lint assembleDebug --stacktrace
-
-      - name: Verify OpenRouter secret is present
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        continue-on-error: true
         run: |
-          if [ -z "$OPENROUTER_API_KEY" ]; then
-            echo "OPENROUTER_API_KEY GitHub Actions secret is missing or empty."
-            exit 1
-          fi
-          echo "OPENROUTER_API_KEY secret is present."
+          chmod +x ./gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
+
+      - name: Verify OpenRouter key
+        run: test -n "$OPENROUTER_API_KEY"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
 
       - name: Run coding agent through OpenRouter
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODEX_HOME: ${{ github.workspace }}/.codex
         run: |
           set -euo pipefail
-          npm install -g @openai/codex
-          codex --version
-          mkdir -p "$HOME/.codex"
-          cat > "$HOME/.codex/config.toml" <<'EOF'
-          model_provider = "openrouter"
-          model = "openrouter/free"
-          model_reasoning_effort = "high"
-          approval_policy = "never"
-          sandbox_mode = "danger-full-access"
+          mkdir -p "$CODEX_HOME"
+          cat > "$CODEX_HOME/config.toml" <<'EOF'
+model = "openrouter/free"
+model_provider = "openrouter"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
-          [model_providers.openrouter]
-          name = "OpenRouter"
-          base_url = "https://openrouter.ai/api/v1"
-          env_key = "OPENROUTER_API_KEY"
-          wire_api = "responses"
-          EOF
-          codex exec --sandbox danger-full-access --skip-git-repo-check --model openrouter/free "You are the autonomous principal engineer for ${{ github.repository }}. The Android project is under android/. Read AGENTS.md and agent-state.md first. Continue the CarDiag project toward the complete professional-product Definition of Done. Inspect the repository and the latest CI result, identify the highest-impact unfinished blocker, inspect relevant code/tests before editing, make production-correct changes, add regression tests where appropriate, validate from android/, never weaken tests/checks, never commit secrets, and avoid speculative broad rewrites. Priorities: correctness/crash prevention > build stability > security > data integrity > tests > architecture > UX/UI > optimization > new features. Requirements include professional Kotlin/Compose/Material 3 UI; Arabic RTL and French; language selection/settings switching; Algerian vehicle catalog; diagnostic codes with symptoms/causes/tests/repair guidance; guided diagnosis; OBD-ready abstraction and scanner/PID handling; history/reports; offline/local knowledge; secure Supabase/RLS; accessibility; performance; unit/UI/runtime tests; emulator smoke tests when infrastructure supports it; release APK/AAB hardening. Do not invent automotive facts, diagnostic results, prices, or hardware validation. Record blockers and next milestone in agent-state.md. Do not push: the workflow handles the commit/push."
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+EOF
+          codex exec --full-auto --skip-git-repo-check "Read AGENTS.md and agent-state.md first. Act as the principal engineer for CarDiag DZ. Inspect the current repository, the latest CI state, and the existing implementation. Identify the highest-priority blocker toward the project's Definition of Done, then implement the smallest complete, production-quality fix. Preserve existing behavior unless improvement is required. Add or update regression tests when appropriate. Do not weaken tests, disable lint, remove real functionality, expose secrets, or make broad rewrites without evidence. Before finishing, validate the changes as far as the environment permits and update agent-state.md with what you changed, validation evidence, and the next prioritized work. If the repository is already healthy, make one meaningful next improvement rather than making cosmetic churn."
 
       - name: Commit and safely synchronize agent changes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git config user.name "CarDiag Autonomous Engineer"
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -z "$(git status --porcelain)" ]; then
+          if git diff --quiet && git diff --cached --quiet; then
             echo "No changes produced by agent."
             exit 0
           fi
           git add -A
-          git diff --cached --check
           git commit -m "chore(agent): autonomous engineering cycle"
-          for attempt in 1 2 3; do
-            git fetch origin main
-            if git rebase origin/main; then
-              if git push origin HEAD:main; then
-                exit 0
-              fi
-            else
-              git rebase --abort || true
-            fi
-            sleep $((attempt * 5))
-          done
-          echo "Unable to synchronize agent commit with origin/main after 3 attempts."
-          exit 1
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
+
+      - name: Trigger Android build for agent commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "CarDiag DZ Android" --repo "${{ github.repository }}" --ref main
