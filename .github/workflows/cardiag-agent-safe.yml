@@ -81,7 +81,7 @@ EOF
 
       - name: Commit and safely synchronize agent changes
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -96,10 +96,10 @@ EOF
           git rebase origin/main
           git push origin HEAD:main
 
-      - name: Trigger Android build for agent commit
+      - name: Verify Android workflow is dispatchable
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN"
-          gh workflow run android.yml --repo "${{ github.repository }}" --ref main
+          gh workflow view android.yml --repo "${{ github.repository }}" --yaml | grep -q '^  workflow_dispatch:'
