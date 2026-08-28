@@ -1,0 +1,103 @@
+name: CarDiag Agent
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cardiag-agent-main
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    name: Autonomous engineering cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify manual trigger and baseline
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF_NAME" = main
+          test -f AGENTS.md
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          git diff --check
+          echo CARdiag_AGENT_TRIGGER_OK
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Android
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Codex
+        run: npm install -g @openai/codex
+
+      - name: Run autonomous agent
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODEX_HOME: ${{ github.workspace }}/.codex
+        run: |
+          set -euo pipefail
+          chmod +x scripts/autonomous-agent.sh
+          ./scripts/autonomous-agent.sh
+
+      - name: Validate Android output
+        working-directory: android
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Final integrity check
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -f AGENTS.md
+          test -f android/app/build.gradle.kts
+          git status --short
+
+      - name: Commit verified improvements
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No verified changes to commit.'
+            exit 0
+          fi
+          git commit -m 'chore(agent): autonomous audit and engineering cycle'
+          git push origin HEAD:main
+
+      - name: Upload results
+        uses: actions/upload-artifact@v6
+        with:
+          name: cardiag-agent-results
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+            market-audit.md
+            agent-state.md
+          if-no-files-found: warn
+          retention-days: 14
