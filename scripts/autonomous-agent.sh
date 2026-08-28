@@ -6,7 +6,7 @@ export CODEX_HOME="${CODEX_HOME:-$PWD/.codex}"
 mkdir -p "$CODEX_HOME"
 
 cat > "$CODEX_HOME/config.toml" <<'EOF'
-model = "openrouter/free"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
 model_provider = "openrouter"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
