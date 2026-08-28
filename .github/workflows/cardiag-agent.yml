@@ -1,0 +1,101 @@
+name: CarDiag Autonomous Agent
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: cardiag-agent-main
+  cancel-in-progress: false
+
+env:
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+  OPENROUTER_MODEL: openrouter/free
+  GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Baseline validation
+        working-directory: android
+        continue-on-error: true
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
+
+      - name: Verify secrets
+        run: |
+          test -n "$OPENROUTER_API_KEY"
+          test -n "$GH_TOKEN"
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: Run autonomous principal engineer
+        env:
+          CODEX_HOME: ${{ github.workspace }}/.codex
+        run: |
+          set -euo pipefail
+          mkdir -p "$CODEX_HOME"
+          cat > "$CODEX_HOME/config.toml" <<'EOF'
+model = "openrouter/free"
+model_provider = "openrouter"
+model_reasoning_effort = "high"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+EOF
+          codex exec --full-auto --skip-git-repo-check "Act as the autonomous principal engineer, product engineer, QA engineer, and release engineer for CarDiag DZ. Read AGENTS.md and agent-state.md first. Inspect the complete repository and latest CI state. Improve the product toward production quality for the Algerian automotive market. Work autonomously on the highest-impact incomplete items: architecture, correctness, security, UX/UI, Arabic RTL, French localization, automotive data integrity, tests, performance, accessibility, CI/CD and release readiness. Modify code and configuration as necessary. Never weaken tests, suppress real defects, disable security, or fabricate automotive/pricing/service facts. Run the strongest available validation, inspect actual failures, fix root causes, and repeat. Update agent-state.md with evidence and remaining priorities. Commit coherent production-quality changes and push them to main. Do not declare completion merely because one build is green."
+
+      - name: Final integrity check
+        run: |
+          test -f AGENTS.md
+          test -f agent-state.md
+          git diff --check
+
+      - name: Commit and push changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet && git diff --cached --quiet; then
+            echo 'No changes produced by agent.'
+            exit 0
+          fi
+          git add -A
+          git commit -m 'chore(agent): autonomous engineering cycle'
+          git fetch origin main
+          git rebase origin/main
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:main
