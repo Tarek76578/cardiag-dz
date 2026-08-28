@@ -45,13 +45,6 @@ data class FreezeFrame(
 )
 
 @Serializable
-data class ReadinessStatus(
-    val milOn: Boolean,
-    val monitorsReady: Boolean,
-    val monitors: Map<String, Boolean> = emptyMap()
-)
-
-@Serializable
 data class DtcKnowledge(
     val code: String,
     val title: String,
@@ -61,17 +54,6 @@ data class DtcKnowledge(
     val tests: List<String> = emptyList(),
     val repairs: List<String> = emptyList(),
     val relatedCodes: List<String> = emptyList()
-)
-
-@Serializable
-data class DiagnosticFinding(
-    val code: String,
-    val severity: String,
-    val score: Int,
-    val confidence: Double,
-    val causes: List<String>,
-    val tests: List<String>,
-    val recommendations: List<String>
 )
 
 @Serializable
@@ -108,32 +90,6 @@ enum class SyncState { LOCAL_ONLY, PENDING, SYNCED, CONFLICT, FAILED }
 
 enum class AppLanguage { ARABIC, FRENCH }
 enum class MeasurementUnit { METRIC, IMPERIAL }
-
-/** Deterministic diagnostic scoring; AI may explain findings but cannot replace these rules. */
-object DiagnosticEngine {
-    fun evaluate(
-        knowledge: DtcKnowledge,
-        observedSymptoms: Set<String> = emptySet(),
-        liveData: List<LivePidValue> = emptyList(),
-        testResults: Map<String, Boolean> = emptyMap()
-    ): DiagnosticFinding {
-        var score = 40
-        score += observedSymptoms.count { symptom -> knowledge.symptoms.any { it.equals(symptom, true) } } * 10
-        score += testResults.values.count { it } * 8
-        score += liveData.count { it.value.isFinite() && it.value in (it.min ?: Double.NEGATIVE_INFINITY)..(it.max ?: Double.POSITIVE_INFINITY) } * 2
-        val bounded = score.coerceIn(0, 100)
-        val confidence = bounded / 100.0
-        return DiagnosticFinding(
-            code = knowledge.code,
-            severity = knowledge.severity,
-            score = bounded,
-            confidence = confidence,
-            causes = knowledge.causes,
-            tests = knowledge.tests,
-            recommendations = knowledge.repairs
-        )
-    }
-}
 
 interface ScanRepositoryContract {
     suspend fun save(session: ScanSession): SyncState
