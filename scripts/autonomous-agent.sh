@@ -39,25 +39,35 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# Free OpenRouter models can temporarily return HTTP 429. Retry the same
-# engineering cycle with exponential backoff instead of failing immediately.
-# Keep the total retry window bounded so a permanently broken configuration
-# still fails visibly in CI.
+# OpenRouter free capacity can transiently return HTTP 429. Retry only when
+# the provider explicitly reports rate limiting; do not repeat a partially
+# completed engineering cycle after unrelated Codex/tool failures.
 max_attempts="${OPENROUTER_MAX_ATTEMPTS:-5}"
-delay="${OPENROUTER_INITIAL_DELAY:-20}"
+delay="${OPENROUTER_INITIAL_DELAY:-30}"
+log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
 
 for attempt in $(seq 1 "$max_attempts"); do
   echo "Starting autonomous Codex cycle (attempt $attempt/$max_attempts)"
-  if codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT"; then
+  set +e
+  codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
+  status=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$status" -eq 0 ]; then
     exit 0
   fi
 
-  if [ "$attempt" -eq "$max_attempts" ]; then
-    echo "Autonomous Codex cycle failed after $max_attempts attempts." >&2
-    exit 1
+  if ! grep -Eq '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit' "$log_file"; then
+    echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
+    exit "$status"
   fi
 
-  echo "Codex failed; waiting ${delay}s before retrying transient provider errors..." >&2
+  if [ "$attempt" -eq "$max_attempts" ]; then
+    echo "OpenRouter remained rate-limited after $max_attempts attempts." >&2
+    exit "$status"
+  fi
+
+  echo "OpenRouter rate-limited the request; waiting ${delay}s before retrying..." >&2
   sleep "$delay"
   delay=$((delay * 2))
 done
