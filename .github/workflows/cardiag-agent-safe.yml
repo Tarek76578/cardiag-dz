@@ -61,8 +61,23 @@ jobs:
             Inspect callers/models/tests before edits. Make the smallest correct change. Run relevant validation.
             Never disable, weaken, skip, or delete tests to obtain green CI. Never commit secrets.
             Do not make speculative broad rewrites.
-            If and only if the change is validated, commit it directly to main and push origin/main.
+            Do not commit or push from inside Codex. The workflow will commit only the validated workspace changes after this step.
             If blocked by an external dependency, record the exact blocker in agent-state.md and do not fake success.
             Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features.
             CarDiag acceptance goals: Android/Kotlin/Compose stability; Arabic RTL and French localization; complete domain models; secure Supabase integration; consistent diagnostic/vehicle logic; runtime validation when an emulator is available; release APK/AAB buildability.
-            Do not declare the project finished merely because compilation succeeds. Leave the repository clean and committed for the next scheduled cycle.
+            Do not declare the project finished merely because compilation succeeds. Leave the workspace ready for the next scheduled cycle.
+
+      - name: Commit validated agent changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "CarDiag Autonomous Engineer"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git diff --cached --check
+            git commit -m "chore(agent): autonomous engineering cycle"
+            git push origin HEAD:main
+          else
+            echo "No changes produced by agent."
+          fi
