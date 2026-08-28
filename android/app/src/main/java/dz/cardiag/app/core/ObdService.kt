@@ -55,13 +55,24 @@ class ObdService {
     suspend fun readEngineLoad(): Double? = ObdParser.parsePercent(command("0104"))
     suspend fun readTimingAdvance(): Double? = ObdParser.parseTimingAdvance(command("010E"))
     suspend fun readBatteryVoltage(): Double? = ObdParser.parseVoltage(command("0142"))
+
     suspend fun readSupportedPids01_20(): String = command("0100", 3000)
     suspend fun readSupportedPids21_40(): String = command("0120", 3000)
     suspend fun readSupportedPids41_60(): String = command("0140", 3000)
-    suspend fun readSupportedPids(): Set<Int> = ObdParser.parseSupportedPids(readSupportedPids01_20(), 0)
+
+    suspend fun readSupportedPids(): Set<Int> {
+        val supported = mutableSetOf<Int>()
+        val ranges = listOf(0x00 to ::readSupportedPids01_20, 0x20 to ::readSupportedPids21_40, 0x40 to ::readSupportedPids41_60)
+        for ((base, reader) in ranges) {
+            runCatching { supported += ObdParser.parseSupportedPids(reader(), base) }
+                .getOrElse { if (base == 0x00) throw it }
+        }
+        return supported
+    }
+
     suspend fun readVehicleInfoVin(): String = command("0902", 5000)
     suspend fun readEcuName(): String = command("090A", 5000)
-    suspend fun readEcuInfo(): String = command("090A", 5000)
+    suspend fun readEcuInfo(): String = readEcuName()
     suspend fun readFreezeFrameRaw(): String = command("02", 5000)
     suspend fun readFreezeFrameCodes(): List<String> = ObdParser.parseDtc(readFreezeFrameRaw(), 0x42)
     suspend fun readReadinessRaw(): String = command("0101", 3000)
@@ -70,23 +81,37 @@ class ObdService {
     suspend fun adapterInfo(): String = command("ATI", 2500)
     suspend fun adapterProtocol(): String = command("ATDPN", 2500).let(::parseProtocol)
     suspend fun readMode01Pid(pid: String): String = command("01${pid.trim().uppercase().padStart(2, '0')}", 2500)
-    suspend fun scanSupportedPids(): Map<Int, Boolean> = (0..0xFF).associateWith { it in readSupportedPids() }
+    suspend fun scanSupportedPids(): Map<Int, Boolean> = readSupportedPids().let { supported -> (1..0x60).associateWith { it in supported } }
 
     suspend fun command(command: String, timeoutMs: Long = 1800): String = withContext(Dispatchers.IO) {
-        val normalized = command.trim().uppercase(); require(normalized.matches(Regex("[0-9A-Z]+"))) { "Invalid ELM327 command" }
+        val normalized = command.trim().uppercase()
+        require(normalized.matches(Regex("[0-9A-Z]+"))) { "Invalid ELM327 command" }
         val s = socket ?: error("OBD adapter is not connected")
         try {
             s.outputStream.write((normalized + "\r").toByteArray(Charsets.US_ASCII)); s.outputStream.flush()
-            val deadline = System.currentTimeMillis() + timeoutMs; val buffer = StringBuilder(); val bytes = ByteArray(1024)
+            val deadline = System.currentTimeMillis() + timeoutMs
+            val buffer = StringBuilder(); val bytes = ByteArray(1024)
             while (System.currentTimeMillis() < deadline) {
-                if (s.inputStream.available() > 0) { val n=s.inputStream.read(bytes); if(n>0){buffer.append(String(bytes,0,n,Charsets.US_ASCII));if(buffer.contains(">"))break} } else Thread.sleep(20)
+                if (s.inputStream.available() > 0) {
+                    val n = s.inputStream.read(bytes)
+                    if (n > 0) { buffer.append(String(bytes, 0, n, Charsets.US_ASCII)); if (buffer.contains(">")) break }
+                } else Thread.sleep(20)
             }
             ObdParser.normalize(buffer.toString()).ifBlank { error("ELM327 timeout: $normalized") }
-        } catch(e:Exception){ connected=false; try{s.close()}catch(_:Exception){}; socket=null; throw IOException("ELM327 command failed: $normalized",e) }
+        } catch (e: Exception) {
+            connected = false; try { s.close() } catch (_: Exception) {}; socket = null
+            throw IOException("ELM327 command failed: $normalized", e)
+        }
     }
 
-    fun disconnect(){ connected=false; try{socket?.close()}catch(_:IOException){};socket=null }
-    private fun parseProtocol(raw:String):String = when(raw.trim().uppercase().removePrefix("A")){ "0"->"AUTO"; "1"->"SAE J1850 PWM"; "2"->"SAE J1850 VPW"; "3"->"ISO 9141-2"; "4"->"ISO 14230-4 KWP (5-baud)"; "5"->"ISO 14230-4 KWP (fast)"; "6"->"ISO 15765-4 CAN 11/500"; "7"->"ISO 15765-4 CAN 29/500"; "8"->"ISO 15765-4 CAN 11/250"; "9"->"ISO 15765-4 CAN 29/250"; else->raw.ifBlank{"unknown"} }
+    fun disconnect() { connected = false; try { socket?.close() } catch (_: IOException) {}; socket = null }
+
+    private fun parseProtocol(raw: String): String = when (raw.trim().uppercase().removePrefix("A")) {
+        "0" -> "AUTO"; "1" -> "SAE J1850 PWM"; "2" -> "SAE J1850 VPW"; "3" -> "ISO 9141-2"
+        "4" -> "ISO 14230-4 KWP (5-baud)"; "5" -> "ISO 14230-4 KWP (fast)"; "6" -> "ISO 15765-4 CAN 11/500"
+        "7" -> "ISO 15765-4 CAN 29/500"; "8" -> "ISO 15765-4 CAN 11/250"; "9" -> "ISO 15765-4 CAN 29/250"
+        else -> raw.ifBlank { "unknown" }
+    }
 }
 
-data class ReadinessStatus(val milOn:Boolean?,val monitorsReady:Boolean?,val raw:String)
+data class ReadinessStatus(val milOn: Boolean?, val monitorsReady: Boolean?, val raw: String)
