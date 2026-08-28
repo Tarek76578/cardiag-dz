@@ -1,0 +1,81 @@
+name: CarDiag Autonomous Agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Agent trigger validation
+        run: echo "AGENT_TRIGGER_OK"
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify agent instructions
+        run: |
+          test -f AGENTS.md
+          test -f agent-state.md
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Codex
+        run: npm install -g @openai/codex
+
+      - name: Verify OpenRouter credential
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: test -n "$OPENROUTER_API_KEY"
+
+      - name: Run autonomous engineering cycle
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODEX_HOME: ${{ github.workspace }}/.codex
+        run: |
+          set -euo pipefail
+          mkdir -p "$CODEX_HOME"
+          cat > "$CODEX_HOME/config.toml" <<'EOF'
+model = "openrouter/free"
+model_provider = "openrouter"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+EOF
+          codex exec --full-auto --skip-git-repo-check "Act as the autonomous principal engineer for CarDiag DZ. Read AGENTS.md and agent-state.md first. Inspect the repository and current CI. Improve the Android product toward genuinely production quality for the Algerian automotive market. Work only on concrete, verifiable improvements. Review Kotlin/Compose architecture, UI/UX, Arabic RTL, French localization, accessibility, performance, reliability, security, data integrity, diagnostics logic, tests, Gradle and CI/CD. Never invent automotive specifications, diagnostic facts, prices, services, test results, or completion claims. Never weaken or delete tests to make CI green. Keep secrets out of source control. Run real validation and inspect actual failures. Fix root causes. Update agent-state.md with evidence, changes, validation, blockers and next priorities. Make coherent changes and commit them. Do not create an infinite self-triggering loop."
+
+      - name: Final integrity check
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -f AGENTS.md
+          test -f agent-state.md
+
+      - name: Commit agent changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet && git diff --cached --quiet; then
+            echo 'No changes produced by agent.'
+            exit 0
+          fi
+          git add -A
+          git commit -m 'chore(agent): autonomous engineering cycle'
+          git push origin HEAD:main
