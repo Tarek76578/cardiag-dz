@@ -1,0 +1,24 @@
+package dz.cardiag.app.diagnostics
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ScanModelsTest {
+    @Test fun emptyScanHasNoFaults() {
+        val result = ScanResult("session-1", vehicleName = "Fiat Doblo", timestampEpochMs = 1L)
+        assertFalse(result.hasFaults)
+    }
+
+    @Test fun dtcScanHasFaults() {
+        val result = ScanResult("session-2", dtcs = listOf(ScanDtc("P0301")), timestampEpochMs = 1L)
+        assertTrue(result.hasFaults)
+    }
+
+    @Test fun allScanStatesExist() {
+        assertTrue(ScanState.values().containsAll(listOf(
+            ScanState.CONNECTING, ScanState.SCANNING, ScanState.PROCESSING,
+            ScanState.SUCCESS, ScanState.ERROR, ScanState.OFFLINE
+        )))
+    }
+}
