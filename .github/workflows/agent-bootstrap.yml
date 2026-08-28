@@ -22,7 +22,6 @@ jobs:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
-          gh workflow run .github/workflows/cardiag-agent-safe.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          echo "Autonomous Agent dispatched successfully."
+          gh api "repos/$GITHUB_REPOSITORY/dispatches" \
+            -f event_type=agent-bootstrap
+          echo "Autonomous Agent dispatch accepted."
