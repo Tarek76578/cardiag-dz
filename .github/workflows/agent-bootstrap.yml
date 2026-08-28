@@ -11,13 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch single autonomous Agent
+      - name: Dispatch single rebuilt Agent
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN"
-          gh workflow run .github/workflows/cardiag-agent-safe.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          echo "CarDiag Autonomous Engineer dispatch accepted."
+          gh workflow run .github/workflows/cardiag-agent.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "CarDiag Autonomous Agent dispatch accepted."
