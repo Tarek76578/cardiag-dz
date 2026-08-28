@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
   group: cardiag-android-${{ github.ref }}
@@ -80,17 +79,3 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
-
-  start-agent:
-    name: Start autonomous agent
-    needs: build
-    if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch Agent by workflow ID
-        env:
-          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          gh workflow run 344284632 --repo "${{ github.repository }}" --ref main
