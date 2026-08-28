@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothSocket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import java.io.IOException
 import java.util.UUID
 
@@ -58,7 +59,6 @@ class ObdService {
     suspend fun readSupportedPids21_40(): String = command("0120", 3000)
     suspend fun readSupportedPids41_60(): String = command("0140", 3000)
 
-    /** Reads the three standard Mode-01 capability bitmaps once each. */
     suspend fun readSupportedPids(): Set<Int> {
         val supported = mutableSetOf<Int>()
         supported += ObdParser.parseSupportedPids(readSupportedPids01_20(), 0x00)
@@ -110,4 +110,10 @@ class ObdService {
     }
 }
 
-data class ReadinessStatus(val milOn: Boolean?, val monitorsReady: Boolean?, val raw: String)
+@Serializable
+data class ReadinessStatus(
+    val milOn: Boolean?,
+    val monitorsReady: Boolean?,
+    val raw: String,
+    val monitors: Map<String, Boolean> = emptyMap()
+)
