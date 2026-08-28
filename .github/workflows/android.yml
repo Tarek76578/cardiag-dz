@@ -79,3 +79,18 @@ jobs:
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+  start-agent:
+    name: Start autonomous agent
+    needs: build
+    if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Agent through repository event
+        env:
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          gh api --method POST "repos/${{ github.repository }}/dispatches" \
+            -f event_type=android-build-success
