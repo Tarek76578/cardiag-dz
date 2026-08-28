@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: cardiag-autonomous-engineer
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -20,9 +20,6 @@ jobs:
     name: Autonomous engineering cycle
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: android
     steps:
       - name: Checkout main
         uses: actions/checkout@v5
@@ -42,13 +39,16 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Preflight Gradle
+      - name: Verify Android project
+        working-directory: android
         run: |
+          test -f ./gradlew
           chmod +x ./gradlew
           ./gradlew --version
 
       - name: Baseline validation
         continue-on-error: true
+        working-directory: android
         run: ./gradlew test lint assembleDebug --stacktrace
 
       - name: Run Codex
@@ -61,21 +61,19 @@ jobs:
           prompt: |
             You are the autonomous principal engineer for ${{ github.repository }}.
             The Android project is under android/. Read AGENTS.md and agent-state.md first.
-            Inspect the repository, latest GitHub Actions runs and failures, then work through the project Definition of Done continuously across scheduled cycles.
-            Select the highest-impact production blocker or one coherent milestone for this cycle. Inspect callers/models/tests before edits.
-            Make the smallest correct production change and run relevant validation from android/.
-            Never disable, weaken, skip, delete, or rewrite tests merely to obtain green CI. Never commit secrets.
-            Do not make speculative broad rewrites.
-            Do not commit or push from inside Codex. The workflow commits validated workspace changes after this step.
-            If blocked by an external dependency, record the exact blocker in agent-state.md and continue with independent work.
+            Your mission is to continue the CarDiag project toward the complete professional-product Definition of Done, not merely repair CI.
+            Inspect the repository and recent GitHub Actions failures. Choose the highest-impact unfinished milestone or production blocker for this cycle.
+            Before editing, inspect relevant callers, models, tests, resources, and existing architecture. Make production-correct changes and add/regress tests where appropriate.
+            Validate from android/ after changes. Never disable, weaken, skip, delete, or rewrite tests merely to obtain green CI. Never commit secrets. Never make speculative broad rewrites.
+            Do not commit or push from inside Codex; the workflow handles the commit after the agent exits.
+            If an external dependency prevents completion, record the exact blocker in agent-state.md and continue with independent work.
             Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features.
-            Product goal: a professional production Android automotive diagnostics product for Algeria, with Arabic RTL and French, robust vehicle/diagnostic knowledge, secure Supabase integration, OBD-ready architecture, polished Compose UI/UX, runtime validation, and release APK/AAB buildability.
-            Do not declare the project finished merely because compilation succeeds. Continue until the Definition of Done in AGENTS.md is satisfied; leave an accurate checkpoint in agent-state.md.
+            Product requirements include: professional Kotlin/Compose/Material 3 architecture and UI; Arabic RTL and French; first-run language selection and settings language switching; Algerian vehicle catalog; diagnostic codes with symptoms/causes/tests/repair guidance; guided diagnosis; OBD-ready abstraction and robust scanner/PID handling; history/reports where supported; offline/local knowledge; secure Supabase integration and RLS where used; accessibility; performance; unit/UI/runtime tests; emulator smoke testing when infrastructure supports it; release APK/AAB and release hardening.
+            Do not invent automotive facts, diagnostic results, prices, or hardware validation. Clearly mark unavailable/uncertain data.
+            Do not declare the project finished merely because compilation succeeds. Continue across future scheduled cycles until AGENTS.md Definition of Done is satisfied. At the end, update agent-state.md with completed work, verification, blockers, and the next highest-priority milestone.
 
       - name: Commit validated agent changes
         working-directory: .
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "CarDiag Autonomous Engineer"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
