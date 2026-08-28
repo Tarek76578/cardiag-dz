@@ -3,7 +3,7 @@ name: CarDiag Autonomous Engineer (safe)
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: ["CarDiag CI"]
+    workflows: ["CarDiag DZ Android"]
     types: [completed]
 
 concurrency:
