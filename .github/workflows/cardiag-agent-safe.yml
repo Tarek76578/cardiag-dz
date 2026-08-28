@@ -71,7 +71,7 @@ jobs:
           mkdir -p "$HOME/.codex"
           cat > "$HOME/.codex/config.toml" <<'EOF'
           model_provider = "openrouter"
-          model = "openai/gpt-oss-20b:free"
+          model = "openrouter/free"
           model_reasoning_effort = "high"
           approval_policy = "never"
           sandbox_mode = "workspace-write"
@@ -82,7 +82,7 @@ jobs:
           env_key = "OPENROUTER_API_KEY"
           wire_api = "responses"
           EOF
-          codex exec --skip-git-repo-check --model openai/gpt-oss-20b:free "You are the autonomous principal engineer for ${{ github.repository }}. The Android project is under android/. Read AGENTS.md and agent-state.md first. Continue the CarDiag project toward the complete professional-product Definition of Done, not merely repair CI. Inspect the repository and recent failures, choose the highest-impact unfinished milestone or production blocker, inspect relevant architecture/tests/resources before editing, make production-correct changes, add regression tests where appropriate, validate from android/, never weaken tests or commit secrets, do not make speculative broad rewrites, and do not commit or push because the workflow handles that. Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features. Requirements include professional Kotlin/Compose/Material 3 UI; Arabic RTL and French; language selection/settings switching; Algerian vehicle catalog; diagnostic codes with symptoms/causes/tests/repair guidance; guided diagnosis; OBD-ready abstraction and scanner/PID handling; history/reports; offline/local knowledge; secure Supabase/RLS; accessibility; performance; unit/UI/runtime tests; emulator smoke tests when infrastructure supports it; release APK/AAB hardening. Do not invent automotive facts, diagnostic results, prices, or hardware validation. Record blockers and next milestone in agent-state.md."
+          codex exec --skip-git-repo-check --model openrouter/free "You are the autonomous principal engineer for ${{ github.repository }}. The Android project is under android/. Read AGENTS.md and agent-state.md first. Continue the CarDiag project toward the complete professional-product Definition of Done, not merely repair CI. Inspect the repository and recent failures, choose the highest-impact unfinished milestone or production blocker, inspect relevant architecture/tests/resources before editing, make production-correct changes, add regression tests where appropriate, validate from android/, never weaken tests or commit secrets, do not make speculative broad rewrites, and do not commit or push because the workflow handles that. Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features. Requirements include professional Kotlin/Compose/Material 3 UI; Arabic RTL and French; language selection/settings switching; Algerian vehicle catalog; diagnostic codes with symptoms/causes/tests/repair guidance; guided diagnosis; OBD-ready abstraction and scanner/PID handling; history/reports; offline/local knowledge; secure Supabase/RLS; accessibility; performance; unit/UI/runtime tests; emulator smoke tests when infrastructure supports it; release APK/AAB hardening. Do not invent automotive facts, diagnostic results, prices, or hardware validation. Record blockers and next milestone in agent-state.md."
 
       - name: Commit validated agent changes
         run: |
