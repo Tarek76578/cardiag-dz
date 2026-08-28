@@ -86,15 +86,28 @@ jobs:
           EOF
           codex exec --sandbox danger-full-access --skip-git-repo-check --model openrouter/free "You are the autonomous principal engineer for ${{ github.repository }}. The Android project is under android/. Read AGENTS.md and agent-state.md first. Continue the CarDiag project toward the complete professional-product Definition of Done. Inspect the repository and the latest CI result, identify the highest-impact unfinished blocker, inspect relevant code/tests before editing, make production-correct changes, add regression tests where appropriate, validate from android/, never weaken tests/checks, never commit secrets, and avoid speculative broad rewrites. Priorities: correctness/crash prevention > build stability > security > data integrity > tests > architecture > UX/UI > optimization > new features. Requirements include professional Kotlin/Compose/Material 3 UI; Arabic RTL and French; language selection/settings switching; Algerian vehicle catalog; diagnostic codes with symptoms/causes/tests/repair guidance; guided diagnosis; OBD-ready abstraction and scanner/PID handling; history/reports; offline/local knowledge; secure Supabase/RLS; accessibility; performance; unit/UI/runtime tests; emulator smoke tests when infrastructure supports it; release APK/AAB hardening. Do not invent automotive facts, diagnostic results, prices, or hardware validation. Record blockers and next milestone in agent-state.md. Do not push: the workflow handles the commit/push."
 
-      - name: Commit validated agent changes
+      - name: Commit and safely synchronize agent changes
         run: |
+          set -euo pipefail
           git config user.name "CarDiag Autonomous Engineer"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "$(git status --porcelain)" ]; then
-            git add -A
-            git diff --cached --check
-            git commit -m "chore(agent): autonomous engineering cycle"
-            git push origin HEAD:main
-          else
+          if [ -z "$(git status --porcelain)" ]; then
             echo "No changes produced by agent."
+            exit 0
           fi
+          git add -A
+          git diff --cached --check
+          git commit -m "chore(agent): autonomous engineering cycle"
+          for attempt in 1 2 3; do
+            git fetch origin main
+            if git rebase origin/main; then
+              if git push origin HEAD:main; then
+                exit 0
+              fi
+            else
+              git rebase --abort || true
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "Unable to synchronize agent commit with origin/main after 3 attempts."
+          exit 1
