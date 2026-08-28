@@ -98,7 +98,8 @@ EOF
 
       - name: Trigger Android build for agent commit
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
-          gh workflow run "CarDiag DZ Android" --repo "${{ github.repository }}" --ref main
+          test -n "$GH_TOKEN"
+          gh workflow run android.yml --repo "${{ github.repository }}" --ref main
