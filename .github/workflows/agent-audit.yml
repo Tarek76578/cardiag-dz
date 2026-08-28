@@ -34,6 +34,7 @@ jobs:
           test -f android/gradlew
           test -f android/app/build.gradle.kts
           git diff --check
+          echo "Repository baseline OK"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v5
@@ -75,25 +76,25 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md and inspect the entire repository before making changes.
+          codex exec --full-auto --skip-git-repo-check "You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md first, then inspect the entire repository before changing anything.
 
-MISSION: continuously improve the actual CarDiag product, not merely write a report.
+MISSION: improve the real CarDiag product through evidence-based engineering. Do not merely produce a report and do not make changes just to create a commit.
 
 PHASE 1 — DEEP AUDIT: inspect Android/Kotlin/Compose architecture, navigation/state, crashes, lifecycle, permissions, Bluetooth/OBD/ELM327 handling, VIN/DTC/live data, vehicle catalog/data integrity, Arabic RTL, French localization, accessibility, adaptive layouts, UI consistency, loading/empty/error states, performance, battery, privacy, Supabase/auth/RLS security, secrets, dependencies, Gradle, tests, runtime coverage, release configuration and CI.
 
-PHASE 2 — RESEARCH: use fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative OBD/automotive references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record source URLs and access dates in market-audit.md. Never fabricate automotive facts, prices, services, compatibility, DTC meanings or test results.
+PHASE 2 — RESEARCH: perform fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative OBD/automotive references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record source URLs and access dates in market-audit.md. Never fabricate automotive facts, prices, services, compatibility, DTC meanings or test results.
 
-PHASE 3 — PRIORITIZE: rank findings by severity, user impact, security risk, correctness and release impact. Fix the highest-value VERIFIED problems that can safely be fixed in this run. Do not make cosmetic or speculative changes merely to create commits.
+PHASE 3 — PRIORITIZE: rank findings by severity, user impact, security risk, correctness and release impact. Fix the highest-value VERIFIED problems that can safely be fixed in this run. Avoid speculative rewrites and unnecessary cosmetic churn.
 
-PHASE 4 — ENGINEER: implement robust fixes, preserve existing behavior unless the audit proves it is defective, add or improve tests for meaningful changes, and never weaken/delete tests or suppress failures. Keep Arabic RTL and French support intact.
+PHASE 4 — ENGINEER: implement robust fixes, preserve valid existing behavior, add or improve tests for meaningful changes, and never weaken, delete or bypass tests. Keep Arabic RTL and French support intact.
 
-PHASE 5 — VALIDATE: run formatting/static checks where available and real Gradle tests/lint/build. If a check cannot run, document the exact blocker. Diagnose failures at root cause instead of hiding them.
+PHASE 5 — VALIDATE: run relevant formatting/static checks and real Gradle unit tests, lint and builds. If runtime/emulator validation is unavailable, document the exact blocker. Diagnose failures at root cause; never hide failures with suppression or ignored exit codes.
 
-PHASE 6 — DOCUMENT: update agent-state.md with date, audit scope, evidence, research sources, findings, changes, validation results, blockers and next priorities. Update market-audit.md with researched sources and dated conclusions.
+PHASE 6 — DOCUMENT: update agent-state.md with date, scope, evidence, research sources, findings, changes, validation results, blockers and next priorities. Update market-audit.md with dated research conclusions and URLs.
 
-PHASE 7 — SAFETY: never commit credentials, never modify GitHub secrets, never invent data, never delete user/product functionality without evidence, never create another workflow or another agent, and do not change this workflow file.
+PHASE 7 — SAFETY: never commit credentials, never modify GitHub secrets, never invent automotive data, never remove product functionality without evidence, never create another workflow or another agent, and never modify .github/workflows/agent-audit.yml. Do not alter signing credentials or invent release secrets.
 
-At the end, leave all safe verified improvements in the working tree."
+At the end, leave safe verified improvements in the working tree for the validation and commit stages."
 
       - name: Validate Android project
         working-directory: android
@@ -107,8 +108,9 @@ At the end, leave all safe verified improvements in the working tree."
           set -euo pipefail
           git diff --check
           test -f AGENTS.md
-          test -f agent-state.md || true
-          test -f market-audit.md || true
+          test -f android/app/build.gradle.kts
+          echo "Final repository integrity OK"
+          git status --short
 
       - name: Commit autonomous improvements
         run: |
