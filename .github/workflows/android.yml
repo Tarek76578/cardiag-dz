@@ -11,13 +11,13 @@ permissions:
   contents: read
   actions: write
 
-concurrency:
-  group: cardiag-android-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+
+concurrency:
+  group: cardiag-android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -99,8 +99,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          ref: main
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
@@ -133,17 +131,3 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
-
-  continue-agent:
-    name: Start next autonomous engineering cycle
-    needs: [build, release]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch next agent cycle
-        env:
-          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          gh workflow run .github/workflows/cardiag-agent-safe.yml --repo "${{ github.repository }}" --ref main
