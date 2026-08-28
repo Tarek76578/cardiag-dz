@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
   actions: write
 
 jobs:
@@ -12,17 +11,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify workflow token
-        env:
-          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
-        run: test -n "$GH_TOKEN"
-
       - name: Dispatch autonomous Agent workflow
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
-          gh workflow run .github/workflows/cardiag-agent-safe.yml \
+          test -n "$GH_TOKEN"
+          gh workflow run .github/workflows/cardiag-agent.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main
           echo "Autonomous Agent workflow dispatch accepted."
