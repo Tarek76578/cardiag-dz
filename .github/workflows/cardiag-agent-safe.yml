@@ -84,6 +84,7 @@ EOF
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$GH_TOKEN"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --quiet && git diff --cached --quiet; then
@@ -94,6 +95,7 @@ EOF
           git commit -m "chore(agent): autonomous engineering cycle"
           git fetch origin main
           git rebase origin/main
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git push origin HEAD:main
 
       - name: Verify Android workflow is dispatchable
