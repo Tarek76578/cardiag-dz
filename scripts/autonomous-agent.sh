@@ -27,9 +27,11 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# OpenRouter free capacity is volatile. Prefer coding/tool-use models and fail
-# over between model endpoints when a provider returns 429. Do not repeat a
-# non-rate-limit failure because the agent may already have changed files.
+# OpenRouter free capacity and tool support vary by model. Try several explicit
+# free coding/tool-use models. A 429/capacity response OR a provider-side tool
+# request 400 is treated as a model/provider incompatibility and moves to the
+# next candidate. A different failure is not repeated because the agent may
+# already have made legitimate repository changes.
 models=(
   "qwen/qwen3-coder:free"
   "openai/gpt-oss-20b:free"
@@ -71,10 +73,16 @@ EOF
       break
     fi
 
-    echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
+    if grep -Eqi 'Server tool request failed|unexpected argument|tool request.*(400|bad request)|HTTP 400|status: 400' "$log_file"; then
+      echo "Provider/model tool interface is incompatible for $model; moving to the next free model." >&2
+      sleep "$delay"
+      break
+    fi
+
+    echo "Codex failed for a non-recoverable reason; refusing to repeat the engineering cycle." >&2
     exit "$status"
   done
 done
 
-echo "All configured free OpenRouter coding models were unavailable or rate-limited." >&2
+echo "All configured free OpenRouter coding models were unavailable, rate-limited, or incompatible." >&2
 exit 1
