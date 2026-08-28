@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: write
   actions: write
-  contents: read
 
 jobs:
   bootstrap:
@@ -17,11 +17,15 @@ jobs:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: test -n "$GH_TOKEN"
 
-      - name: Dispatch autonomous Agent
+      - name: Create autonomous bootstrap event
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/dispatches" \
-            -f event_type=agent-bootstrap
-          echo "Autonomous Agent dispatch accepted."
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore(agent): bootstrap autonomous cycle"
+          git push origin HEAD:main
+          echo "Bootstrap commit pushed; the Agent push trigger will start the autonomous engineer."
