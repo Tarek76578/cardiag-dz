@@ -27,17 +27,17 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# Free OpenRouter capacity is volatile. Try a small set of known free models,
-# but only retry when the provider explicitly returns HTTP 429/rate limiting.
-# A non-rate-limit failure is not repeated because the run may already have
-# partially changed the repository.
+# Free OpenRouter capacity is volatile. Try several tool-capable free models.
+# A 429 is transient provider capacity/rate limiting, so wait with exponential
+# backoff and then move to another model. Any other failure stops immediately
+# to avoid repeating a partially completed engineering cycle.
 models=(
   "nvidia/nemotron-3-ultra-550b-a55b:free"
   "openai/gpt-oss-120b:free"
   "qwen/qwen3-coder:free"
 )
-max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-2}"
-delay="${OPENROUTER_INITIAL_DELAY:-60}"
+max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-3}"
+initial_delay="${OPENROUTER_INITIAL_DELAY:-90}"
 log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
 
 for model in "${models[@]}"; do
@@ -53,9 +53,11 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
 
+  delay="$initial_delay"
   for attempt in $(seq 1 "$max_attempts_per_model"); do
     echo "Starting autonomous Codex cycle with $model (attempt $attempt/$max_attempts_per_model)"
     set +e
+    : > "$log_file"
     codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
     status=${PIPESTATUS[0]}
     set -e
@@ -64,21 +66,21 @@ EOF
       exit 0
     fi
 
-    if ! grep -Eqi '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit|rate-limited' "$log_file"; then
-      echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
-      exit "$status"
+    if grep -Eqi '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity' "$log_file"; then
+      if [ "$attempt" -lt "$max_attempts_per_model" ]; then
+        echo "OpenRouter capacity/rate limit for $model; waiting ${delay}s before retrying..." >&2
+        sleep "$delay"
+        delay=$((delay * 2))
+        continue
+      fi
+      echo "$model remained unavailable after $max_attempts_per_model attempts; moving to the next free model." >&2
+      break
     fi
 
-    if [ "$attempt" -lt "$max_attempts_per_model" ]; then
-      echo "OpenRouter rate-limited $model; waiting ${delay}s before retrying..." >&2
-      sleep "$delay"
-      delay=$((delay * 2))
-    else
-      echo "$model remained rate-limited; moving to the next free model." >&2
-      delay=60
-    fi
+    echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
+    exit "$status"
   done
 done
 
-echo "All configured free OpenRouter models were rate-limited." >&2
+echo "All configured free OpenRouter models were unavailable or rate-limited." >&2
 exit 1
