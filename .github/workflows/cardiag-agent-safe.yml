@@ -20,6 +20,9 @@ jobs:
     name: Autonomous engineering cycle
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
     steps:
       - name: Checkout main
         uses: actions/checkout@v5
@@ -34,6 +37,7 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
+          cache-dependency-path: android/**/*.gradle*
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -56,18 +60,20 @@ jobs:
           effort: high
           prompt: |
             You are the autonomous principal engineer for ${{ github.repository }}.
-            Read AGENTS.md first.
-            Inspect the repository, latest GitHub Actions runs and failures, then work on exactly one highest-impact production blocker or coherent milestone.
-            Inspect callers/models/tests before edits. Make the smallest correct change. Run relevant validation.
-            Never disable, weaken, skip, or delete tests to obtain green CI. Never commit secrets.
+            The Android project is under android/. Read AGENTS.md and agent-state.md first.
+            Inspect the repository, latest GitHub Actions runs and failures, then work through the project Definition of Done continuously across scheduled cycles.
+            Select the highest-impact production blocker or one coherent milestone for this cycle. Inspect callers/models/tests before edits.
+            Make the smallest correct production change and run relevant validation from android/.
+            Never disable, weaken, skip, delete, or rewrite tests merely to obtain green CI. Never commit secrets.
             Do not make speculative broad rewrites.
-            Do not commit or push from inside Codex. The workflow will commit only the validated workspace changes after this step.
-            If blocked by an external dependency, record the exact blocker in agent-state.md and do not fake success.
+            Do not commit or push from inside Codex. The workflow commits validated workspace changes after this step.
+            If blocked by an external dependency, record the exact blocker in agent-state.md and continue with independent work.
             Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features.
-            CarDiag acceptance goals: Android/Kotlin/Compose stability; Arabic RTL and French localization; complete domain models; secure Supabase integration; consistent diagnostic/vehicle logic; runtime validation when an emulator is available; release APK/AAB buildability.
-            Do not declare the project finished merely because compilation succeeds. Leave the workspace ready for the next scheduled cycle.
+            Product goal: a professional production Android automotive diagnostics product for Algeria, with Arabic RTL and French, robust vehicle/diagnostic knowledge, secure Supabase integration, OBD-ready architecture, polished Compose UI/UX, runtime validation, and release APK/AAB buildability.
+            Do not declare the project finished merely because compilation succeeds. Continue until the Definition of Done in AGENTS.md is satisfied; leave an accurate checkpoint in agent-state.md.
 
       - name: Commit validated agent changes
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
