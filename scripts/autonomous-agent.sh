@@ -5,18 +5,6 @@ set -euo pipefail
 export CODEX_HOME="${CODEX_HOME:-$PWD/.codex}"
 mkdir -p "$CODEX_HOME"
 
-cat > "$CODEX_HOME/config.toml" <<'EOF'
-model = "nvidia/nemotron-3-ultra-550b-a55b:free"
-model_provider = "openrouter"
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
-
-[model_providers.openrouter]
-name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
-EOF
-
 PROMPT='You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ.
 
 Read AGENTS.md and agent-state.md first. Inspect the entire repository before changing anything.
@@ -39,35 +27,58 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# OpenRouter free capacity can transiently return HTTP 429. Retry only when
-# the provider explicitly reports rate limiting; do not repeat a partially
-# completed engineering cycle after unrelated Codex/tool failures.
-max_attempts="${OPENROUTER_MAX_ATTEMPTS:-5}"
-delay="${OPENROUTER_INITIAL_DELAY:-30}"
+# Free OpenRouter capacity is volatile. Try a small set of known free models,
+# but only retry when the provider explicitly returns HTTP 429/rate limiting.
+# A non-rate-limit failure is not repeated because the run may already have
+# partially changed the repository.
+models=(
+  "nvidia/nemotron-3-ultra-550b-a55b:free"
+  "openai/gpt-oss-120b:free"
+  "qwen/qwen3-coder:free"
+)
+max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-2}"
+delay="${OPENROUTER_INITIAL_DELAY:-60}"
 log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
 
-for attempt in $(seq 1 "$max_attempts"); do
-  echo "Starting autonomous Codex cycle (attempt $attempt/$max_attempts)"
-  set +e
-  codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
-  status=${PIPESTATUS[0]}
-  set -e
+for model in "${models[@]}"; do
+  cat > "$CODEX_HOME/config.toml" <<EOF
+model = "$model"
+model_provider = "openrouter"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
-  if [ "$status" -eq 0 ]; then
-    exit 0
-  fi
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+EOF
 
-  if ! grep -Eq '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit' "$log_file"; then
-    echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
-    exit "$status"
-  fi
+  for attempt in $(seq 1 "$max_attempts_per_model"); do
+    echo "Starting autonomous Codex cycle with $model (attempt $attempt/$max_attempts_per_model)"
+    set +e
+    codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
+    status=${PIPESTATUS[0]}
+    set -e
 
-  if [ "$attempt" -eq "$max_attempts" ]; then
-    echo "OpenRouter remained rate-limited after $max_attempts attempts." >&2
-    exit "$status"
-  fi
+    if [ "$status" -eq 0 ]; then
+      exit 0
+    fi
 
-  echo "OpenRouter rate-limited the request; waiting ${delay}s before retrying..." >&2
-  sleep "$delay"
-  delay=$((delay * 2))
+    if ! grep -Eqi '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit|rate-limited' "$log_file"; then
+      echo "Codex failed for a non-rate-limit reason; refusing to repeat the engineering cycle." >&2
+      exit "$status"
+    fi
+
+    if [ "$attempt" -lt "$max_attempts_per_model" ]; then
+      echo "OpenRouter rate-limited $model; waiting ${delay}s before retrying..." >&2
+      sleep "$delay"
+      delay=$((delay * 2))
+    else
+      echo "$model remained rate-limited; moving to the next free model." >&2
+      delay=60
+    fi
+  done
 done
+
+echo "All configured free OpenRouter models were rate-limited." >&2
+exit 1
