@@ -27,17 +27,17 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# Free OpenRouter capacity is volatile. Try several tool-capable free models.
-# A 429 is transient provider capacity/rate limiting, so wait with exponential
-# backoff and then move to another model. Any other failure stops immediately
-# to avoid repeating a partially completed engineering cycle.
+# OpenRouter free capacity is volatile. Prefer coding/tool-use models and fail
+# over between model endpoints when a provider returns 429. Do not repeat a
+# non-rate-limit failure because the agent may already have changed files.
 models=(
-  "nvidia/nemotron-3-ultra-550b-a55b:free"
-  "openai/gpt-oss-120b:free"
   "qwen/qwen3-coder:free"
+  "openai/gpt-oss-20b:free"
+  "openai/gpt-oss-120b:free"
+  "meta-llama/llama-3.3-70b-instruct:free"
 )
-max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-3}"
-initial_delay="${OPENROUTER_INITIAL_DELAY:-90}"
+max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-1}"
+delay="${OPENROUTER_INITIAL_DELAY:-30}"
 log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
 
 for model in "${models[@]}"; do
@@ -53,7 +53,6 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
 
-  delay="$initial_delay"
   for attempt in $(seq 1 "$max_attempts_per_model"); do
     echo "Starting autonomous Codex cycle with $model (attempt $attempt/$max_attempts_per_model)"
     set +e
@@ -67,13 +66,8 @@ EOF
     fi
 
     if grep -Eqi '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity' "$log_file"; then
-      if [ "$attempt" -lt "$max_attempts_per_model" ]; then
-        echo "OpenRouter capacity/rate limit for $model; waiting ${delay}s before retrying..." >&2
-        sleep "$delay"
-        delay=$((delay * 2))
-        continue
-      fi
-      echo "$model remained unavailable after $max_attempts_per_model attempts; moving to the next free model." >&2
+      echo "OpenRouter capacity/rate limit for $model; moving to the next free model." >&2
+      sleep "$delay"
       break
     fi
 
@@ -82,5 +76,5 @@ EOF
   done
 done
 
-echo "All configured free OpenRouter models were unavailable or rate-limited." >&2
+echo "All configured free OpenRouter coding models were unavailable or rate-limited." >&2
 exit 1
