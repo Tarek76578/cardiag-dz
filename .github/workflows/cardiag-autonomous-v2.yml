@@ -1,0 +1,130 @@
+name: CarDiag Autonomous Agent V2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cardiag-autonomous-agent
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    name: Autonomous audit, research, engineering and validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Validate manual trigger
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          echo "CARdiag_AGENT_TRIGGER_OK"
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify repository baseline
+        run: |
+          set -euo pipefail
+          test -f AGENTS.md
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          git diff --check
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Codex
+        run: npm install -g @openai/codex
+
+      - name: Run autonomous engineering cycle
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODEX_HOME: ${{ github.workspace }}/.codex
+        run: |
+          set -euo pipefail
+          test -n "$OPENROUTER_API_KEY"
+          mkdir -p "$CODEX_HOME"
+          cat > "$CODEX_HOME/config.toml" <<'EOF'
+model = "openrouter/free"
+model_provider = "openrouter"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+EOF
+          codex exec --full-auto --skip-git-repo-check "Act as the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ. Read AGENTS.md first and inspect the entire repository before making changes.
+
+Mission: improve the real product with evidence-based engineering. Do not make cosmetic or speculative changes merely to create a commit.
+
+1. Deep audit: inspect Android/Kotlin/Compose architecture, navigation/state, lifecycle, permissions, Bluetooth/OBD/ELM327 handling, VIN/DTC/live data, vehicle catalog/data integrity, Arabic RTL, French localization, accessibility, adaptive layouts, UI consistency, loading/empty/error states, performance, battery, privacy, Supabase/auth/RLS security, secrets, dependencies, Gradle, tests, runtime coverage, release configuration and CI.
+2. Research: perform fresh public web research available in the runner. Prefer official Android/Google documentation and authoritative automotive/OBD references, then reputable competitor documentation and current Algerian automotive-market sources. Compare CarDiag with Carista, OBDeleven and Torque. Record source URLs and dates in market-audit.md. Never fabricate compatibility, prices, DTC meanings, automotive facts or test results.
+3. Prioritize findings by severity, user impact, security, correctness and release impact. Fix the highest-value verified problems that can be safely fixed in this run.
+4. Engineer robust fixes, preserve valid behavior, and add or improve tests for meaningful changes. Never weaken or delete tests.
+5. Validate relevant checks plus Gradle unit tests, lint and release builds. If runtime/emulator validation is unavailable, document the exact blocker. Never hide failures.
+6. Document agent-state.md with date, scope, evidence, research, findings, changes, validation, blockers and next priorities.
+7. Safety: never commit credentials, never modify secrets, never invent automotive data, never remove functionality without evidence, never create another workflow or agent, and never modify .github/workflows/cardiag-autonomous-v2.yml.
+
+Leave only safe, verified improvements in the working tree."
+
+      - name: Validate Android project
+        working-directory: android
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Final integrity check
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -f AGENTS.md
+          test -f android/app/build.gradle.kts
+          git status --short
+
+      - name: Commit verified improvements
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No verified changes to commit.'
+            exit 0
+          fi
+          git commit -m 'chore(agent): autonomous audit and engineering cycle'
+          git push origin HEAD:main
+
+      - name: Upload release and reports
+        uses: actions/upload-artifact@v6
+        with:
+          name: cardiag-agent-results
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+            market-audit.md
+            agent-state.md
+          if-no-files-found: warn
+          retention-days: 14
