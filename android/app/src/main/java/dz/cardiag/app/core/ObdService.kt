@@ -7,7 +7,6 @@ import android.bluetooth.BluetoothSocket
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import java.io.IOException
 import java.util.UUID
 
@@ -109,11 +108,3 @@ class ObdService {
         else -> raw.ifBlank { "unknown" }
     }
 }
-
-@Serializable
-data class ReadinessStatus(
-    val milOn: Boolean?,
-    val monitorsReady: Boolean?,
-    val raw: String,
-    val monitors: Map<String, Boolean> = emptyMap()
-)
