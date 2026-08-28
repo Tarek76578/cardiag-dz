@@ -3,7 +3,7 @@ name: CarDiag Autonomous Engineer (safe)
 on:
   workflow_dispatch:
   repository_dispatch:
-    types: [android-build-success]
+    types: [android-build-success, agent-bootstrap]
 
 permissions:
   contents: write
