@@ -87,10 +87,10 @@ jobs:
     if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch Agent with PAT
+      - name: Dispatch Agent by workflow ID
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN"
-          gh workflow run "CarDiag Autonomous Engineer (safe)" --repo "${{ github.repository }}" --ref main
+          gh workflow run 344284632 --repo "${{ github.repository }}" --ref main
