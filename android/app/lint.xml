@@ -11,8 +11,15 @@
     build.
   - Typos: the lint dictionary flags "Exemple" (French for "Example")
     which is intentional copy in the French UI strings.
+  - UnusedAttribute: android:usesPermissionFlags="neverForLocation" is
+    a forward-compat declaration (API 31+); lint flags it because
+    minSdk=26 but the attribute is only consumed on API 31+ devices.
+    The manifest merger copies this attribute into the final manifest
+    for API 31+ devices, satisfying the Play Store BLUETOOTH_SCAN
+    location-derivation policy without affecting older devices.
 -->
 <lint>
     <issue id="GradleDependency" severity="informational" />
     <issue id="Typos" severity="informational" />
+    <issue id="UnusedAttribute" severity="informational" />
 </lint>

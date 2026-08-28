@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.core.content.edit
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -39,8 +40,8 @@ fun ProfessionalDashboard() {
     var dark by remember { mutableStateOf(prefs.getBoolean(DARK_MODE, true)) }
     val vehicleName = prefs.getString(VEHICLE_NAME, null)
     val vehicleEngine = prefs.getString(VEHICLE_ENGINE, null)
-    fun setArabic(v: Boolean) { arabic = v; prefs.edit().putBoolean(ARABIC, v).apply() }
-    fun setDark(v: Boolean) { dark = v; prefs.edit().putBoolean(DARK_MODE, v).apply() }
+    fun setArabic(v: Boolean) { arabic = v; prefs.edit { putBoolean(ARABIC, v) } }
+    fun setDark(v: Boolean) { dark = v; prefs.edit { putBoolean(DARK_MODE, v) } }
     CarDiagTheme(darkTheme = dark) {
         CompositionLocalProvider(LocalLayoutDirection provides if (arabic) LayoutDirection.Rtl else LayoutDirection.Ltr) {
             Scaffold(

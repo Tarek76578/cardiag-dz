@@ -1,6 +1,7 @@
 package dz.cardiag.app.core.diagnostics
 
 import android.content.Context
+import androidx.core.content.edit
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -40,9 +41,8 @@ class OfflineFirstScanRepository(context: Context) : ScanRepository {
         ids.add(0, id)
         val removed = ids.drop(50)
         ids.subList(50.coerceAtMost(ids.size), ids.size).clear()
-        val editor = prefs.edit().putString("$prefix:$id", payload).putString(indexKey, json.encodeToString(ListSerializer(String.serializer()), ids))
-        removed.forEach { editor.remove("$prefix:$it") }
-        editor.apply()
+        prefs.edit { putString("$prefix:$id", payload); putString(indexKey, json.encodeToString(ListSerializer(String.serializer()), ids)) }
+        removed.forEach { pref -> prefs.edit { remove("$prefix:$pref") } }
     }
 
     private fun readIds(key: String): List<String> = prefs.getString(key, null)?.let { runCatching { json.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull() }.orEmpty()

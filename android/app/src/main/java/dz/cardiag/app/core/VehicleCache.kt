@@ -1,6 +1,7 @@
 package dz.cardiag.app.core
 
 import android.content.Context
+import androidx.core.content.edit
 import dz.cardiag.app.UiModel
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -17,10 +18,9 @@ object VehicleCache {
 
     fun write(context: Context, models: List<UiModel>) {
         runCatching {
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_MODELS, json.encodeToString(ListSerializer(UiModel.serializer()), models))
-                .apply()
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+                putString(KEY_MODELS, json.encodeToString(ListSerializer(UiModel.serializer()), models))
+            }
         }
     }
 }

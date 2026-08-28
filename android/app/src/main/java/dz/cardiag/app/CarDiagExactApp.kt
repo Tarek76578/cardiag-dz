@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.core.content.edit
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -75,11 +76,11 @@ fun CarDiagExactApp() {
 
     fun setDark(value: Boolean) {
         dark = value
-        prefs.edit().putBoolean(KEY_DARK, value).apply()
+        prefs.edit { putBoolean(KEY_DARK, value) }
     }
     fun setArabic(value: Boolean) {
         arabic = value
-        prefs.edit().putBoolean(KEY_ARABIC, value).apply()
+        prefs.edit { putBoolean(KEY_ARABIC, value) }
     }
 
     val copy = if (arabic) AR else FR
