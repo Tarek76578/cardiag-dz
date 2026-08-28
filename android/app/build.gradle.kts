@@ -20,10 +20,16 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17); optIn.add("androidx.compose.material3.ExperimentalMaterial3Api") } }
 
-    val supabaseUrl = System.getenv("SUPABASE_URL")?.trim().orEmpty()
-    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY")?.trim().orEmpty()
-    require(supabaseUrl.startsWith("https://") && !supabaseUrl.contains("localhost")) { "SUPABASE_URL must be supplied as a non-local HTTPS Supabase URL" }
-    require(supabasePublishableKey.startsWith("sb_publishable_") || supabasePublishableKey.startsWith("eyJ")) { "SUPABASE_PUBLISHABLE_KEY must be supplied as a Supabase publishable/legacy anon key" }
+    // The Supabase URL and publishable key are client configuration, not privileged secrets.
+    // They may be supplied by CI/local environment, with the project's public publishable
+    // configuration used as a safe fallback so builds remain reproducible when CI secrets
+    // are not configured. Never place service_role/private keys here.
+    val supabaseUrl = System.getenv("SUPABASE_URL")?.trim().takeUnless { it.isNullOrBlank() }
+        ?: "https://knripjpkmvdmqtstkcmo.supabase.co"
+    val supabasePublishableKey = System.getenv("SUPABASE_PUBLISHABLE_KEY")?.trim().takeUnless { it.isNullOrBlank() }
+        ?: "sb_publishable_Wczl8w-35no4HbROqqnMyg_fbmYizuZ"
+    require(supabaseUrl.startsWith("https://") && !supabaseUrl.contains("localhost")) { "SUPABASE_URL must be a non-local HTTPS Supabase URL" }
+    require(supabasePublishableKey.startsWith("sb_publishable_") || supabasePublishableKey.startsWith("eyJ")) { "SUPABASE_PUBLISHABLE_KEY must be a Supabase publishable/legacy anon key" }
 
     buildTypes {
         debug {
