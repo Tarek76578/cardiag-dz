@@ -1,36 +1,13 @@
 package dz.cardiag.app
 
-import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
-/** Production launcher for the unified CarDiag experience. */
+/** Single launcher entry point for the production CarDiag application shell. */
 class CarDiagModernActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ProfessionalDashboard() }
+        setContent { CarDiagUnifiedApp() }
     }
-}
-
-fun openObd(
-    context: Context,
-    modelId: String? = null,
-    modelName: String? = null,
-    dtc: String? = null,
-) {
-    context.startActivity(Intent(context, ObdScannerActivity::class.java).apply {
-        putExtra("model_id", modelId)
-        putExtra("model_name", modelName ?: "Véhicule")
-        putExtra("dtc_code", dtc)
-    })
-}
-
-fun openGuided(context: Context, modelId: String? = null, modelName: String? = null) {
-    context.startActivity(Intent(context, GuidedDiagnosisActivity::class.java).apply {
-        putExtra("model_id", modelId)
-        putExtra("model_name", modelName ?: "Véhicule")
-        putExtra("source", "vehicle_profile")
-    })
 }
