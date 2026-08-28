@@ -39,7 +39,6 @@ class ObdService {
     }
 
     suspend fun reconnect(): String { val d = lastDevice ?: error("No previous OBD adapter"); repeat(2) { try { return connect(d) } catch (_: Exception) { delay(400) } }; error("Unable to reconnect to ELM327 adapter") }
-
     suspend fun readTroubleCodes(): List<String> = ObdParser.parseDtc(command("03", 4000))
     suspend fun readPendingTroubleCodes(): List<String> = ObdParser.parseDtc(command("07", 4000))
     suspend fun readPermanentTroubleCodes(): List<String> = ObdParser.parseDtc(command("0A", 4000))
@@ -55,18 +54,16 @@ class ObdService {
     suspend fun readEngineLoad(): Double? = ObdParser.parsePercent(command("0104"))
     suspend fun readTimingAdvance(): Double? = ObdParser.parseTimingAdvance(command("010E"))
     suspend fun readBatteryVoltage(): Double? = ObdParser.parseVoltage(command("0142"))
-
     suspend fun readSupportedPids01_20(): String = command("0100", 3000)
     suspend fun readSupportedPids21_40(): String = command("0120", 3000)
     suspend fun readSupportedPids41_60(): String = command("0140", 3000)
 
+    /** Reads the three standard Mode-01 capability bitmaps once each. */
     suspend fun readSupportedPids(): Set<Int> {
         val supported = mutableSetOf<Int>()
-        val ranges = listOf(0x00 to ::readSupportedPids01_20, 0x20 to ::readSupportedPids21_40, 0x40 to ::readSupportedPids41_60)
-        for ((base, reader) in ranges) {
-            runCatching { supported += ObdParser.parseSupportedPids(reader(), base) }
-                .getOrElse { if (base == 0x00) throw it }
-        }
+        supported += ObdParser.parseSupportedPids(readSupportedPids01_20(), 0x00)
+        runCatching { supported += ObdParser.parseSupportedPids(readSupportedPids21_40(), 0x20) }
+        runCatching { supported += ObdParser.parseSupportedPids(readSupportedPids41_60(), 0x40) }
         return supported
     }
 
@@ -105,7 +102,6 @@ class ObdService {
     }
 
     fun disconnect() { connected = false; try { socket?.close() } catch (_: IOException) {}; socket = null }
-
     private fun parseProtocol(raw: String): String = when (raw.trim().uppercase().removePrefix("A")) {
         "0" -> "AUTO"; "1" -> "SAE J1850 PWM"; "2" -> "SAE J1850 VPW"; "3" -> "ISO 9141-2"
         "4" -> "ISO 14230-4 KWP (5-baud)"; "5" -> "ISO 14230-4 KWP (fast)"; "6" -> "ISO 15765-4 CAN 11/500"
