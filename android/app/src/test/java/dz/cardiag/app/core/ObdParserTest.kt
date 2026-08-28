@@ -1,6 +1,7 @@
 package dz.cardiag.app.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,9 +16,33 @@ class ObdParserTest {
     @Test fun parsesPendingDtcs() = assertEquals(listOf("P0301"), ObdParser.parseDtc("47 03 01 00 00"))
     @Test fun parsesPermanentDtcs() = assertEquals(listOf("P0301"), ObdParser.parseDtc("4A 03 01 00 00"))
     @Test fun parsesFreezeFrameDtcs() = assertEquals(listOf("P0301"), ObdParser.parseDtc("42 03 01 00 00", 0x42))
-    @Test fun parsesSupportedPids() { val pids=ObdParser.parseSupportedPids("41 00 FF FF FF FF",0); assertEquals(32,pids.size); assertTrue(1 in pids); assertTrue(32 in pids) }
-    @Test fun parsesReadinessAndMil() { val r=ObdParser.parseReadiness("41 01 80 07 65 00 00 00"); assertEquals(true,r.milOn); assertEquals(false,r.monitorsReady) }
-    @Test fun ignoresNoData() = assertTrue(ObdParser.normalize("SEARCHING...\rNO DATA\r>").isBlank())
+
+    @Test fun parsesSupportedPidRanges() {
+        val first = ObdParser.parseSupportedPids("41 00 FF FF FF FF", 0x00)
+        val second = ObdParser.parseSupportedPids("41 20 80 00 00 01", 0x20)
+        val third = ObdParser.parseSupportedPids("41 40 80 00 00 01", 0x40)
+        assertEquals(32, first.size)
+        assertTrue(1 in first && 32 in first)
+        assertTrue(0x21 in second && 0x40 in second)
+        assertTrue(0x41 in third && 0x60 in third)
+    }
+
+    @Test fun parsesReadinessAndMil() {
+        val r = ObdParser.parseReadiness("41 01 80 07 65 00 00 00")
+        assertEquals(true, r.milOn)
+        assertEquals(false, r.monitorsReady)
+    }
+
+    @Test fun ignoresNoDataAndInvalidResponses() {
+        assertTrue(ObdParser.normalize("SEARCHING...\rNO DATA\r>").isBlank())
+        assertNull(ObdParser.parseRpm("NO DATA>"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInvalidSupportedPidBase() {
+        ObdParser.parseSupportedPids("41 00 FF FF FF FF", 0x10)
+    }
+
     @Test fun validatesVin() {
         assertTrue(VinValidator.isValid("VF1AAAAA1BBBBBBBB"))
         assertTrue(!VinValidator.isValid("VF1IOQ"))
