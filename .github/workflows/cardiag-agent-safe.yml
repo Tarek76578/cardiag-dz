@@ -2,9 +2,8 @@ name: CarDiag Autonomous Engineer (safe)
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["CarDiag DZ Android"]
-    types: [completed]
+  push:
+    branches: [main]
 
 permissions:
   contents: write
@@ -22,7 +21,7 @@ env:
 
 jobs:
   agent:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -31,6 +30,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
 
       - name: Setup JDK 17
         uses: actions/setup-java@v5
@@ -77,9 +77,9 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "Read AGENTS.md and agent-state.md first. Act as the principal engineer for CarDiag DZ. Inspect the current repository, the latest CI state, and the existing implementation. Identify the highest-priority blocker toward the project's Definition of Done, then implement the smallest complete, production-quality fix. Preserve existing behavior unless improvement is required. Add or update regression tests when appropriate. Do not weaken tests, disable lint, remove real functionality, expose secrets, or make broad rewrites without evidence. Before finishing, validate the changes as far as the environment permits and update agent-state.md with what you changed, validation evidence, and the next prioritized work. If the repository is already healthy, make one meaningful next improvement rather than making cosmetic churn."
+          codex exec --full-auto --skip-git-repo-check "Read AGENTS.md and agent-state.md first. Act as the principal engineer for CarDiag DZ. Inspect the current repository and latest CI state. Identify the highest-priority blocker toward the project's Definition of Done, then implement the smallest complete production-quality fix. Preserve existing behavior unless improvement is required. Add or update regression tests when appropriate. Do not weaken tests, disable lint, remove real functionality, expose secrets, or make broad rewrites without evidence. Validate changes as far as the environment permits and update agent-state.md with what you changed, validation evidence, and the next prioritized work. If the repository is already healthy, make one meaningful next improvement rather than cosmetic churn."
 
-      - name: Commit and safely synchronize agent changes
+      - name: Commit and push agent changes with PAT
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
@@ -97,11 +97,3 @@ EOF
           git rebase origin/main
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           git push origin HEAD:main
-
-      - name: Verify Android workflow is dispatchable
-        env:
-          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN"
-          gh workflow view android.yml --repo "${{ github.repository }}" --yaml | grep -q '^  workflow_dispatch:'
