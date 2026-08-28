@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - .github/workflows/cardiag-agent-manual.yml
 
 permissions:
   contents: write
@@ -47,6 +49,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
+          set -euo pipefail
           test -n "$OPENROUTER_API_KEY"
           test -n "$GH_TOKEN"
 
@@ -73,7 +76,7 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "You are the autonomous principal engineer, product engineer, QA engineer, security reviewer, and release engineer for CarDiag DZ. Read AGENTS.md and agent-state.md first. Inspect the entire repository, current application behavior, data, architecture, UX, localization, security posture, and CI. Improve the product toward production quality for the Algerian automotive market. Prioritize correctness, security, data integrity, reliability, UX, Arabic RTL and French localization, architecture, tests and release quality. You may modify application code, resources, tests, Gradle and CI/CD. Never weaken tests, suppress real defects, fabricate automotive/pricing/service data, or expose secrets. Use actual repository and CI evidence. Run the strongest available validation including compilation, unit tests, lint, debug APK, and release APK/AAB when appropriate. If a check fails, inspect the actual failure and fix its root cause. Update agent-state.md with evidence, completed work, blockers, and next priorities. Commit coherent production-quality changes to main. Do not declare the project complete merely because a build is green; continue through the highest-value actionable work available in this cycle."
+          codex exec --full-auto --skip-git-repo-check "Act as the autonomous principal engineer, product engineer, QA engineer, security reviewer, and release engineer for CarDiag DZ. Read AGENTS.md and agent-state.md first. Inspect the entire repository and current CI. Improve the product toward production quality for the Algerian automotive market. Prioritize correctness, security, data integrity, reliability, UX, Arabic RTL and French localization, architecture, tests and CI. You may modify application code, resources, tests, Gradle and CI/CD. Never weaken tests, suppress real defects, fabricate automotive/pricing/service data, or expose secrets. Run real validation and inspect actual failures. Fix root causes. Update agent-state.md with evidence, completed work, blockers and next priorities. Commit coherent production-quality changes to main. Do not declare completion merely because a build is green; complete the highest-value actionable work for this cycle."
 
       - name: Final integrity check
         run: |
@@ -82,7 +85,7 @@ EOF
           test -f AGENTS.md
           test -f agent-state.md
 
-      - name: Commit and push agent changes
+      - name: Commit and push
         env:
           GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
