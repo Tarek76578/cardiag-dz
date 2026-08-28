@@ -142,7 +142,8 @@ jobs:
     steps:
       - name: Dispatch next agent cycle
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$GH_TOKEN"
           gh workflow run .github/workflows/cardiag-agent-safe.yml --repo "${{ github.repository }}" --ref main
