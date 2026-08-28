@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: cardiag-android-${{ github.ref }}
@@ -130,3 +131,16 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
+
+  continue-agent:
+    name: Start next autonomous engineering cycle
+    needs: [build, release]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch next agent cycle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run "CarDiag Autonomous Engineer (safe)" --repo "${{ github.repository }}" --ref main
