@@ -27,19 +27,19 @@ GIT: review the complete diff for accidental changes and secrets. Commit only sa
 
 CONTINUE the engineering loop for the current milestone instead of stopping merely because one check is green.'
 
-# OpenRouter free capacity and tool support vary by model. Try several explicit
-# free coding/tool-use models. A 429/capacity response OR a provider-side tool
-# request 400 is treated as a model/provider incompatibility and moves to the
-# next candidate. A different failure is not repeated because the agent may
-# already have made legitimate repository changes.
+# OpenRouter free availability changes over time. Prefer the official free
+# router, which automatically selects an available free model compatible with
+# the request. Keep explicit free coding/agent models as fallbacks so a single
+# provider/model outage does not stop the engineering cycle.
 models=(
-  "qwen/qwen3-coder:free"
-  "openai/gpt-oss-20b:free"
+  "openrouter/free"
+  "z-ai/glm-5.2:free"
+  "minimax/minimax-m3:free"
+  "nvidia/nemotron-3-ultra-550b-a55b:free"
   "openai/gpt-oss-120b:free"
-  "meta-llama/llama-3.3-70b-instruct:free"
 )
 max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-1}"
-delay="${OPENROUTER_INITIAL_DELAY:-30}"
+delay="${OPENROUTER_INITIAL_DELAY:-20}"
 log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
 
 for model in "${models[@]}"; do
@@ -67,14 +67,11 @@ EOF
       exit 0
     fi
 
-    if grep -Eqi '(^|[^0-9])429([^0-9]|$)|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity' "$log_file"; then
-      echo "OpenRouter capacity/rate limit for $model; moving to the next free model." >&2
-      sleep "$delay"
-      break
-    fi
-
-    if grep -Eqi 'Server tool request failed|unexpected argument|tool request.*(400|bad request)|HTTP 400|status: 400' "$log_file"; then
-      echo "Provider/model tool interface is incompatible for $model; moving to the next free model." >&2
+    # Treat transient availability failures and provider/model incompatibility
+    # as safe reasons to move to the next free candidate. Do NOT silently
+    # retry authentication/configuration failures.
+    if grep -Eqi '(^|[^0-9])(400|404|408|409|429|500|502|503|504)([^0-9]|$)|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|status: 400' "$log_file"; then
+      echo "OpenRouter/model availability or compatibility failure for $model; moving to the next free candidate." >&2
       sleep "$delay"
       break
     fi
@@ -84,5 +81,5 @@ EOF
   done
 done
 
-echo "All configured free OpenRouter coding models were unavailable, rate-limited, or incompatible." >&2
+echo "All configured OpenRouter free models/router were unavailable, rate-limited, or incompatible." >&2
 exit 1
