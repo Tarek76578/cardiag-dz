@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.ColumnScope
 
 @Composable
 fun CarDiagPrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
