@@ -51,11 +51,21 @@ jobs:
         working-directory: android
         run: ./gradlew test lint assembleDebug --stacktrace
 
+      - name: Verify Codex secret is present
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY GitHub Actions secret is missing or empty."
+            exit 1
+          fi
+          echo "OPENAI_API_KEY secret is present."
+
       - name: Run Codex
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          sandbox: workspace-write
+          permission-profile: ":workspace"
           model: gpt-5.6
           effort: high
           prompt: |
