@@ -17,7 +17,7 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
 
-codex exec --full-auto --skip-git-repo-check 'You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ.
+codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check 'You are the sole autonomous principal engineer, QA engineer, security reviewer, automotive diagnostics reviewer, researcher and release engineer for CarDiag DZ.
 
 Read AGENTS.md and agent-state.md first. Inspect the entire repository before changing anything.
 
