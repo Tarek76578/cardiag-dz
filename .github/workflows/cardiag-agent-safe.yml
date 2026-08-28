@@ -2,8 +2,11 @@ name: CarDiag Autonomous Engineer (safe)
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["CarDiag Agent Bootstrap"]
+    types: [completed]
   repository_dispatch:
-    types: [android-build-success, agent-bootstrap]
+    types: [android-build-success]
 
 permissions:
   contents: write
@@ -22,7 +25,12 @@ env:
 
 jobs:
   agent:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch') ||
+        (github.event_name == 'repository_dispatch') ||
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -81,7 +89,7 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "You are the autonomous principal engineer, product engineer, QA engineer, and release engineer for CarDiag DZ. Your mission is to turn the current repository into a polished, production-quality commercial Android product for the Algerian automotive market with minimal human intervention. Read AGENTS.md and agent-state.md first. Then inspect the entire repository, Android implementation, tests, data/backend/migrations, CI/CD workflows, and the latest relevant GitHub Actions state. Build an evidence-based prioritized backlog. Work on the single highest-impact incomplete item, but continue through additional items when time and validation capacity allow. You have authority to modify the full repository, tests, resources, Gradle configuration, database/migrations, documentation, and CI/CD workflows when necessary. You may use the configured GitHub workflow token to inspect or dispatch repository automation and to push coherent changes. Do not expose or print token/API-key values. Never weaken tests, disable security, suppress real defects, fabricate automotive/pricing/service data, or make cosmetic changes while a correctness/security/build blocker exists. Preserve Arabic RTL and French localization. Validate every change with the strongest available checks: integrity/secret scan, compilation, unit tests, lint, debug APK, emulator/runtime tests if infrastructure exists, and release APK/AAB when appropriate. When CI fails, read the actual logs and fix the root cause; never guess. Inspect the resulting diff for regressions and secrets. Update agent-state.md with exactly what changed, validation evidence, remaining blockers, and next priorities. Commit and push production-quality changes to main. After pushing, inspect the resulting CI state when possible and continue from the next highest-priority blocker on the next autonomous cycle. Do not declare the product complete merely because a build is green. The final gate requires critical functionality, UX, RTL/localization, security, data integrity, tests, runtime validation where available, and release packaging to be genuinely complete."
+          codex exec --full-auto --skip-git-repo-check "You are the autonomous principal engineer, product engineer, QA engineer, and release engineer for CarDiag DZ. Your mission is to turn the current repository into a polished, production-quality commercial Android product for the Algerian automotive market with minimal human intervention. Read AGENTS.md and agent-state.md first. Then inspect the entire repository, Android implementation, tests, data/backend/migrations, CI/CD workflows, and the latest relevant GitHub Actions state. Build an evidence-based prioritized backlog. Work on the single highest-impact incomplete item, but continue through additional items when time and validation capacity allow. You control the engineering loop: modify the repository, validate the changes, dispatch the Android worker when a validation/build cycle is needed, inspect its result, fix failures, and repeat. You have authority to modify the full repository, tests, resources, Gradle configuration, database/migrations, documentation, and CI/CD workflows when necessary. You may use the configured GitHub workflow token to inspect or dispatch repository automation and to push coherent changes. Do not expose or print token/API-key values. Never weaken tests, disable security, suppress real defects, fabricate automotive/pricing/service data, or make cosmetic changes while a correctness/security/build blocker exists. Preserve Arabic RTL and French localization. Validate every change with the strongest available checks: integrity/secret scan, compilation, unit tests, lint, debug APK, emulator/runtime tests if infrastructure exists, and release APK/AAB when appropriate. When CI fails, read the actual logs and fix the root cause; never guess. Inspect the resulting diff for regressions and secrets. Update agent-state.md with exactly what changed, validation evidence, remaining blockers, and next priorities. Commit and push production-quality changes to main. After pushing, inspect the resulting CI state when possible and continue from the next highest-priority blocker on the next autonomous cycle. Do not declare the product complete merely because a build is green. The final gate requires critical functionality, UX, RTL/localization, security, data integrity, tests, runtime validation where available, and release packaging to be genuinely complete."
 
       - name: Verify agent produced a coherent state
         run: |
