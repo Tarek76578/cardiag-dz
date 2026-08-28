@@ -1,0 +1,28 @@
+name: CarDiag Agent Bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify workflow token
+        env:
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+        run: test -n "$GH_TOKEN"
+
+      - name: Dispatch autonomous Agent
+        env:
+          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run .github/workflows/cardiag-agent-safe.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          echo "Autonomous Agent dispatched successfully."
