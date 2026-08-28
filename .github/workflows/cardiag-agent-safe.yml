@@ -1,0 +1,68 @@
+name: CarDiag Autonomous Engineer (safe)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+concurrency:
+  group: cardiag-autonomous-engineer
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  agent:
+    name: Autonomous engineering cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Preflight Gradle
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --version
+
+      - name: Baseline validation
+        continue-on-error: true
+        run: ./gradlew test lint assembleDebug --stacktrace
+
+      - name: Run Codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          model: gpt-5.6
+          effort: high
+          prompt: |
+            You are the autonomous principal engineer for ${{ github.repository }}.
+            Read AGENTS.md first.
+            Inspect the repository, latest GitHub Actions runs and failures, then work on exactly one highest-impact production blocker or coherent milestone.
+            Inspect callers/models/tests before edits. Make the smallest correct change. Run relevant validation.
+            Never disable, weaken, skip, or delete tests to obtain green CI. Never commit secrets.
+            Do not make speculative broad rewrites.
+            If and only if the change is validated, commit it directly to main and push origin/main.
+            If blocked by an external dependency, record the exact blocker in agent-state.md and do not fake success.
+            Priorities: correctness/crash prevention > CI/build > security > data integrity > tests > architecture > UX/UI > optimization > new features.
+            CarDiag acceptance goals: Android/Kotlin/Compose stability; Arabic RTL and French localization; complete domain models; secure Supabase integration; consistent diagnostic/vehicle logic; runtime validation when an emulator is available; release APK/AAB buildability.
+            Do not declare the project finished merely because compilation succeeds. Leave the repository clean and committed for the next scheduled cycle.
