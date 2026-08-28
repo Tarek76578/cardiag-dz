@@ -18,6 +18,7 @@ concurrency:
 env:
   OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
   OPENROUTER_MODEL: openrouter/free
+  GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
 
 jobs:
   agent:
@@ -42,7 +43,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0"
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
 
@@ -56,10 +57,13 @@ jobs:
       - name: Verify OpenRouter key
         run: test -n "$OPENROUTER_API_KEY"
 
+      - name: Verify workflow token
+        run: test -n "$GH_TOKEN"
+
       - name: Install Codex CLI
         run: npm install -g @openai/codex
 
-      - name: Run coding agent through OpenRouter
+      - name: Run autonomous principal engineer
         env:
           CODEX_HOME: ${{ github.workspace }}/.codex
         run: |
@@ -77,14 +81,18 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 EOF
-          codex exec --full-auto --skip-git-repo-check "Read AGENTS.md and agent-state.md first. Act as the principal engineer for CarDiag DZ. Inspect the current repository and latest CI state. Identify the highest-priority blocker toward the project's Definition of Done, then implement the smallest complete production-quality fix. Preserve existing behavior unless improvement is required. Add or update regression tests when appropriate. Do not weaken tests, disable lint, remove real functionality, expose secrets, or make broad rewrites without evidence. Validate changes as far as the environment permits and update agent-state.md with what you changed, validation evidence, and the next prioritized work. If the repository is already healthy, make one meaningful next improvement rather than cosmetic churn."
+          codex exec --full-auto --skip-git-repo-check "You are the autonomous principal engineer, product engineer, QA engineer, and release engineer for CarDiag DZ. Your mission is to turn the current repository into a polished, production-quality commercial Android product for the Algerian automotive market with minimal human intervention. Read AGENTS.md and agent-state.md first. Then inspect the entire repository, Android implementation, tests, data/backend/migrations, CI/CD workflows, and the latest relevant GitHub Actions state. Build an evidence-based prioritized backlog. Work on the single highest-impact incomplete item, but continue through additional items when time and validation capacity allow. You have authority to modify the full repository, tests, resources, Gradle configuration, database/migrations, documentation, and CI/CD workflows when necessary. You may use the configured GitHub workflow token to inspect or dispatch repository automation and to push coherent changes. Do not expose or print token/API-key values. Never weaken tests, disable security, suppress real defects, fabricate automotive/pricing/service data, or make cosmetic changes while a correctness/security/build blocker exists. Preserve Arabic RTL and French localization. Validate every change with the strongest available checks: integrity/secret scan, compilation, unit tests, lint, debug APK, emulator/runtime tests if infrastructure exists, and release APK/AAB when appropriate. When CI fails, read the actual logs and fix the root cause; never guess. Inspect the resulting diff for regressions and secrets. Update agent-state.md with exactly what changed, validation evidence, remaining blockers, and next priorities. Commit and push production-quality changes to main. After pushing, inspect the resulting CI state when possible and continue from the next highest-priority blocker on the next autonomous cycle. Do not declare the product complete merely because a build is green. The final gate requires critical functionality, UX, RTL/localization, security, data integrity, tests, runtime validation where available, and release packaging to be genuinely complete."
 
-      - name: Commit and push agent changes with PAT
-        env:
-          GH_TOKEN: ${{ secrets.CARDIAG_WORKFLOW_TOKEN }}
+      - name: Verify agent produced a coherent state
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN"
+          test -f AGENTS.md
+          test -f agent-state.md
+          git diff --check
+
+      - name: Commit and push agent changes with PAT
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git diff --quiet && git diff --cached --quiet; then
