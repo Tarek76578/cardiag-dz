@@ -99,6 +99,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: main
       - name: Setup JDK 17
         uses: actions/setup-java@v5
         with:
@@ -143,4 +145,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh workflow run "CarDiag Autonomous Engineer (safe)" --repo "${{ github.repository }}" --ref main
+          gh workflow run .github/workflows/cardiag-agent-safe.yml --repo "${{ github.repository }}" --ref main
