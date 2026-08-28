@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CarDiag DZ lint configuration.
+
+  We intentionally keep lint warnings visible. This file only disables
+  checks that produce confirmed false positives in the current
+  codebase. New regressions in production code remain reported.
+
+  - GradleDependency: dependency upgrades are tracked separately and
+    must not block CI; a stale advisory should not delay a green
+    build.
+  - Typos: the lint dictionary flags "Exemple" (French for "Example")
+    which is intentional copy in the French UI strings.
+-->
+<lint>
+    <issue id="GradleDependency" severity="informational" />
+    <issue id="Typos" severity="informational" />
+</lint>

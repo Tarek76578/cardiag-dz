@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pre-Android-12 full backup rules for CarDiag DZ.
+  Backup is disabled in the manifest, so every storage location that
+  could contain authenticated user data must be explicitly excluded.
+-->
+<full-backup-content>
+    <exclude domain="root" />
+    <exclude domain="file" />
+    <exclude domain="database" />
+    <exclude domain="sharedpref" />
+    <exclude domain="external" />
+</full-backup-content>

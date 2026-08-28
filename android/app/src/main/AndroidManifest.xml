@@ -4,11 +4,21 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <!--
+      Android 12+ (API 31+) runtime Bluetooth permissions.
+      usesPermissionFlags="neverForLocation" ensures BLUETOOTH_SCAN is not
+      derived from device location, satisfying Play Store policy for OBD-II
+      adapters used with this app.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/full_backup_content"
         android:usesCleartextTraffic="false"
         android:icon="@drawable/ic_cardiag_launcher"
         android:roundIcon="@drawable/ic_cardiag_launcher"

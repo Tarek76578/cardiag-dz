@@ -1,3 +1,5 @@
+@file:Suppress("InlinedApi")
+
 package dz.cardiag.app
 
 import android.Manifest
@@ -321,7 +323,7 @@ private fun parsePid(pid: ObdPidCatalog, raw: String): Pair<Double?, String?> {
 private fun PidCard(value: LiveValue) {
     val p = value.pid
     val number = value.value
-    val outOfRange = number != null && ((p.minValue != null && number < p.minValue!!) || (p.maxValue != null && number > p.maxValue!!))
+    val outOfRange = number != null && ((p.minValue != null && number < p.minValue) || (p.maxValue != null && number > p.maxValue))
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

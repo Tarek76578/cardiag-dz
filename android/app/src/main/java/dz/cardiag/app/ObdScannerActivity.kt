@@ -1,3 +1,5 @@
+@file:Suppress("InlinedApi")
+
 package dz.cardiag.app
 
 import android.Manifest
