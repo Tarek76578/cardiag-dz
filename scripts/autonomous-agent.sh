@@ -20,8 +20,9 @@ PROMPT="$(cat "$MISSION_FILE")
 --- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
 $(cat "$REQUIREMENTS_FILE")"
 
-# Keep the free router/candidates first, but never use retired model slugs.
-# The previous cycle failed because openai/gpt-oss-120b:free was removed by OpenRouter.
+# Keep the configured candidates in order. Provider outages are handled
+# separately from genuine engineering failures so CI can still validate and
+# preserve verified repository work when an AI provider is temporarily down.
 models=(
   "openrouter/free"
   "z-ai/glm-5.2:free"
@@ -32,6 +33,7 @@ models=(
 max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-1}"
 delay="${OPENROUTER_INITIAL_DELAY:-20}"
 log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
+ai_unavailable=false
 
 for model in "${models[@]}"; do
   cat > "$CODEX_HOME/config.toml" <<EOF
@@ -60,6 +62,7 @@ EOF
 
     if grep -Eqi '(^|[^0-9])(400|404|408|409|429|500|502|503|504)([^0-9]|$)|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|status: 400' "$log_file"; then
       echo "OpenRouter/model availability or compatibility failure for $model; moving to the next candidate." >&2
+      ai_unavailable=true
       sleep "$delay"
       break
     fi
@@ -69,5 +72,12 @@ EOF
   done
 done
 
-echo "All configured OpenRouter models/router were unavailable, rate-limited, or incompatible." >&2
+if [ "$ai_unavailable" = true ]; then
+  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
+  echo "All configured OpenRouter models/router were unavailable, rate-limited, or incompatible." >&2
+  echo "Continuing to CI validation so genuine Android/project failures remain visible." >&2
+  exit 0
+fi
+
+echo "Autonomous agent ended without a successful model execution." >&2
 exit 1
