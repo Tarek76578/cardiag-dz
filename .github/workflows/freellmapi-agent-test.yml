@@ -1,0 +1,147 @@
+name: FreeLLMAPI Agent Compatibility Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freellmapi-test:
+    name: Gateway + keyless Kilo + Gemini + tool calling
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout CarDiag
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Clone FreeLLMAPI-Extended
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git /tmp/freellmapi
+          cd /tmp/freellmapi
+          npm ci
+          node -e "console.log('FreeLLMAPI package installed')"
+
+      - name: Start gateway
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          cd /tmp/freellmapi
+          export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+          export PORT=3001
+          # Provider keys are injected only when available; Kilo/Pollinations are keyless.
+          export GOOGLE_API_KEY="${GEMINI_API_KEY:-}"
+          npm run dev > /tmp/freellmapi.log 2>&1 &
+          echo $! > /tmp/freellmapi.pid
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3001/health >/tmp/freellmapi-health.json 2>/dev/null; then
+              echo 'FREELLMAPI_GATEWAY_READY'
+              cat /tmp/freellmapi-health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Gateway did not become ready' >&2
+          cat /tmp/freellmapi.log >&2 || true
+          exit 1
+
+      - name: Inspect available models
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:3001/v1/models > /tmp/models.json
+          python3 - <<'PY'
+          import json
+          p='/tmp/models.json'
+          data=json.load(open(p))
+          items=data.get('data', data if isinstance(data,list) else [])
+          print('MODEL_COUNT=', len(items))
+          for m in items[:30]:
+              print(m.get('id','<unknown>'))
+          PY
+
+      - name: Real tool-calling probe through gateway
+        run: |
+          set -euo pipefail
+          cat >/tmp/tool-test.json <<'JSON'
+          {
+            "model": "",
+            "messages": [
+              {"role":"system","content":"You are a tool-using coding agent. You MUST call the provided tool before answering."},
+              {"role":"user","content":"Read the project status file using the tool and tell me the first line."}
+            ],
+            "tools": [{
+              "type":"function",
+              "function": {
+                "name":"read_project_file",
+                "description":"Read a UTF-8 text file from the checked-out project.",
+                "parameters": {
+                  "type":"object",
+                  "properties":{"path":{"type":"string"}},
+                  "required":["path"]
+                }
+              }
+            }],
+            "tool_choice":"required"
+          }
+          JSON
+          code=$(curl -sS -o /tmp/tool-response.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/tool-test.json \
+            http://127.0.0.1:3001/v1/chat/completions)
+          echo "TOOL_TEST_HTTP=$code"
+          cat /tmp/tool-response.json
+          test "$code" = 200
+          python3 - <<'PY'
+          import json,sys
+          d=json.load(open('/tmp/tool-response.json'))
+          msg=d['choices'][0]['message']
+          calls=msg.get('tool_calls') or []
+          if not calls:
+              print('FAIL: no tool_calls returned', file=sys.stderr)
+              sys.exit(2)
+          call=calls[0]
+          assert call.get('function',{}).get('name') == 'read_project_file', call
+          print('TOOL_CALLING_SUCCESS')
+          print('ROUTED_VIA=', d.get('_routing', 'see X-Routed-Via header in server logs'))
+          PY
+
+      - name: Gemini direct compatibility probe (when secret is configured)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo 'GEMINI_SECRET_NOT_CONFIGURED: keyless test remains authoritative.'
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/gemini-via-gateway.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"google/gemini-3.7-flash","messages":[{"role":"user","content":"Reply exactly GEMINI_GATEWAY_READY"}]}' \
+            http://127.0.0.1:3001/v1/chat/completions)
+          echo "GEMINI_GATEWAY_HTTP=$code"
+          cat /tmp/gemini-via-gateway.json
+          if [ "$code" = 200 ] && grep -q 'GEMINI_GATEWAY_READY' /tmp/gemini-via-gateway.json; then
+            echo 'GEMINI_GATEWAY_SUCCESS'
+          else
+            echo 'Gemini via gateway did not succeed; keyless/tool path remains independently evaluated.'
+          fi
+
+      - name: Dump gateway diagnostics on failure
+        if: failure()
+        run: |
+          echo '===== FreeLLMAPI log ====='
+          cat /tmp/freellmapi.log || true
+          echo '===== Health ====='
+          cat /tmp/freellmapi-health.json || true
+
+      - name: Stop gateway
+        if: always()
+        run: |
+          if [ -f /tmp/freellmapi.pid ]; then kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true; fi
