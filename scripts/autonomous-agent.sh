@@ -1,42 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CODEX_HOME="${CODEX_HOME:-$PWD/.codex}"
-mkdir -p "$CODEX_HOME"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-MISSION_FILE="$PWD/docs/agent-professional-transformation-mission.md"
-REQUIREMENTS_FILE="$PWD/docs/agent-current-user-requirements.md"
-USER_PRIORITY_FILE="$PWD/docs/agent-user-priority-requirements.md"
-for file in "$MISSION_FILE" "$REQUIREMENTS_FILE" "$USER_PRIORITY_FILE"; do
+MISSION_FILE="$ROOT/docs/agent-professional-transformation-mission.md"
+REQUIREMENTS_FILE="$ROOT/docs/agent-current-user-requirements.md"
+USER_PRIORITY_FILE="$ROOT/docs/agent-user-priority-requirements.md"
+STATE_FILE="$ROOT/agent-state.md"
+for file in "$MISSION_FILE" "$REQUIREMENTS_FILE" "$USER_PRIORITY_FILE" "$STATE_FILE" "$ROOT/AGENTS.md"; do
   if [ ! -f "$file" ]; then
     echo "Missing agent input: $file" >&2
     exit 1
   fi
 done
 
-PROMPT="$(cat "$MISSION_FILE")
-
---- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
-$(cat "$REQUIREMENTS_FILE")
-
---- EXPLICIT USER-PRIORITY PRODUCT REQUIREMENTS (MANDATORY) ---
-$(cat "$USER_PRIORITY_FILE")"
-
-# Gemini is the primary autonomous-engineering provider. Google documents this
-# OpenAI-compatible endpoint and function-calling support. Validate the API
-# before invoking Codex so provider failures cannot be reported as success.
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
-GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
 if [ -z "${GEMINI_API_KEY:-}" ]; then
   echo "GEMINI_API_KEY is required for the autonomous engineering cycle." >&2
-  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-  exit 1
+  exit 20
 fi
 
-export GEMINI_MODEL
+MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
+export GEMINI_MODEL="$MODEL"
+export GEMINI_CLI_TRUST_WORKSPACE=true
 
-echo "Validating Gemini API: $GEMINI_MODEL"
-validation_payload=$(python3 - <<'PY'
+# Validate Gemini using Google's documented OpenAI-compatible Chat Completions
+# endpoint. Do not use curl -f so Google's actual error body remains visible.
+echo "Validating Gemini API: $MODEL"
+validation_payload="$(python3 - <<'PY'
 import json, os
 print(json.dumps({
   "model": os.environ.get("GEMINI_MODEL", "gemini-3.7-flash"),
@@ -44,55 +35,63 @@ print(json.dumps({
   "max_tokens": 16,
 }))
 PY
-)
-validation_response=$(curl -fsS --retry 2 --retry-delay 2 \
-  -X POST "$GEMINI_BASE_URL/chat/completions" \
-  -H "Authorization: Bearer $GEMINI_API_KEY" \
+)"
+validation_response="$(curl -sS --retry 2 --retry-delay 2 \
+  -w '\nHTTP_STATUS:%{http_code}' \
+  -X POST "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" \
+  -H "Authorization: Bearer ${GEMINI_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d "$validation_payload") || {
-    echo "Gemini API validation failed." >&2
-    echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-    exit 1
-  }
+  -d "$validation_payload")"
 
-if ! printf '%s' "$validation_response" | grep -q 'GEMINI_READY'; then
-  echo "Gemini API responded, but the expected completion was not received." >&2
-  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-  exit 1
+http_status="${validation_response##*HTTP_STATUS:}"
+validation_body="${validation_response%$'\nHTTP_STATUS:'*}"
+if [ "$http_status" != "200" ]; then
+  echo "Gemini API validation failed (HTTP $http_status)." >&2
+  printf '%s\n' "$validation_body" | python3 -c 'import json,sys; s=sys.stdin.read();\ntry: print(json.dumps(json.loads(s), indent=2)[:4000])\nexcept Exception: print(s[:4000])'
+  exit 21
 fi
 
-echo "Gemini API validation succeeded: $GEMINI_MODEL"
+if ! printf '%s' "$validation_body" | grep -q 'GEMINI_READY'; then
+  echo "Gemini API responded, but the expected completion was not received." >&2
+  printf '%s\n' "$validation_body" | head -c 4000 >&2
+  exit 21
+fi
 
-# Configure Codex to use the same documented Gemini OpenAI-compatible endpoint.
-# The API key remains in the environment and is never written to repository files.
-cat > "$CODEX_HOME/config.toml" <<EOF
-model = "$GEMINI_MODEL"
-model_provider = "gemini"
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
+echo "Gemini API validation succeeded: $MODEL"
+echo "AI_PROVIDER_SUCCESS=gemini/$MODEL"
 
-[model_providers.gemini]
-name = "gemini"
-base_url = "$GEMINI_BASE_URL/"
-env_key = "GEMINI_API_KEY"
+echo "Starting autonomous Gemini CLI cycle with gemini/$MODEL"
 
-[projects."/home/runner/work/cardiag-dz/cardiag-dz"]
-trust_level = "trusted"
-EOF
+if ! command -v gemini >/dev/null 2>&1; then
+  echo "Gemini CLI is not installed." >&2
+  exit 22
+fi
 
-log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
-echo "Starting autonomous Codex cycle with gemini/$GEMINI_MODEL"
+echo "Gemini CLI version: $(gemini --version)"
+
+PROMPT="$(cat "$MISSION_FILE")
+
+--- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
+$(cat "$REQUIREMENTS_FILE")
+
+--- EXPLICIT USER-PRIORITY PRODUCT REQUIREMENTS (MANDATORY) ---
+$(cat "$USER_PRIORITY_FILE")
+
+--- CURRENT PROJECT STATE ---
+$(cat "$STATE_FILE")
+
+--- EXECUTION DIRECTIVE ---
+Continue from the existing repository state. Do not restart the project and do not discard valid previous work. This is an autonomous engineering cycle, not an audit. Select the highest-value unfinished requirement from agent-state.md and the mission, implement real changes, integrate them into the application, run relevant tests/build checks, fix failures, and update agent-state.md with exact completed and remaining work. Never fabricate GPS, businesses, diagnostic results, vehicle data, prices, or image identity. Never expose secrets. Do not claim a feature is complete unless it is implemented and verified."
+
 set +e
-: > "$log_file"
-codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
-status=${PIPESTATUS[0]}
+gemini -p "$PROMPT" --output-format stream-json --approval-mode yolo
+status=$?
 set -e
 
-if [ "$status" -eq 0 ]; then
-  echo "AI_PROVIDER_SUCCESS=gemini/$GEMINI_MODEL" > "$PWD/.ai-provider-status"
-  exit 0
+if [ "$status" -ne 0 ]; then
+  echo "Gemini autonomous engineering cycle failed with exit code $status." >&2
+  exit "$status"
 fi
 
-echo "Codex autonomous engineering cycle failed after Gemini API validation." >&2
-echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-exit "$status"
+echo "AI_PROVIDER_SUCCESS=gemini/$MODEL"
+echo "Gemini autonomous engineering cycle completed successfully."
