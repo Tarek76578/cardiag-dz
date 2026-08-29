@@ -1,0 +1,12 @@
+model = "minimax/minimax-m3:free"
+model_provider = "openrouter"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+
+[projects."/home/runner/work/cardiag-dz/cardiag-dz"]
+trust_level = "trusted"
