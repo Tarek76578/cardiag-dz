@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}"
 export CODEX_HOME="${CODEX_HOME:-$PWD/.codex}"
 mkdir -p "$CODEX_HOME"
 
@@ -15,41 +14,57 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
   echo "Missing current user requirements: $REQUIREMENTS_FILE" >&2
   exit 1
 fi
+
 PROMPT="$(cat "$MISSION_FILE")
 
 --- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
 $(cat "$REQUIREMENTS_FILE")"
 
-# Keep the configured candidates in order. Provider outages are handled
-# separately from genuine engineering failures so CI can still validate and
-# preserve verified repository work when an AI provider is temporarily down.
-models=(
-  "openrouter/free"
-  "z-ai/glm-5.2:free"
-  "minimax/minimax-m3:free"
-  "nvidia/nemotron-3-ultra-550b-a55b:free"
-  "openai/gpt-oss-120b"
+# Prefer provider paths that do not depend on OpenRouter's free-model quota.
+# GitHub Models uses the workflow GITHUB_TOKEN with models: read permission.
+# Gemini/Groq are optional secret-backed fallbacks when configured.
+# OpenRouter remains the final fallback, not the primary provider.
+candidates=(
+  "github|openai/gpt-4.1-mini|https://models.github.ai/inference|GITHUB_TOKEN"
+  "gemini|gemini-2.5-flash|https://generativelanguage.googleapis.com/v1beta/openai/|GEMINI_API_KEY"
+  "groq|openai/gpt-oss-120b|https://api.groq.com/openai/v1|GROQ_API_KEY"
+  "openrouter|openrouter/free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
+  "openrouter|z-ai/glm-5.2:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
+  "openrouter|minimax/minimax-m3:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
+  "openrouter|nvidia/nemotron-3-ultra-550b-a55b:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
+  "openrouter|openai/gpt-oss-120b|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
 )
-max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-1}"
-delay="${OPENROUTER_INITIAL_DELAY:-20}"
-log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
-ai_unavailable=false
 
-for model in "${models[@]}"; do
+max_attempts="${AI_PROVIDER_MAX_ATTEMPTS:-1}"
+delay="${AI_PROVIDER_INITIAL_DELAY:-10}"
+log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
+provider_unavailable=false
+tried_provider=false
+
+for candidate in "${candidates[@]}"; do
+  IFS='|' read -r provider model base_url env_key <<< "$candidate"
+  token="${!env_key:-}"
+
+  if [ -z "$token" ]; then
+    echo "Skipping $provider/$model: $env_key is not configured."
+    continue
+  fi
+  tried_provider=true
+
   cat > "$CODEX_HOME/config.toml" <<EOF
 model = "$model"
-model_provider = "openrouter"
+model_provider = "$provider"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
-[model_providers.openrouter]
-name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
+[model_providers.$provider]
+name = "$provider"
+base_url = "$base_url"
+env_key = "$env_key"
 EOF
 
-  for attempt in $(seq 1 "$max_attempts_per_model"); do
-    echo "Starting autonomous Codex cycle with $model (attempt $attempt/$max_attempts_per_model)"
+  for attempt in $(seq 1 "$max_attempts"); do
+    echo "Starting autonomous Codex cycle with $provider/$model (attempt $attempt/$max_attempts)"
     set +e
     : > "$log_file"
     codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
@@ -57,24 +72,25 @@ EOF
     set -e
 
     if [ "$status" -eq 0 ]; then
+      echo "AI_PROVIDER_SUCCESS=$provider/$model" > "$PWD/.ai-provider-status"
       exit 0
     fi
 
-    if grep -Eqi '(^|[^0-9])(400|404|408|409|429|500|502|503|504)([^0-9]|$)|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|status: 400' "$log_file"; then
-      echo "OpenRouter/model availability or compatibility failure for $model; moving to the next candidate." >&2
-      ai_unavailable=true
+    if grep -Eqi '(^|[^0-9])(400|401|403|404|408|409|429|500|502|503|504)([^0-9]|$)|Unauthorized|Forbidden|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|HTTP 401|HTTP 403|status: 400|status: 401|status: 403' "$log_file"; then
+      echo "Provider/model availability or compatibility failure for $provider/$model; moving to the next provider." >&2
+      provider_unavailable=true
       sleep "$delay"
       break
     fi
 
-    echo "Codex failed for a non-recoverable reason; refusing to repeat the engineering cycle." >&2
+    echo "Codex failed for a non-recoverable reason on $provider/$model; refusing to repeat the engineering cycle." >&2
     exit "$status"
   done
 done
 
-if [ "$ai_unavailable" = true ]; then
+if [ "$provider_unavailable" = true ] || [ "$tried_provider" = false ]; then
   echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-  echo "All configured OpenRouter models/router were unavailable, rate-limited, or incompatible." >&2
+  echo "No configured AI provider could execute the autonomous engineering cycle." >&2
   echo "Continuing to CI validation so genuine Android/project failures remain visible." >&2
   exit 0
 fi
