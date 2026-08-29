@@ -2,6 +2,14 @@ name: CarDiag Agent
 
 on:
   workflow_dispatch:
+    inputs:
+      task:
+        description: 'Agent task selector'
+        required: false
+        default: 'next'
+        type: choice
+        options:
+          - next
 
 permissions:
   contents: write
@@ -30,6 +38,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF_NAME" = main
+          test "${{ inputs.task }}" = next
           test -f AGENTS.md
           test -f android/gradlew
           test -f android/app/build.gradle.kts
