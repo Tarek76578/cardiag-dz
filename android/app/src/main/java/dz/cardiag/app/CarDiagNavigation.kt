@@ -2,14 +2,26 @@ package dz.cardiag.app
 
 /** Canonical product flow. Keep route names stable so screens do not invent their own navigation vocabulary. */
 enum class CarDiagRoute {
+    // Primary bottom-bar destinations
     HOME,
+    GARAGE,
+    DIAGNOSE,
+    HISTORY,
+    MORE,
+
+    // Detail destinations
     VEHICLE,
     OBD,
     SCAN_RESULTS,
     DTC,
     GUIDED_DIAGNOSIS,
+    SYMPTOM,
+    LIVE_DATA,
+    FREEZE_FRAME,
+    READINESS,
+    VIN,
+    AI,
     REPORT,
-    HISTORY,
 }
 
 /** Lightweight navigation contract shared by Compose screens and Activity bridges. */
