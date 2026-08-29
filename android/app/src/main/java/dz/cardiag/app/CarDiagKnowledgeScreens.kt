@@ -66,7 +66,8 @@ fun DtcDetailScreen(
     arabic: Boolean,
     initialCode: String?,
     onBack: () -> Unit,
-    onOpenGuided: (String) -> Unit
+    onOpenGuided: (String) -> Unit,
+    onOpenBrowse: () -> Unit = {}
 ) {
     var code by remember { mutableStateOf(initialCode?.uppercase() ?: "") }
     var record by remember { mutableStateOf<DtcRecord?>(null) }
@@ -115,6 +116,11 @@ fun DtcDetailScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = ::load, enabled = !loading) { Text(stringResource(R.string.action_retry)) }
+            }
+        }
+        item {
+            OutlinedButton(onClick = onOpenBrowse, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(stringResource(R.string.dtc_browse_open))
             }
         }
         if (loading) item { CarDiagLoadingState(stringResource(R.string.state_loading)) }

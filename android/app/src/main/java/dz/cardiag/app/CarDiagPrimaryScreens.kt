@@ -64,6 +64,7 @@ import dz.cardiag.app.core.AuthService
 import dz.cardiag.app.core.SupabaseClient
 import dz.cardiag.app.core.VehicleHealthEngine
 import dz.cardiag.app.core.VehicleHealthSnapshot
+import dz.cardiag.app.ui.rememberCarDiagWindowSize
 import dz.cardiag.app.ui.theme.CarDiagSeverity
 import dz.cardiag.app.ui.theme.CarDiagShapes
 import dz.cardiag.app.ui.theme.CarDiagSpacing
@@ -211,6 +212,7 @@ fun HomeScreen(
     onOpenHistory: () -> Unit,
     onOpenDtcSearch: () -> Unit
 ) {
+    val windowSize = rememberCarDiagWindowSize()
     var sessionCount by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
@@ -256,38 +258,77 @@ fun HomeScreen(
         item {
             CarDiagSectionHeader(stringResource(R.string.home_start_diagnosis))
         }
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CarDiagActionCard(
-                    title = stringResource(R.string.home_obd_scan),
-                    subtitle = stringResource(R.string.home_obd_scan_desc),
-                    icon = Icons.Default.Bolt,
-                    onClick = onOpenObd
-                )
-                CarDiagActionCard(
-                    title = stringResource(R.string.home_symptom_diagnosis),
-                    subtitle = stringResource(R.string.home_symptom_diagnosis_desc),
-                    icon = Icons.Default.Search,
-                    onClick = onOpenSymptom
-                )
-                CarDiagActionCard(
-                    title = stringResource(R.string.home_dtc_lookup),
-                    subtitle = stringResource(R.string.home_dtc_lookup_desc),
-                    icon = Icons.Default.Warning,
-                    onClick = onOpenDtcSearch
-                )
-                CarDiagActionCard(
-                    title = stringResource(R.string.home_ai_assistant),
-                    subtitle = stringResource(R.string.home_ai_assistant_desc),
-                    icon = Icons.Default.AutoAwesome,
-                    accentColor = MaterialTheme.colorScheme.tertiary,
-                    onClick = onOpenAi
-                )
+        if (windowSize.isExpanded) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_obd_scan),
+                            subtitle = stringResource(R.string.home_obd_scan_desc),
+                            icon = Icons.Default.Bolt,
+                            onClick = onOpenObd
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_dtc_lookup),
+                            subtitle = stringResource(R.string.home_dtc_lookup_desc),
+                            icon = Icons.Default.Warning,
+                            onClick = onOpenDtcSearch
+                        )
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_symptom_diagnosis),
+                            subtitle = stringResource(R.string.home_symptom_diagnosis_desc),
+                            icon = Icons.Default.Search,
+                            onClick = onOpenSymptom
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_ai_assistant),
+                            subtitle = stringResource(R.string.home_ai_assistant_desc),
+                            icon = Icons.Default.AutoAwesome,
+                            accentColor = MaterialTheme.colorScheme.tertiary,
+                            onClick = onOpenAi
+                        )
+                    }
+                }
+            }
+        } else {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CarDiagActionCard(
+                        title = stringResource(R.string.home_obd_scan),
+                        subtitle = stringResource(R.string.home_obd_scan_desc),
+                        icon = Icons.Default.Bolt,
+                        onClick = onOpenObd
+                    )
+                    CarDiagActionCard(
+                        title = stringResource(R.string.home_symptom_diagnosis),
+                        subtitle = stringResource(R.string.home_symptom_diagnosis_desc),
+                        icon = Icons.Default.Search,
+                        onClick = onOpenSymptom
+                    )
+                    CarDiagActionCard(
+                        title = stringResource(R.string.home_dtc_lookup),
+                        subtitle = stringResource(R.string.home_dtc_lookup_desc),
+                        icon = Icons.Default.Warning,
+                        onClick = onOpenDtcSearch
+                    )
+                    CarDiagActionCard(
+                        title = stringResource(R.string.home_ai_assistant),
+                        subtitle = stringResource(R.string.home_ai_assistant_desc),
+                        icon = Icons.Default.AutoAwesome,
+                        accentColor = MaterialTheme.colorScheme.tertiary,
+                        onClick = onOpenAi
+                    )
+                }
             }
         }
         item {

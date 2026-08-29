@@ -46,6 +46,9 @@ fun CarDiagNavGraph(
         mutableStateOf(listOf(initialRoute))
     }
     var pendingDtcCode by rememberSaveable { mutableStateOf(initialDtcCode) }
+    var pendingSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingBefore by remember { mutableStateOf<dz.cardiag.app.core.BeforeAfterSnapshot?>(null) }
+    var pendingAfter by remember { mutableStateOf<dz.cardiag.app.core.BeforeAfterSnapshot?>(null) }
     var pendingVehicleId by rememberSaveable { mutableStateOf(initialVehicleId) }
     var pendingVehicleName by rememberSaveable { mutableStateOf(initialVehicleName) }
 
@@ -128,7 +131,26 @@ fun CarDiagNavGraph(
             CarDiagRoute.HISTORY -> HistoryScreen(
                 padding = padding,
                 arabic = arabic,
-                onOpenSession = { sessionId -> pushDetail(CarDiagRoute.REPORT) }
+                onOpenSession = { sessionId ->
+                    pendingSessionId = sessionId
+                    // Sample offline snapshots stand in for the recorded session
+                    // until the persistent history model is wired in.
+                    pendingBefore = dz.cardiag.app.core.BeforeAfterSnapshot(
+                        capturedAt = 0L,
+                        label = "before",
+                        dtcs = listOf("P0301", "P0171"),
+                        readinessReady = false,
+                        milOn = true
+                    )
+                    pendingAfter = dz.cardiag.app.core.BeforeAfterSnapshot(
+                        capturedAt = 0L,
+                        label = "after",
+                        dtcs = listOf("P0301"),
+                        readinessReady = null,
+                        milOn = true
+                    )
+                    pushDetail(CarDiagRoute.REPORT)
+                }
             )
             CarDiagRoute.MORE -> MoreScreen(
                 padding = padding,
@@ -172,7 +194,14 @@ fun CarDiagNavGraph(
                 arabic = arabic,
                 initialCode = pendingDtcCode,
                 onBack = ::pop,
-                onOpenGuided = { code -> setDtc(code); pushDetail(CarDiagRoute.GUIDED_DIAGNOSIS) }
+                onOpenGuided = { code -> setDtc(code); pushDetail(CarDiagRoute.GUIDED_DIAGNOSIS) },
+                onOpenBrowse = { pushDetail(CarDiagRoute.DTC_BROWSE) }
+            )
+            CarDiagRoute.DTC_BROWSE -> DtcBrowseScreen(
+                padding = padding,
+                arabic = arabic,
+                onBack = ::pop,
+                onSelectCode = { code -> setDtc(code); pushDetail(CarDiagRoute.DTC) }
             )
             CarDiagRoute.GUIDED_DIAGNOSIS -> GuidedDiagnosisScreen(
                 padding = padding,
@@ -227,6 +256,9 @@ fun CarDiagNavGraph(
             CarDiagRoute.REPORT -> DiagnosticReportScreen(
                 padding = padding,
                 arabic = arabic,
+                sessionId = pendingSessionId,
+                before = pendingBefore,
+                after = pendingAfter,
                 onBack = ::pop
             )
         }

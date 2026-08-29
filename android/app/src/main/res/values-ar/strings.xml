@@ -426,4 +426,42 @@
     <string name="cd_vehicle">سيارة</string>
     <string name="cd_dtc_code">رمز العطل</string>
     <string name="cd_dtc_severity">خطورة الرمز</string>
+    <!-- Symptom catalog multi-select -->
+    <string name="symptom_specific_label">الأعراض الملاحظة</string>
+    <string name="symptom_specific_hint">اختر عرضا أو أكثر لتحسين دقة التشخيص.</string>
+    <string name="symptom_questions_label">أسئلة سياقية</string>
+    <string name="symptom_questions_none">لا توجد أسئلة سياقية للاختيار الحالي.</string>
+    <string name="symptom_selected_count">%1$d عرض (أعراض) مختارة</string>
+
+    <!-- DTC browse -->
+    <string name="dtc_browse_title">تصفّح قاعدة DTC</string>
+    <string name="dtc_browse_subtitle">كتالوج مرجعي J2012 يمكن تصفّحه دون اتصال.</string>
+    <string name="dtc_browse_open">تصفّح القاعدة</string>
+    <string name="dtc_browse_filter_family">العائلة</string>
+    <string name="dtc_browse_filter_severity">الخطورة</string>
+    <string name="dtc_browse_no_results">لا توجد رموز تطابق عوامل التصفية.</string>
+    <string name="dtc_browse_select_code">اختر هذا الرمز</string>
+
+    <!-- Before / After history -->
+    <string name="history_detail_title">تفاصيل الجلسة</string>
+    <string name="history_before_after">المقارنة قبل / بعد</string>
+    <string name="before_after_insufficient">بيانات غير كافية للمقارنة.</string>
+    <string name="before_after_improved_label">تحسّن</string>
+    <string name="before_after_same_label">دون تغيير</string>
+    <string name="before_after_regressed_label">تراجع</string>
+    <string name="before_after_insufficient_label">غير كافٍ</string>
+    <string name="before_after_dtc_before">أعطال قبل: %1$s</string>
+    <string name="before_after_dtc_after">أعطال بعد: %1$s</string>
+    <string name="before_after_count_before">عدد DTC قبل: %1$d</string>
+    <string name="before_after_count_after">عدد DTC بعد: %1$d</string>
+    <string name="before_after_readiness_before">الجاهزية قبل: %1$s</string>
+    <string name="before_after_readiness_after">الجاهزية بعد: %1$s</string>
+    <string name="before_after_mil_before">MIL قبل: %1$s</string>
+    <string name="before_after_mil_after">MIL بعد: %1$s</string>
+
+    <!-- Adaptive layouts -->
+    <string name="adaptive_list_pane">القائمة</string>
+    <string name="adaptive_detail_pane">التفاصيل</string>
+    <string name="adaptive_select_code">اختر رمزا من القائمة.</string>
+
 </resources>

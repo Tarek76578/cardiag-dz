@@ -426,4 +426,42 @@
     <string name="cd_vehicle">Véhicule</string>
     <string name="cd_dtc_code">Code défaut</string>
     <string name="cd_dtc_severity">Gravité du code</string>
+    <!-- Symptom catalog multi-select -->
+    <string name="symptom_specific_label">Symptômes observés</string>
+    <string name="symptom_specific_hint">Sélectionnez un ou plusieurs symptômes pour affiner le diagnostic.</string>
+    <string name="symptom_questions_label">Questions de contexte</string>
+    <string name="symptom_questions_none">Aucune question contextuelle pour la sélection courante.</string>
+    <string name="symptom_selected_count">%1$d symptôme(s) sélectionné(s)</string>
+
+    <!-- DTC browse -->
+    <string name="dtc_browse_title">Parcourir la base DTC</string>
+    <string name="dtc_browse_subtitle">Catalogue de référence OBD-II (J2012) consultable hors ligne.</string>
+    <string name="dtc_browse_open">Parcourir la base</string>
+    <string name="dtc_browse_filter_family">Famille</string>
+    <string name="dtc_browse_filter_severity">Gravité</string>
+    <string name="dtc_browse_no_results">Aucun code ne correspond aux filtres.</string>
+    <string name="dtc_browse_select_code">Choisir ce code</string>
+
+    <!-- Before / After history -->
+    <string name="history_detail_title">Détails de la session</string>
+    <string name="history_before_after">Comparaison avant / après</string>
+    <string name="before_after_insufficient">Données insuffisantes pour la comparaison.</string>
+    <string name="before_after_improved_label">Amélioration</string>
+    <string name="before_after_same_label">Identique</string>
+    <string name="before_after_regressed_label">Régression</string>
+    <string name="before_after_insufficient_label">Insuffisant</string>
+    <string name="before_after_dtc_before">DTC avant: %1$s</string>
+    <string name="before_after_dtc_after">DTC après: %1$s</string>
+    <string name="before_after_count_before">DTC actifs avant: %1$d</string>
+    <string name="before_after_count_after">DTC actifs après: %1$d</string>
+    <string name="before_after_readiness_before">Readiness avant: %1$s</string>
+    <string name="before_after_readiness_after">Readiness après: %1$s</string>
+    <string name="before_after_mil_before">MIL avant: %1$s</string>
+    <string name="before_after_mil_after">MIL après: %1$s</string>
+
+    <!-- Adaptive layouts -->
+    <string name="adaptive_list_pane">Liste</string>
+    <string name="adaptive_detail_pane">Détails</string>
+    <string name="adaptive_select_code">Sélectionnez un code dans la liste.</string>
+
 </resources>

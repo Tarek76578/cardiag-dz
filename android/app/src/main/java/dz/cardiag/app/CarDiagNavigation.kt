@@ -14,6 +14,7 @@ enum class CarDiagRoute {
     OBD,
     SCAN_RESULTS,
     DTC,
+    DTC_BROWSE,
     GUIDED_DIAGNOSIS,
     SYMPTOM,
     LIVE_DATA,
