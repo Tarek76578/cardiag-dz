@@ -10,6 +10,10 @@ concurrency:
   group: cardiag-agent-main
   cancel-in-progress: false
 
+env:
+  OLLAMA_MODEL: qwen2.5-coder:7b
+  OLLAMA_HOST: http://127.0.0.1:11434
+
 jobs:
   agent:
     name: Autonomous engineering cycle
@@ -50,16 +54,51 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install Gemini CLI
+      - name: Setup Ollama
         run: |
           set -euo pipefail
-          npm install -g @google/gemini-cli@latest
-          gemini --version
+          if ! command -v ollama >/dev/null 2>&1; then
+            curl -fsSL https://ollama.com/install.sh | sh
+          fi
+          ollama --version
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          echo $! >/tmp/ollama.pid
+          for i in $(seq 1 60); do
+            if curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json 2>/dev/null; then
+              echo OLLAMA_READY
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json
+          if ! grep -q 'qwen2.5-coder' /tmp/ollama-tags.json; then
+            ollama pull "$OLLAMA_MODEL"
+          fi
+          ollama list
+          curl -fsS "$OLLAMA_HOST/api/chat" \
+            -H 'Content-Type: application/json' \
+            -d "{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly OLLAMA_READY\"}],\"stream\":false}" \
+            >/tmp/ollama-probe.json
+          grep -q 'OLLAMA_READY' /tmp/ollama-probe.json
+          echo "AI_PROVIDER_SUCCESS=ollama/$OLLAMA_MODEL"
+
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v1
+
+      - name: Install Aider
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --upgrade aider-chat
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/aider" --version
 
       - name: Run autonomous agent
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-3.7-flash
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          OLLAMA_MODEL: qwen2.5-coder:7b
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
@@ -104,3 +143,8 @@ jobs:
             agent-state.md
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Stop Ollama
+        if: always()
+        run: |
+          if [ -f /tmp/ollama.pid ]; then kill "$(cat /tmp/ollama.pid)" 2>/dev/null || true; fi
