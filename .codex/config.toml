@@ -1,12 +1,12 @@
-model = "openai/gpt-oss-120b"
-model_provider = "openrouter"
+model = "openai/gpt-4.1-mini"
+model_provider = "github"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
-[model_providers.openrouter]
-name = "OpenRouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
+[model_providers.github]
+name = "GitHub Models"
+base_url = "https://models.github.ai/inference"
+env_key = "GITHUB_TOKEN"
 
 [projects."/home/runner/work/cardiag-dz/cardiag-dz"]
 trust_level = "trusted"
