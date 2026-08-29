@@ -6,11 +6,19 @@ export CODEX_HOME="${CODEX_HOME:-$PWD/.codex}"
 mkdir -p "$CODEX_HOME"
 
 MISSION_FILE="$PWD/docs/agent-professional-transformation-mission.md"
+REQUIREMENTS_FILE="$PWD/docs/agent-current-user-requirements.md"
 if [ ! -f "$MISSION_FILE" ]; then
   echo "Missing agent mission: $MISSION_FILE" >&2
   exit 1
 fi
-PROMPT="$(cat "$MISSION_FILE")"
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+  echo "Missing current user requirements: $REQUIREMENTS_FILE" >&2
+  exit 1
+fi
+PROMPT="$(cat "$MISSION_FILE")
+
+--- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
+$(cat "$REQUIREMENTS_FILE")"
 
 models=(
   "openrouter/free"
