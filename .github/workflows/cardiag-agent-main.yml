@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ollama/models
-          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v2
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v3
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -69,23 +69,31 @@ jobs:
           ollama --version
           nohup ollama serve >/tmp/ollama.log 2>&1 &
           echo $! >/tmp/ollama.pid
+          ready=0
           for i in $(seq 1 60); do
             if curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json 2>/dev/null; then
-              echo OLLAMA_READY
+              ready=1
+              echo "OLLAMA_HTTP_READY attempt=$i"
               break
             fi
             sleep 2
           done
-          curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json
+          if [ "$ready" -ne 1 ]; then
+            echo 'Ollama did not become ready.' >&2
+            cat /tmp/ollama.log >&2 || true
+            exit 20
+          fi
           if ! grep -q 'qwen2.5-coder:3b' /tmp/ollama-tags.json; then
+            echo "Pulling $OLLAMA_MODEL"
             ollama pull "$OLLAMA_MODEL"
           fi
           ollama list
-          curl -fsS "$OLLAMA_HOST/api/chat" \
+          # Do not use an LLM-generated response as the health check. A successful
+          # HTTP/API response and presence of the requested model are sufficient.
+          curl -fsS "$OLLAMA_HOST/api/show" \
             -H 'Content-Type: application/json' \
-            -d "{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly OLLAMA_READY\"}],\"stream\":false}" \
-            >/tmp/ollama-probe.json
-          grep -q 'OLLAMA_READY' /tmp/ollama-probe.json
+            -d "{\"name\":\"$OLLAMA_MODEL\"}" >/tmp/ollama-show.json
+          grep -q 'qwen2.5-coder' /tmp/ollama-show.json
           echo "AI_PROVIDER_SUCCESS=ollama/$OLLAMA_MODEL"
 
       - name: Install Aider
