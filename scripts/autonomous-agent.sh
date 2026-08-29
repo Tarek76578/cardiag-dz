@@ -7,18 +7,12 @@ mkdir -p "$CODEX_HOME"
 MISSION_FILE="$PWD/docs/agent-professional-transformation-mission.md"
 REQUIREMENTS_FILE="$PWD/docs/agent-current-user-requirements.md"
 USER_PRIORITY_FILE="$PWD/docs/agent-user-priority-requirements.md"
-if [ ! -f "$MISSION_FILE" ]; then
-  echo "Missing agent mission: $MISSION_FILE" >&2
-  exit 1
-fi
-if [ ! -f "$REQUIREMENTS_FILE" ]; then
-  echo "Missing current user requirements: $REQUIREMENTS_FILE" >&2
-  exit 1
-fi
-if [ ! -f "$USER_PRIORITY_FILE" ]; then
-  echo "Missing user-priority requirements: $USER_PRIORITY_FILE" >&2
-  exit 1
-fi
+for file in "$MISSION_FILE" "$REQUIREMENTS_FILE" "$USER_PRIORITY_FILE"; do
+  if [ ! -f "$file" ]; then
+    echo "Missing agent input: $file" >&2
+    exit 1
+  fi
+done
 
 PROMPT="$(cat "$MISSION_FILE")
 
@@ -28,78 +22,77 @@ $(cat "$REQUIREMENTS_FILE")
 --- EXPLICIT USER-PRIORITY PRODUCT REQUIREMENTS (MANDATORY) ---
 $(cat "$USER_PRIORITY_FILE")"
 
-# GitHub Models was retired on 2026-07-30, so do not use GITHUB_TOKEN as an
-# inference provider. Prefer direct provider APIs with explicit secrets, then
-# fall back to OpenRouter. A missing optional provider is skipped cleanly.
-candidates=(
-  "gemini|gemini-2.5-flash|https://generativelanguage.googleapis.com/v1beta/openai/|GEMINI_API_KEY"
-  "groq|openai/gpt-oss-120b|https://api.groq.com/openai/v1|GROQ_API_KEY"
-  "openrouter|openrouter/free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
-  "openrouter|z-ai/glm-5.2:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
-  "openrouter|minimax/minimax-m3:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
-  "openrouter|nvidia/nemotron-3-ultra-550b-a55b:free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
-  "openrouter|openai/gpt-oss-120b|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
+# Gemini is the primary autonomous-engineering provider. Google documents this
+# OpenAI-compatible endpoint and function-calling support. Validate the API
+# before invoking Codex so provider failures cannot be reported as success.
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
+GEMINI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai"
+if [ -z "${GEMINI_API_KEY:-}" ]; then
+  echo "GEMINI_API_KEY is required for the autonomous engineering cycle." >&2
+  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
+  exit 1
+fi
+
+export GEMINI_MODEL
+
+echo "Validating Gemini API: $GEMINI_MODEL"
+validation_payload=$(python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "model": os.environ.get("GEMINI_MODEL", "gemini-3.7-flash"),
+  "messages": [{"role": "user", "content": "Reply with exactly GEMINI_READY"}],
+  "max_tokens": 16,
+}))
+PY
 )
+validation_response=$(curl -fsS --retry 2 --retry-delay 2 \
+  -X POST "$GEMINI_BASE_URL/chat/completions" \
+  -H "Authorization: Bearer $GEMINI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$validation_payload") || {
+    echo "Gemini API validation failed." >&2
+    echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
+    exit 1
+  }
 
-max_attempts="${AI_PROVIDER_MAX_ATTEMPTS:-1}"
-delay="${AI_PROVIDER_INITIAL_DELAY:-10}"
-log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
-provider_unavailable=false
-tried_provider=false
+if ! printf '%s' "$validation_response" | grep -q 'GEMINI_READY'; then
+  echo "Gemini API responded, but the expected completion was not received." >&2
+  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
+  exit 1
+fi
 
-for candidate in "${candidates[@]}"; do
-  IFS='|' read -r provider model base_url env_key <<< "$candidate"
-  token="${!env_key:-}"
+echo "Gemini API validation succeeded: $GEMINI_MODEL"
 
-  if [ -z "$token" ]; then
-    echo "Skipping $provider/$model: $env_key is not configured."
-    continue
-  fi
-  tried_provider=true
-
-  cat > "$CODEX_HOME/config.toml" <<EOF
-model = "$model"
-model_provider = "$provider"
+# Configure Codex to use the same documented Gemini OpenAI-compatible endpoint.
+# The API key remains in the environment and is never written to repository files.
+cat > "$CODEX_HOME/config.toml" <<EOF
+model = "$GEMINI_MODEL"
+model_provider = "gemini"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
-[model_providers.$provider]
-name = "$provider"
-base_url = "$base_url"
-env_key = "$env_key"
+[model_providers.gemini]
+name = "gemini"
+base_url = "$GEMINI_BASE_URL/"
+env_key = "GEMINI_API_KEY"
+
+[projects."/home/runner/work/cardiag-dz/cardiag-dz"]
+trust_level = "trusted"
 EOF
 
-  for attempt in $(seq 1 "$max_attempts"); do
-    echo "Starting autonomous Codex cycle with $provider/$model (attempt $attempt/$max_attempts)"
-    set +e
-    : > "$log_file"
-    codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
-    status=${PIPESTATUS[0]}
-    set -e
+log_file="${RUNNER_TEMP:-/tmp}/codex-agent.log"
+echo "Starting autonomous Codex cycle with gemini/$GEMINI_MODEL"
+set +e
+: > "$log_file"
+codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "$PROMPT" 2>&1 | tee "$log_file"
+status=${PIPESTATUS[0]}
+set -e
 
-    if [ "$status" -eq 0 ]; then
-      echo "AI_PROVIDER_SUCCESS=$provider/$model" > "$PWD/.ai-provider-status"
-      exit 0
-    fi
-
-    if grep -Eqi '(^|[^0-9])(400|401|403|404|408|409|429|500|502|503|504)([^0-9]|$)|Unauthorized|Forbidden|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|HTTP 401|HTTP 403|status: 400|status: 401|status: 403' "$log_file"; then
-      echo "Provider/model availability or compatibility failure for $provider/$model; moving to the next provider." >&2
-      provider_unavailable=true
-      sleep "$delay"
-      break
-    fi
-
-    echo "Codex failed for a non-recoverable reason on $provider/$model; refusing to repeat the engineering cycle." >&2
-    exit "$status"
-  done
-done
-
-if [ "$provider_unavailable" = true ] || [ "$tried_provider" = false ]; then
-  echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
-  echo "No configured AI provider could execute the autonomous engineering cycle." >&2
-  echo "Continuing to CI validation so genuine Android/project failures remain visible." >&2
+if [ "$status" -eq 0 ]; then
+  echo "AI_PROVIDER_SUCCESS=gemini/$GEMINI_MODEL" > "$PWD/.ai-provider-status"
   exit 0
 fi
 
-echo "Autonomous agent ended without a successful model execution." >&2
-exit 1
+echo "Codex autonomous engineering cycle failed after Gemini API validation." >&2
+echo "AI_PROVIDER_UNAVAILABLE=true" > "$PWD/.ai-provider-status"
+exit "$status"
