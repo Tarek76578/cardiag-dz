@@ -4,11 +4,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-MISSION_FILE="$ROOT/docs/agent-professional-transformation-mission.md"
-REQUIREMENTS_FILE="$ROOT/docs/agent-current-user-requirements.md"
-USER_PRIORITY_FILE="$ROOT/docs/agent-user-priority-requirements.md"
+TASK_FILE="$ROOT/docs/agent-next-task.md"
 STATE_FILE="$ROOT/agent-state.md"
-for file in "$MISSION_FILE" "$REQUIREMENTS_FILE" "$USER_PRIORITY_FILE" "$STATE_FILE" "$ROOT/AGENTS.md"; do
+AGENTS_FILE="$ROOT/AGENTS.md"
+for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
   test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
 done
 
@@ -19,60 +18,73 @@ export AIDER_MODEL="ollama_chat/$MODEL"
 export AIDER_YES_ALWAYS=true AIDER_AUTO_COMMITS=false AIDER_DIRTY_COMMITS=false
 export AIDER_ANALYTICS=false AIDER_CHECK_UPDATE=false AIDER_STREAM=true AIDER_PRETTY=false
 
+# The task manifest is intentionally executable as policy: these are the only files
+# the model receives in chat. This prevents Aider from constructing a repo-wide map.
+ALLOWED_FILES=(
+  "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
+  "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt"
+)
+for file in "${ALLOWED_FILES[@]}"; do
+  test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }
+done
+
+BASELINE_FILE="$(mktemp)"
+PROMPT_FILE="$(mktemp)"
+trap 'rm -f "$BASELINE_FILE" "$PROMPT_FILE"' EXIT
+
+git status --short > "$BASELINE_FILE"
+if grep -qE '^.M|^ M|^A |^ D|^D |^R |^C |^\?\?' "$BASELINE_FILE"; then
+  echo "Working tree must be clean before the autonomous edit." >&2
+  cat "$BASELINE_FILE" >&2
+  exit 12
+fi
+
 command -v ollama >/dev/null || { echo "Ollama is not installed." >&2; exit 20; }
 command -v aider >/dev/null || { echo "Aider is not installed." >&2; exit 21; }
 curl -fsS "$OLLAMA_BASE/api/tags" >/tmp/cardiag-ollama-tags.json || { echo "Ollama server is not reachable." >&2; exit 22; }
 grep -q 'qwen2.5-coder:3b' /tmp/cardiag-ollama-tags.json || { echo "Required Ollama model is not available: $MODEL" >&2; exit 23; }
 
-PROMPT="$(cat "$MISSION_FILE")
---- CURRENT USER REQUIREMENTS ---
-$(cat "$REQUIREMENTS_FILE")
---- USER-PRIORITY REQUIREMENTS ---
-$(cat "$USER_PRIORITY_FILE")
---- CURRENT PROJECT STATE ---
+PROMPT="$(cat "$TASK_FILE")
+
+--- CURRENT AGENT STATE ---
 $(cat "$STATE_FILE")
---- STRICT 3B AGENT DIRECTIVE ---
-You are an autonomous coding agent using Qwen2.5-Coder 3B. Execute ONE highest-value unfinished requirement only.
 
-FIRST: inspect the repository structure and the state file. Then identify the smallest safe implementation. Do NOT load or rewrite the whole repository.
+--- REPOSITORY RULES ---
+$(cat "$AGENTS_FILE")
 
-FILE SCOPE IS MANDATORY:
-- Before editing, choose at most 3 existing source/config files directly required for this ONE task.
-- Prefer 1-2 files.
-- Do not add those files to chat/context unless they are actually relevant.
-- Do not modify any other file.
-- If more than 3 files would be required, stop and record a blocker in agent-state.md instead of expanding scope.
-- Never generate large catalogs, repeated localization data, mock data, or whole-file rewrites.
+--- STRICT 3B EXECUTION CONTRACT ---
+You are Qwen2.5-Coder 3B operating as a constrained autonomous coding agent.
 
-IMPLEMENTATION RULES:
-- Make actual edits; do not merely explain or propose patches.
-- Preserve working architecture and existing functionality.
-- Do not invent APIs, dependencies, GPS coordinates, businesses, prices, vehicle data, diagnostic results, or external responses.
-- Reuse existing dependencies and patterns.
-- Do not touch secrets or credentials.
-- Do not change Gradle/build configuration unless it is the selected requirement and is strictly necessary.
-- Do not create unrelated documentation.
-- Keep the diff minimal; prefer targeted edits over replacing complete files.
-- If the task is too broad, implement only a safe, concrete subset and document the remaining work.
-- If uncertain about correctness, do not guess; record the blocker.
+The task manifest above is the ONLY task. Do not choose another backlog item.
+The two paths listed in the manifest are the ONLY files you may edit.
+They are the ONLY project source files supplied to your chat context.
+Do not ask Aider to add, read, or edit any other source/config file.
+Do not create any new file.
+Do not modify documentation, tests, Gradle, manifests, resources, or unrelated code.
 
-QUALITY GATE BEFORE FINISHING:
-- Inspect git diff and reject your own unrelated/large changes.
-- Check imports, types, Android/Kotlin/Gradle compatibility, and duplicated logic.
-- Update agent-state.md only with the exact work completed and remaining work.
-- Do not commit; the workflow performs validation and commit.
+IMPLEMENTATION:
+- Inspect only the supplied two files and the task manifest.
+- Implement the acceptance criteria exactly and minimally.
+- Reuse dependencies already present in the project; do not add dependencies.
+- Preserve public interfaces and existing behavior unless the task explicitly requires a change.
+- Never fabricate OSM/business data. Only map fields actually returned by the API.
+- Use bounded network timeouts and safe failure handling.
+- Do not store location data.
+- Do not implement hazards in this cycle.
+
+QUALITY GATE:
+- Make a small targeted diff.
+- Review the final diff before stopping.
+- Do not commit.
+- If the task cannot be completed safely within the two-file scope, STOP without speculative changes and state the blocker.
 "
-
-PROMPT_FILE="$(mktemp)"
-trap 'rm -f "$PROMPT_FILE"' EXIT
 printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
 
-# Keep Aider's repository map intentionally tiny. The model must work from explicitly
-# selected files rather than receiving the entire 275-file repository as context.
 echo "AI_PROVIDER=ollama"
 echo "AI_MODEL=$MODEL"
-echo "AGENT_SCOPE=max-3-files"
-echo "Starting focused autonomous engineering cycle"
+echo "AGENT_SCOPE=exactly-2-files"
+echo "AGENT_TASK_FILE=$TASK_FILE"
+echo "Starting deterministic autonomous engineering cycle"
 
 aider \
   --model "ollama_chat/$MODEL" \
@@ -83,15 +95,43 @@ aider \
   --no-analytics \
   --no-check-update \
   --no-pretty \
-  --map-tokens 512 \
-  --max-chat-history-tokens 6000 \
-  --no-gitignore
+  --map-tokens 128 \
+  --max-chat-history-tokens 4000 \
+  --no-gitignore \
+  "${ALLOWED_FILES[@]}"
 
-status=$?
-if [ "$status" -ne 0 ]; then
-  echo "Ollama/Aider autonomous engineering cycle failed with exit code $status." >&2
-  exit "$status"
+# Hard security/quality gate: reject any modification outside the two declared files.
+CHANGED_FILES="$(git diff --name-only && git ls-files --others --exclude-standard)"
+if [ -n "$CHANGED_FILES" ]; then
+  while IFS= read -r changed; do
+    [ -z "$changed" ] && continue
+    allowed=0
+    for file in "${ALLOWED_FILES[@]}"; do
+      if [ "$changed" = "$file" ]; then allowed=1; break; fi
+    done
+    if [ "$allowed" -ne 1 ]; then
+      echo "UNAUTHORIZED_FILE_CHANGE=$changed" >&2
+      git diff --name-status >&2 || true
+      exit 30
+    fi
+  done <<< "$CHANGED_FILES"
 fi
 
+if ! git diff --check; then
+  echo "git diff --check failed." >&2
+  exit 31
+fi
+
+if git diff --quiet -- "${ALLOWED_FILES[@]}"; then
+  echo "AGENT_NO_CODE_CHANGE=1"
+  echo "The model completed without a code change; validation/commit must not treat this as an improvement."
+  exit 32
+fi
+
+# Print a compact audit trail for the workflow log without dumping the whole diff.
+echo "AGENT_CHANGED_FILES:"
+git diff --name-status -- "${ALLOWED_FILES[@]}"
+echo "AGENT_DIFF_STATS:"
+git diff --stat -- "${ALLOWED_FILES[@]}"
 echo "AI_PROVIDER_SUCCESS=ollama/$MODEL"
-echo "Ollama/Aider focused autonomous engineering cycle completed successfully."
+echo "Ollama/Aider deterministic autonomous engineering cycle completed successfully."
