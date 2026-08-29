@@ -1,4 +1,4 @@
-model = "minimax/minimax-m3:free"
+model = "openai/gpt-oss-120b"
 model_provider = "openrouter"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
