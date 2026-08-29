@@ -11,7 +11,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AI_MODEL: openrouter/qwen/qwen3-coder:free
+  OLLAMA_MODEL: qwen2.5-coder:3b
+  OLLAMA_HOST: http://127.0.0.1:11434
 
 jobs:
   agent:
@@ -35,6 +36,12 @@ jobs:
           git diff --check
           echo CARdiag_AGENT_TRIGGER_OK
 
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v2
+
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
@@ -53,23 +60,33 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Verify OpenRouter access
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Setup Ollama
         run: |
           set -euo pipefail
-          test -n "$OPENROUTER_API_KEY" || { echo 'Missing GitHub secret OPENROUTER_API_KEY' >&2; exit 12; }
-          curl -fsS https://openrouter.ai/api/v1/models -H "Authorization: Bearer $OPENROUTER_API_KEY" >/tmp/openrouter-models.json
-          python3 - <<'PY'
-          import json
-          target='qwen/qwen3-coder:free'
-          data=json.load(open('/tmp/openrouter-models.json'))
-          ids={m.get('id') for m in data.get('data', [])}
-          if target not in ids:
-              raise SystemExit(f'Required OpenRouter model is unavailable: {target}')
-          print(f'OPENROUTER_MODEL_AVAILABLE={target}')
-          PY
-          echo OPENROUTER_READY
+          if ! command -v ollama >/dev/null 2>&1; then
+            curl -fsSL https://ollama.com/install.sh | sh
+          fi
+          ollama --version
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          echo $! >/tmp/ollama.pid
+          for i in $(seq 1 60); do
+            if curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json 2>/dev/null; then
+              echo OLLAMA_READY
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json
+          if ! grep -q 'qwen2.5-coder:3b' /tmp/ollama-tags.json; then
+            ollama pull "$OLLAMA_MODEL"
+          fi
+          ollama list
+          curl -fsS "$OLLAMA_HOST/api/chat" \
+            -H 'Content-Type: application/json' \
+            -d "{\"model\":\"$OLLAMA_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply exactly OLLAMA_READY\"}],\"stream\":false}" \
+            >/tmp/ollama-probe.json
+          grep -q 'OLLAMA_READY' /tmp/ollama-probe.json
+          echo "AI_PROVIDER_SUCCESS=ollama/$OLLAMA_MODEL"
 
       - name: Install Aider
         run: |
@@ -79,10 +96,11 @@ jobs:
           "$HOME/.local/bin/aider" --version
 
       - name: Run autonomous agent
-        timeout-minutes: 45
+        timeout-minutes: 30
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          AIDER_MODEL: ${{ env.AI_MODEL }}
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          OLLAMA_MODEL: qwen2.5-coder:3b
+          AIDER_MODEL: ollama_chat/qwen2.5-coder:3b
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
@@ -107,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config user.email 41898282+github-actions[bot].gith[email]
           git add -A
           if git diff --cached --quiet; then
             echo 'No verified changes to commit.'
@@ -127,3 +145,8 @@ jobs:
             agent-state.md
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Stop Ollama
+        if: always()
+        run: |
+          if [ -f /tmp/ollama.pid ]; then kill "$(cat /tmp/ollama.pid)" 2>/dev/null || true; fi
