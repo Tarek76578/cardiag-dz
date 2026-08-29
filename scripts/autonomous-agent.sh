@@ -20,12 +20,14 @@ PROMPT="$(cat "$MISSION_FILE")
 --- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
 $(cat "$REQUIREMENTS_FILE")"
 
+# Keep the free router/candidates first, but never use retired model slugs.
+# The previous cycle failed because openai/gpt-oss-120b:free was removed by OpenRouter.
 models=(
   "openrouter/free"
   "z-ai/glm-5.2:free"
   "minimax/minimax-m3:free"
   "nvidia/nemotron-3-ultra-550b-a55b:free"
-  "openai/gpt-oss-120b:free"
+  "openai/gpt-oss-120b"
 )
 max_attempts_per_model="${OPENROUTER_MAX_ATTEMPTS_PER_MODEL:-1}"
 delay="${OPENROUTER_INITIAL_DELAY:-20}"
@@ -57,7 +59,7 @@ EOF
     fi
 
     if grep -Eqi '(^|[^0-9])(400|404|408|409|429|500|502|503|504)([^0-9]|$)|Not Found|unavailable for free|Too Many Requests|rate limit|rate-limited|temporarily unavailable|capacity|provider.*unavailable|no available provider|Server tool request failed|unexpected argument|tool request.*bad request|HTTP 400|status: 400' "$log_file"; then
-      echo "OpenRouter/model availability or compatibility failure for $model; moving to the next free candidate." >&2
+      echo "OpenRouter/model availability or compatibility failure for $model; moving to the next candidate." >&2
       sleep "$delay"
       break
     fi
@@ -67,5 +69,5 @@ EOF
   done
 done
 
-echo "All configured OpenRouter free models/router were unavailable, rate-limited, or incompatible." >&2
+echo "All configured OpenRouter models/router were unavailable, rate-limited, or incompatible." >&2
 exit 1
