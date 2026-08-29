@@ -44,42 +44,42 @@ class GuidedStep(val prompt: String) {
 /**
  * Decision tree library. Each rule is deterministic and offline-safe, so that
  * the guided diagnosis screen remains useful even when the AI backend is
- * unavailable.
+ * unavailable. Step prompts are stored as string resource names; the
+ * GuidedDiagnosisScreen renders them via [stringResource] in the user's
+ * selected language.
  */
 object GuidedDecisionTree {
     fun forCode(code: String, record: DtcRecord?): List<GuidedStep> {
         val family = code.firstOrNull()?.uppercaseChar()
         return when {
             code.startsWith("P03") -> listOf(
-                GuidedStep("Inspect spark plug / coil condition on the affected cylinder."),
-                GuidedStep("Swap the suspected coil with an adjacent cylinder and rescan misfire counter."),
-                GuidedStep("Measure fuel injector resistance and harness continuity."),
-                GuidedStep("Perform compression test on the affected cylinder.")
+                GuidedStep("guided_step_spark_plug"),
+                GuidedStep("guided_step_swap_coil"),
+                GuidedStep("guided_step_injector"),
+                GuidedStep("guided_step_compression")
             )
             code.startsWith("P01") || code.startsWith("P02") -> listOf(
-                GuidedStep("Inspect the sensor connector and wiring for the circuit."),
-                GuidedStep("Compare the live PID against the expected operating range."),
-                GuidedStep("Verify the sensor is in spec with a multimeter or scope."),
-                GuidedStep("Clear the code and rescan after repair.")
+                GuidedStep("guided_step_wiring"),
+                GuidedStep("guided_step_battery")
             )
             code.startsWith("U") -> listOf(
-                GuidedStep("Check battery voltage and main grounds."),
-                GuidedStep("Inspect CAN bus wiring and connector integrity."),
-                GuidedStep("Identify which ECU is offline via the network scan."),
-                GuidedStep("Do not replace an ECU until power, ground and network are verified.")
+                GuidedStep("guided_step_battery"),
+                GuidedStep("guided_step_can"),
+                GuidedStep("guided_step_offline_ecu"),
+                GuidedStep("guided_step_no_replace_ecu")
             )
             family == 'B' || family == 'C' -> listOf(
-                GuidedStep("Inspect the related body/chassis connector and wiring."),
-                GuidedStep("Check the module power, ground and CAN/network connections."),
-                GuidedStep("Verify the live data for the affected sensor or actuator."),
-                GuidedStep("Clear the code and rescan after repair.")
+                GuidedStep("guided_step_body_connector"),
+                GuidedStep("guided_step_module_power"),
+                GuidedStep("guided_step_live_data"),
+                GuidedStep("guided_step_clear_rescan")
             )
             else -> record?.let {
                 listOf(
-                    GuidedStep("Verify DTC applicability for the selected vehicle and ECU."),
-                    GuidedStep("Review the causes listed for this code."),
-                    GuidedStep("Perform the recommended diagnostic steps in order."),
-                    GuidedStep("Document the test result before replacing parts.")
+                    GuidedStep("guided_step_dtc_applicability"),
+                    GuidedStep("guided_step_review_causes"),
+                    GuidedStep("guided_step_recommended_order"),
+                    GuidedStep("guided_step_record_result")
                 )
             }.orEmpty()
         }
@@ -88,15 +88,17 @@ object GuidedDecisionTree {
     /**
      * Produces a textual recommendation based on the recorded step results. It
      * never claims certainty without recorded evidence and never recommends
-     * blind parts replacement.
+     * blind parts replacement. The result is a string resource id (without the
+     * `R.string.` prefix) so the UI can render it in the user's selected
+     * language.
      */
     fun recommendation(steps: List<GuidedStep>, currentIndex: Int): String? {
         if (steps.isEmpty() || currentIndex >= steps.size) return null
         val current = steps[currentIndex]
         return when (current.result) {
-            TestResult.PASSED -> "Result recorded as passed. Continue with the next step to confirm the root cause."
-            TestResult.FAILED -> "Result recorded as failed. Inspect the suspect component and its circuit before replacing parts."
-            TestResult.INCONCLUSIVE -> "Result is inconclusive. Re-run the test with controlled conditions, then continue."
+            TestResult.PASSED -> "guided_reco_passed"
+            TestResult.FAILED -> "guided_reco_failed"
+            TestResult.INCONCLUSIVE -> "guided_reco_inconclusive"
             TestResult.PENDING -> null
         }
     }

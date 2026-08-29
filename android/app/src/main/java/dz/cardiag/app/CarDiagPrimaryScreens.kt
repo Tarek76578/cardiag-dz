@@ -1,5 +1,6 @@
 package dz.cardiag.app
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +61,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dz.cardiag.app.core.AppMode
 import dz.cardiag.app.core.AuthService
 import dz.cardiag.app.core.SupabaseClient
 import dz.cardiag.app.core.VehicleHealthEngine
@@ -201,6 +203,7 @@ internal fun CarDiagActionCard(
 fun HomeScreen(
     padding: PaddingValues,
     arabic: Boolean,
+    mode: AppMode,
     activeVehicleId: String?,
     activeVehicleName: String?,
     onVehicle: (String, String) -> Unit,
@@ -256,9 +259,85 @@ fun HomeScreen(
             )
         }
         item {
-            CarDiagSectionHeader(stringResource(R.string.home_start_diagnosis))
+            CarDiagSectionHeader(
+                if (mode == AppMode.DRIVER) stringResource(R.string.cd_my_vehicle)
+                else stringResource(R.string.home_start_diagnosis)
+            )
         }
-        if (windowSize.isExpanded) {
+        if (mode == AppMode.DRIVER) {
+            // Conducteur: short, plain-language actions; no raw ECU/PID jargon.
+            if (windowSize.isExpanded) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CarDiagActionCard(
+                                title = stringResource(R.string.cd_describe_problem),
+                                subtitle = stringResource(R.string.home_symptom_diagnosis_desc),
+                                icon = Icons.Default.Search,
+                                onClick = onOpenSymptom
+                            )
+                            CarDiagActionCard(
+                                title = stringResource(R.string.cd_what_does_mean),
+                                subtitle = stringResource(R.string.home_dtc_lookup_desc),
+                                icon = Icons.Default.Warning,
+                                onClick = onOpenDtcSearch
+                            )
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CarDiagActionCard(
+                                title = stringResource(R.string.home_obd_scan),
+                                subtitle = stringResource(R.string.home_obd_scan_desc),
+                                icon = Icons.Default.Bolt,
+                                onClick = onOpenObd
+                            )
+                            CarDiagActionCard(
+                                title = stringResource(R.string.home_ai_assistant),
+                                subtitle = stringResource(R.string.home_ai_assistant_desc),
+                                icon = Icons.Default.AutoAwesome,
+                                accentColor = MaterialTheme.colorScheme.tertiary,
+                                onClick = onOpenAi
+                            )
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CarDiagActionCard(
+                            title = stringResource(R.string.cd_describe_problem),
+                            subtitle = stringResource(R.string.home_symptom_diagnosis_desc),
+                            icon = Icons.Default.Search,
+                            onClick = onOpenSymptom
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.cd_what_does_mean),
+                            subtitle = stringResource(R.string.home_dtc_lookup_desc),
+                            icon = Icons.Default.Warning,
+                            onClick = onOpenDtcSearch
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_obd_scan),
+                            subtitle = stringResource(R.string.home_obd_scan_desc),
+                            icon = Icons.Default.Bolt,
+                            onClick = onOpenObd
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.home_ai_assistant),
+                            subtitle = stringResource(R.string.home_ai_assistant_desc),
+                            icon = Icons.Default.AutoAwesome,
+                            accentColor = MaterialTheme.colorScheme.tertiary,
+                            onClick = onOpenAi
+                        )
+                    }
+                }
+            }
+        } else if (windowSize.isExpanded) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -358,15 +437,21 @@ fun HomeScreen(
 
 @Composable
 private fun VehicleContextCard(arabic: Boolean, activeVehicleId: String?, activeVehicleName: String?, onChooseVehicle: () -> Unit) {
+    val cdVehicle = stringResource(R.string.cd_vehicle)
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .semantics { contentDescription = cdVehicle },
         shape = CarDiagShapes.Large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(R.drawable.vehicle_silhouette),
+                contentDescription = stringResource(R.string.vehicle_image_placeholder),
+                modifier = Modifier.size(56.dp)
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 if (activeVehicleName.isNullOrBlank()) {
@@ -684,9 +769,12 @@ fun MoreScreen(
     padding: PaddingValues,
     arabic: Boolean,
     dark: Boolean,
+    mode: AppMode,
     setDark: (Boolean) -> Unit,
     setArabic: (Boolean) -> Unit,
-    onOpenAdvanced: () -> Unit
+    setMode: (AppMode) -> Unit,
+    onOpenAdvanced: () -> Unit,
+    onReopenOnboarding: () -> Unit = {}
 ) {
     Column(Modifier.fillMaxSize().padding(padding)) {
         CarDiagPageHeader(
@@ -706,6 +794,12 @@ fun MoreScreen(
             onClick = { setArabic(!arabic) }
         )
         SettingRow(
+            title = if (mode == AppMode.MECHANIC) stringResource(R.string.mode_mechanic_label) else stringResource(R.string.mode_driver_label),
+            value = if (mode == AppMode.MECHANIC) stringResource(R.string.mode_switch_to_driver) else stringResource(R.string.mode_switch_to_mechanic),
+            icon = Icons.Default.Build,
+            onClick = { setMode(if (mode == AppMode.MECHANIC) AppMode.DRIVER else AppMode.MECHANIC) }
+        )
+        SettingRow(
             title = stringResource(R.string.more_about),
             value = stringResource(R.string.more_about_value),
             icon = Icons.Default.Info,
@@ -722,6 +816,12 @@ fun MoreScreen(
             value = stringResource(R.string.obd_title),
             icon = Icons.Default.Bolt,
             onClick = onOpenAdvanced
+        )
+        SettingRow(
+            title = stringResource(R.string.onboarding_welcome),
+            value = stringResource(R.string.onboarding_continue),
+            icon = Icons.Default.DirectionsCar,
+            onClick = onReopenOnboarding
         )
     }
 }

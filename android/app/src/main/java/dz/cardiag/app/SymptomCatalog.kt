@@ -83,9 +83,9 @@ object SymptomQuestions {
             out += SymptomQuestion(
                 idRes = R.string.symptom_question_constant,
                 options = listOf(
-                    R.string.symptom_severity_mild to "constant_mild",
-                    R.string.symptom_severity_moderate to "constant_moderate",
-                    R.string.symptom_severity_severe to "intermittent"
+                    R.string.symptom_opt_constant_mild to "constant_mild",
+                    R.string.symptom_opt_constant_moderate to "constant_moderate",
+                    R.string.symptom_opt_intermittent to "intermittent"
                 )
             )
         }
@@ -93,10 +93,10 @@ object SymptomQuestions {
             out += SymptomQuestion(
                 idRes = R.string.symptom_question_when,
                 options = listOf(
-                    R.string.diagnose_step_vehicle to "cold_start",
-                    R.string.diagnose_step_scan to "warm",
-                    R.string.live_data_overview to "acceleration",
-                    R.string.dtc_detail_symptoms to "idle"
+                    R.string.symptom_opt_cold_start to "cold_start",
+                    R.string.symptom_opt_warm to "warm",
+                    R.string.symptom_opt_acceleration to "acceleration",
+                    R.string.symptom_opt_idle to "idle"
                 )
             )
         }
@@ -104,9 +104,9 @@ object SymptomQuestions {
             out += SymptomQuestion(
                 idRes = R.string.symptom_question_smoke,
                 options = listOf(
-                    R.string.live_data_overview to "white",
-                    R.string.symptom_severity_warning to "blue",
-                    R.string.symptom_severity_mild to "black"
+                    R.string.symptom_opt_smoke_white to "white",
+                    R.string.symptom_opt_smoke_blue to "blue",
+                    R.string.symptom_opt_smoke_black to "black"
                 )
             )
         }
@@ -114,8 +114,8 @@ object SymptomQuestions {
             out += SymptomQuestion(
                 idRes = R.string.symptom_question_warning,
                 options = listOf(
-                    R.string.diagnose_step_evidence to "yes",
-                    R.string.diagnose_step_save to "no"
+                    R.string.symptom_opt_warning_yes to "yes",
+                    R.string.symptom_opt_warning_no to "no"
                 )
             )
         }
@@ -123,8 +123,8 @@ object SymptomQuestions {
             out += SymptomQuestion(
                 idRes = R.string.symptom_question_limp,
                 options = listOf(
-                    R.string.symptom_severity_severe to "yes",
-                    R.string.symptom_severity_mild to "no"
+                    R.string.symptom_opt_yes to "yes",
+                    R.string.symptom_opt_no to "no"
                 )
             )
         }

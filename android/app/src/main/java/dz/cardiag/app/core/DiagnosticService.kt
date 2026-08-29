@@ -40,12 +40,12 @@ class DiagnosticService {
                 return withTimeout(45_000) {
                     val response = supabase.functions.invoke(function = "diagnose", body = payload)
                     val body = response.body<JsonObject>()
-                    if (body["error"] != null || body["ok"]?.toString() == "false") error(body["error"]?.toString() ?: "Diagnostic service error")
+                    if (body["error"] != null || body["ok"]?.toString() == "false") error(body["error"]?.toString() ?: if (language == "ar") "خدمة التشخيص غير متاحة مؤقتا" else "Le service de diagnostic est temporairement indisponible")
                     body
                 }
             } catch (e: Throwable) { last = e; Log.e("CarDiag-Diagnostic","diagnose attempt ${attempt + 1} failed",e); if (attempt < 2) delay(800L * (attempt + 1)) }
         }
-        throw IllegalStateException("Diagnostic AI unavailable: ${last?.message ?: "unknown error"}", last)
+        throw IllegalStateException(if (language == "ar") "تشخيص الذكاء الاصطناعي غير متوفر: ${last?.message ?: "خطأ غير معروف"}" else "Diagnostic AI indisponible : ${last?.message ?: "erreur inconnue"}", last)
     }
     suspend fun runDiagnostic(vehicleModelId: String?,userVehicleId: String?,complaint: String,language: String,codes: List<String> = emptyList(),symptoms: JsonObject = buildJsonObject {},measurements: JsonObject = buildJsonObject {},vehicle: JsonObject = buildJsonObject {}): JsonObject { val session = createSession(vehicleModelId,userVehicleId,complaint,language); return diagnose(session.id,codes,symptoms,measurements,vehicle,language) }
 }

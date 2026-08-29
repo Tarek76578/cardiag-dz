@@ -144,3 +144,10 @@ data class UserPreferences(
     val onboardingComplete: Boolean = false,
     val notificationsEnabled: Boolean = true
 )
+
+/**
+ * Product mode chosen by the user during onboarding. The mode influences the
+ * information architecture shown in Home/Garage/Diagnose: Conducteur keeps
+ * technical surfaces collapsed, Mécanicien exposes them.
+ */
+enum class AppMode { DRIVER, MECHANIC }

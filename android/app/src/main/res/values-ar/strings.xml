@@ -5,6 +5,7 @@
     <!-- Navigation -->
     <string name="nav_home">الرئيسية</string>
     <string name="nav_garage">المرآب</string>
+    <string name="nav_symptom">العرض</string>
     <string name="nav_diagnose">التشخيص</string>
     <string name="nav_history">السجل</string>
     <string name="nav_more">المزيد</string>
@@ -464,4 +465,92 @@
     <string name="adaptive_detail_pane">التفاصيل</string>
     <string name="adaptive_select_code">اختر رمزا من القائمة.</string>
 
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">مرحبا بك في CarDiag DZ</string>
+    <string name="onboarding_subtitle">تشخيص ذكي للسيارات للسوق الجزائري</string>
+    <string name="onboarding_language_title">اختر لغتك</string>
+    <string name="onboarding_language_subtitle">CarDiag يدعم العربية والفرنسية.</string>
+    <string name="onboarding_lang_fr">Français</string>
+    <string name="onboarding_lang_ar">العربية</string>
+    <string name="onboarding_mode_title">ما هو ملفك؟</string>
+    <string name="onboarding_mode_subtitle">يمكنك تغيير الملف في أي وقت من الإعدادات.</string>
+    <string name="onboarding_mode_driver">سائق</string>
+    <string name="onboarding_mode_driver_desc">عرض مبسّط: سيارتي، وصف المشكلة، فهم الرمز، متابعة السجل.</string>
+    <string name="onboarding_mode_mechanic">ميكانيكي</string>
+    <string name="onboarding_mode_mechanic_desc">مساحة احترافية: OBD، بيانات حية، فحوصات موجّهة، قياسات، تقرير، قبل/بعد.</string>
+    <string name="onboarding_continue_as_guest">متابعة كضيف</string>
+    <string name="onboarding_continue_as_guest_desc">يستطيع الضيف استخدام كامل التطبيق. أنشئ حسابا لاحقا لمزامنة سياراتك وسجلك.</string>
+    <string name="onboarding_create_account">إنشاء حساب</string>
+    <string name="onboarding_sign_in">تسجيل الدخول</string>
+    <string name="onboarding_step_language">١. اللغة</string>
+    <string name="onboarding_step_mode">٢. الملف</string>
+    <string name="onboarding_step_guest">٣. الدخول</string>
+    <string name="onboarding_guest_optional">المصادقة اختيارية. يمكنك المتابعة بدون حساب.</string>
+    <string name="onboarding_continue">متابعة</string>
+    <string name="onboarding_finish">ابدأ</string>
+
+    <!-- Mode Conducteur -->
+    <string name="mode_driver_label">وضع السائق</string>
+    <string name="mode_mechanic_label">وضع الميكانيكي</string>
+    <string name="mode_switch_to_mechanic">الانتقال إلى وضع الميكانيكي</string>
+    <string name="mode_switch_to_driver">الانتقال إلى وضع السائق</string>
+
+    <!-- Conducteur home / DX summary -->
+    <string name="cd_my_vehicle">سيارتي</string>
+    <string name="cd_describe_problem">صف المشكلة</string>
+    <string name="cd_what_does_mean">ماذا يعني هذا الرمز؟</string>
+    <string name="cd_can_i_drive">هل يمكنني القيادة؟</string>
+    <string name="cd_what_next">ماذا أفعل الآن؟</string>
+    <string name="cd_find_mechanic">ابحث عن ميكانيكي / خدمة</string>
+    <string name="cd_find_mechanic_unavailable">لا تتوفر خدمة مواقع جغرافية في هذا الإصدار.</string>
+    <string name="cd_driver_can_i_drive_yes">يمكنك عادة متابعة القيادة، لكن راقب ضوء المحرك.</string>
+    <string name="cd_driver_can_i_drive_caution">قد بحذر وراجع المختص في أقرب وقت.</string>
+    <string name="cd_driver_can_i_drive_no">توقف فورا واتصل بالمساعدة. لا تواصل القيادة.</string>
+    <string name="cd_driver_can_i_drive_unknown">الجواب غير مؤكد: راجع ميكانيكيا مؤهلا.</string>
+
+    <!-- Vehicle artwork -->
+    <string name="vehicle_image_unavailable">صورة السيارة غير متوفرة</string>
+    <string name="vehicle_image_placeholder">معاينة السيارة</string>
+
+    <!-- AI service error -->
+    <string name="ai_service_error">خدمة التشخيص غير متاحة مؤقتا.</string>
+    <string name="ai_service_timeout">استغرق التشخيص وقتا طويلا. أعد المحاولة.</string>
+    <string name="ai_service_offline">تشخيص دون اتصال مبني على قاعدة المعرفة وقواعد محددة.</string>
+
+    <string name="symptom_opt_cold_start">عند التشغيل البارد</string>
+    <string name="symptom_opt_warm">والمحرك دافئ</string>
+    <string name="symptom_opt_acceleration">عند التسارع</string>
+    <string name="symptom_opt_idle">عند التباطؤ</string>
+    <string name="symptom_opt_smoke_white">دخان أبيض</string>
+    <string name="symptom_opt_smoke_blue">دخان أزرق</string>
+    <string name="symptom_opt_smoke_black">دخان أسود</string>
+    <string name="symptom_opt_warning_yes">نعم</string>
+    <string name="symptom_opt_warning_no">لا</string>
+    <string name="symptom_opt_yes">نعم</string>
+    <string name="symptom_opt_no">لا</string>
+    <string name="symptom_opt_constant_mild">مستمر، خفيف</string>
+    <string name="symptom_opt_constant_moderate">مستمر، متوسط</string>
+    <string name="symptom_opt_intermittent">متقطع</string>
+    <string name="guided_step_spark_plug">افحص حالة البوجية/الملف للسلندر المعني.</string>
+    <string name="guided_step_swap_coil">بدّل الملف المشتبه به مع سلندر مجاور لمعرفة إذا كان العطل يتبع القطعة.</string>
+    <string name="guided_step_injector">اختبر البخاخ (المقاومة، إشارة التحكم، التوازن).</string>
+    <string name="guided_step_compression">قس ضغطة السلندر إذا لم تكف الاختبارات الأخرى.</string>
+    <string name="guided_step_wiring">افحص الأسلاك والوصلات والتأريضات لوحدة التحكم.</string>
+    <string name="guided_step_battery">تحقق من جهد البطارية والتأريضات الرئيسية.</string>
+    <string name="guided_step_can">افحص أسلاك ووصلات شبكة CAN.</string>
+    <string name="guided_step_offline_ecu">حدد أي وحدة ECU غير متصلة عبر فحص الشبكة.</string>
+    <string name="guided_step_no_replace_ecu">لا تستبدل وحدة ECU قبل التحقق من التغذية والتأريض والشبكة.</string>
+    <string name="guided_step_body_connector">افحص الموصل والضفيرة للوحدة المعنية (الهيكل/الكراسي).</string>
+    <string name="guided_step_module_power">تحقق من التغذية والتأريض ووصلات الشبكة للوحدة.</string>
+    <string name="guided_step_live_data">تحقق من القيمة الحية للمستشعر/المشغل المعني.</string>
+    <string name="guided_step_clear_rescan">امسح الرمز وأعد الفحص بعد الإصلاح.</string>
+    <string name="guided_step_dtc_applicability">تحقق من ملاءمة الرمز للمركبة ووحدة ECU المختارة.</string>
+    <string name="guided_step_review_causes">راجع الأسباب المحتملة لهذا الرمز.</string>
+    <string name="guided_step_recommended_order">نفذ خطوات التشخيص الموصى بها بالترتيب.</string>
+    <string name="guided_step_record_result">وثّق نتيجة الاختبار قبل استبدال أي قطعة.</string>
+    <string name="guided_reco_passed">تم تسجيل النتيجة: ناجح. أكمل الخطوة التالية لتأكيد السبب الجذري.</string>
+    <string name="guided_reco_failed">تم تسجيل النتيجة: فاشل. افحص المكون المشتبه به ودائرته قبل استبدال القطع.</string>
+    <string name="guided_reco_inconclusive">النتيجة غير حاسمة. أعد الاختبار في ظروف مضبوطة ثم تابع.</string>
+    <string name="dtc_not_found">لا يوجد تعريف لهذا الرمز في قاعدة البيانات.</string>
+    <string name="ai_unavailable_full">مساعد الذكاء الاصطناعي غير متوفر مؤقتا. أعد المحاولة أو استخدم قاعدة الرموز المحلية.</string>
 </resources>

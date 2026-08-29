@@ -5,6 +5,7 @@
     <!-- Navigation -->
     <string name="nav_home">Accueil</string>
     <string name="nav_garage">Garage</string>
+    <string name="nav_symptom">Symptôme</string>
     <string name="nav_diagnose">Diagnostic</string>
     <string name="nav_history">Historique</string>
     <string name="nav_more">Plus</string>
@@ -464,4 +465,92 @@
     <string name="adaptive_detail_pane">Détails</string>
     <string name="adaptive_select_code">Sélectionnez un code dans la liste.</string>
 
+    <!-- Onboarding -->
+    <string name="onboarding_welcome">Bienvenue sur CarDiag DZ</string>
+    <string name="onboarding_subtitle">Diagnostic automobile intelligent pour le marché algérien</string>
+    <string name="onboarding_language_title">Choisissez votre langue</string>
+    <string name="onboarding_language_subtitle">CarDiag s\'adapte à l\'arabe et au français.</string>
+    <string name="onboarding_lang_fr">Français</string>
+    <string name="onboarding_lang_ar">العربية</string>
+    <string name="onboarding_mode_title">Quel est votre profil ?</string>
+    <string name="onboarding_mode_subtitle">Vous pouvez changer de profil à tout moment dans les paramètres.</string>
+    <string name="onboarding_mode_driver">Conducteur</string>
+    <string name="onboarding_mode_driver_desc">Vue simple : mon véhicule, décrire un problème, comprendre un code, suivre l\'historique.</string>
+    <string name="onboarding_mode_mechanic">Mécanicien</string>
+    <string name="onboarding_mode_mechanic_desc">Espace pro : OBD, données en direct, tests guidés, mesures, rapport, avant/après.</string>
+    <string name="onboarding_continue_as_guest">Continuer en invité</string>
+    <string name="onboarding_continue_as_guest_desc">L\'invité peut utiliser l\'ensemble de l\'application. Créez un compte plus tard pour synchroniser vos véhicules et votre historique.</string>
+    <string name="onboarding_create_account">Créer un compte</string>
+    <string name="onboarding_sign_in">Se connecter</string>
+    <string name="onboarding_step_language">1. Langue</string>
+    <string name="onboarding_step_mode">2. Profil</string>
+    <string name="onboarding_step_guest">3. Accès</string>
+    <string name="onboarding_guest_optional">L\'authentification est facultative. Vous pouvez continuer sans compte.</string>
+    <string name="onboarding_continue">Continuer</string>
+    <string name="onboarding_finish">Commencer</string>
+
+    <!-- Mode Conducteur -->
+    <string name="mode_driver_label">Mode Conducteur</string>
+    <string name="mode_mechanic_label">Mode Mécanicien</string>
+    <string name="mode_switch_to_mechanic">Passer en mode Mécanicien</string>
+    <string name="mode_switch_to_driver">Passer en mode Conducteur</string>
+
+    <!-- Conducteur home / DX summary -->
+    <string name="cd_my_vehicle">Mon véhicule</string>
+    <string name="cd_describe_problem">Décrire un problème</string>
+    <string name="cd_what_does_mean">Que veut dire ce code ?</string>
+    <string name="cd_can_i_drive">Puis-je conduire ?</string>
+    <string name="cd_what_next">Que faire maintenant ?</string>
+    <string name="cd_find_mechanic">Trouver un mécanicien / service</string>
+    <string name="cd_find_mechanic_unavailable">Aucun service géolocalisé n\'est disponible dans cette version.</string>
+    <string name="cd_driver_can_i_drive_yes">Vous pouvez généralement continuer à rouler, mais surveillez le voyant moteur.</string>
+    <string name="cd_driver_can_i_drive_caution">Roulez prudemment et faites contrôler dès que possible.</string>
+    <string name="cd_driver_can_i_drive_no">Arrêtez-vous et appelez une assistance. Ne continuez pas à rouler.</string>
+    <string name="cd_driver_can_i_drive_unknown">Réponse incertaine : faites vérifier par un mécanicien qualifié.</string>
+
+    <!-- Vehicle artwork -->
+    <string name="vehicle_image_unavailable">Image du véhicule indisponible</string>
+    <string name="vehicle_image_placeholder">Aperçu véhicule</string>
+
+    <!-- AI service error -->
+    <string name="ai_service_error">Le service de diagnostic est temporairement indisponible.</string>
+    <string name="ai_service_timeout">Le diagnostic a pris trop de temps. Réessayez.</string>
+    <string name="ai_service_offline">Diagnostic hors ligne basé sur la base de connaissances et les règles déterministes.</string>
+
+    <string name="symptom_opt_cold_start">Démarrage à froid</string>
+    <string name="symptom_opt_warm">À chaud</string>
+    <string name="symptom_opt_acceleration">En accélération</string>
+    <string name="symptom_opt_idle">Au ralenti</string>
+    <string name="symptom_opt_smoke_white">Fumée blanche</string>
+    <string name="symptom_opt_smoke_blue">Fumée bleue</string>
+    <string name="symptom_opt_smoke_black">Fumée noire</string>
+    <string name="symptom_opt_warning_yes">Oui</string>
+    <string name="symptom_opt_warning_no">Non</string>
+    <string name="symptom_opt_yes">Oui</string>
+    <string name="symptom_opt_no">Non</string>
+    <string name="symptom_opt_constant_mild">Constant, faible</string>
+    <string name="symptom_opt_constant_moderate">Constant, modéré</string>
+    <string name="symptom_opt_intermittent">Intermittent</string>
+    <string name="guided_step_spark_plug">Inspecter l\'état de la bougie / bobine du cylindre concerné.</string>
+    <string name="guided_step_swap_coil">Échanger la bobine suspecte avec un cylindre adjacent pour voir si le défaut suit.</string>
+    <string name="guided_step_injector">Tester l\'injecteur (résistance, signal de commande, équilibre).</string>
+    <string name="guided_step_compression">Mesurer la compression du cylindre si les autres tests ne suffisent pas.</string>
+    <string name="guided_step_wiring">Inspecter le faisceau, les connecteurs et les masses de l\'ECU.</string>
+    <string name="guided_step_battery">Vérifier la tension batterie et les principales masses.</string>
+    <string name="guided_step_can">Inspecter le câblage et les connecteurs du bus CAN.</string>
+    <string name="guided_step_offline_ecu">Identifier quel ECU est hors ligne via un scan réseau.</string>
+    <string name="guided_step_no_replace_ecu">Ne pas remplacer un ECU avant d\'avoir vérifié alimentation, masse et réseau.</string>
+    <string name="guided_step_body_connector">Inspecter le connecteur et le faisceau du module carrosserie / châssis concerné.</string>
+    <string name="guided_step_module_power">Vérifier l\'alimentation, la masse et les connexions réseau du module.</string>
+    <string name="guided_step_live_data">Vérifier la valeur en direct du capteur / actionneur concerné.</string>
+    <string name="guided_step_clear_rescan">Effacer le code et rescanner après réparation.</string>
+    <string name="guided_step_dtc_applicability">Vérifier l\'applicabilité du code pour le véhicule et l\'ECU sélectionnés.</string>
+    <string name="guided_step_review_causes">Relire les causes possibles pour ce code.</string>
+    <string name="guided_step_recommended_order">Effectuer les étapes de diagnostic recommandées dans l\'ordre.</string>
+    <string name="guided_step_record_result">Documenter le résultat du test avant tout remplacement de pièce.</string>
+    <string name="guided_reco_passed">Résultat enregistré : réussi. Continuez avec l\'étape suivante pour confirmer la cause racine.</string>
+    <string name="guided_reco_failed">Résultat enregistré : échoué. Inspectez le composant suspect et son circuit avant de remplacer des pièces.</string>
+    <string name="guided_reco_inconclusive">Résultat non concluant. Refaites le test en conditions contrôlées, puis continuez.</string>
+    <string name="dtc_not_found">Code introuvable dans la base DTC.</string>
+    <string name="ai_unavailable_full">L\'assistant IA est momentanément indisponible. Réessayez ou utilisez la base DTC locale.</string>
 </resources>

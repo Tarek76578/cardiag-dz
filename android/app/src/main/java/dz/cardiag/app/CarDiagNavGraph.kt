@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -19,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
+import dz.cardiag.app.core.AppMode
 
 /**
  * Production navigation graph.
@@ -28,6 +30,10 @@ import androidx.compose.ui.res.stringResource
  * guided diagnosis, AI, vehicle profile) are pushed on top of the same
  * Scaffold, so back navigation is predictable and the bottom bar stays
  * consistent.
+ *
+ * The `mode` parameter influences the visible destinations: in [AppMode.DRIVER]
+ * the bottom bar hides the diagnostic hub and surfaces a simpler "My vehicle"
+ * primary destination.
  */
 @Composable
 fun CarDiagNavGraph(
@@ -37,9 +43,12 @@ fun CarDiagNavGraph(
     initialVehicleName: String?,
     dark: Boolean,
     arabic: Boolean,
+    mode: AppMode,
     setDark: (Boolean) -> Unit,
     setArabic: (Boolean) -> Unit,
-    persistVehicle: (String?, String?) -> Unit = { _, _ -> }
+    setMode: (AppMode) -> Unit,
+    persistVehicle: (String?, String?) -> Unit = { _, _ -> },
+    onReopenOnboarding: () -> Unit = {}
 ) {
     var currentRoute by rememberSaveable { mutableStateOf(initialRoute) }
     var navStack by rememberSaveable(stateSaver = NavStackSaver) {
@@ -47,10 +56,32 @@ fun CarDiagNavGraph(
     }
     var pendingDtcCode by rememberSaveable { mutableStateOf(initialDtcCode) }
     var pendingSessionId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Before/After snapshots are ONLY seeded from the user recording a real
+    // scan. We no longer fabricate demo snapshots.
     var pendingBefore by remember { mutableStateOf<dz.cardiag.app.core.BeforeAfterSnapshot?>(null) }
     var pendingAfter by remember { mutableStateOf<dz.cardiag.app.core.BeforeAfterSnapshot?>(null) }
     var pendingVehicleId by rememberSaveable { mutableStateOf(initialVehicleId) }
     var pendingVehicleName by rememberSaveable { mutableStateOf(initialVehicleName) }
+
+    val primaryRoutes = remember(mode) {
+        if (mode == AppMode.DRIVER) {
+            listOf(
+                CarDiagRoute.HOME,
+                CarDiagRoute.GARAGE,
+                CarDiagRoute.SYMPTOM,
+                CarDiagRoute.HISTORY,
+                CarDiagRoute.MORE
+            )
+        } else {
+            listOf(
+                CarDiagRoute.HOME,
+                CarDiagRoute.GARAGE,
+                CarDiagRoute.DIAGNOSE,
+                CarDiagRoute.HISTORY,
+                CarDiagRoute.MORE
+            )
+        }
+    }
 
     fun navigateTo(route: CarDiagRoute) {
         currentRoute = route
@@ -79,9 +110,9 @@ fun CarDiagNavGraph(
         bottomBar = {
             // Bottom bar is hidden when drilling into a detail so that the
             // professional detail surfaces own the full viewport.
-            if (currentRoute in PRIMARY_ROUTES) {
+            if (currentRoute in primaryRoutes) {
                 NavigationBar {
-                    PRIMARY_ROUTES.forEach { route ->
+                    primaryRoutes.forEach { route ->
                         val selected = currentRoute == route
                         val (label, icon) = routePresentation(route)
                         NavigationBarItem(
@@ -99,6 +130,7 @@ fun CarDiagNavGraph(
             CarDiagRoute.HOME -> HomeScreen(
                 padding = padding,
                 arabic = arabic,
+                mode = mode,
                 activeVehicleId = pendingVehicleId,
                 activeVehicleName = pendingVehicleName,
                 onVehicle = { id, name -> setVehicle(id, name); navigateTo(CarDiagRoute.GARAGE) },
@@ -128,27 +160,23 @@ fun CarDiagNavGraph(
                 onOpenDtc = { code -> setDtc(code); pushDetail(CarDiagRoute.DTC) },
                 onOpenGuided = { pushDetail(CarDiagRoute.GUIDED_DIAGNOSIS) }
             )
+            CarDiagRoute.SYMPTOM -> SymptomDiagnosisScreen(
+                padding = padding,
+                arabic = arabic,
+                hasVehicle = pendingVehicleId != null,
+                onBack = ::pop,
+                onOpenAi = { pushDetail(CarDiagRoute.AI) }
+            )
             CarDiagRoute.HISTORY -> HistoryScreen(
                 padding = padding,
                 arabic = arabic,
                 onOpenSession = { sessionId ->
                     pendingSessionId = sessionId
-                    // Sample offline snapshots stand in for the recorded session
-                    // until the persistent history model is wired in.
-                    pendingBefore = dz.cardiag.app.core.BeforeAfterSnapshot(
-                        capturedAt = 0L,
-                        label = "before",
-                        dtcs = listOf("P0301", "P0171"),
-                        readinessReady = false,
-                        milOn = true
-                    )
-                    pendingAfter = dz.cardiag.app.core.BeforeAfterSnapshot(
-                        capturedAt = 0L,
-                        label = "after",
-                        dtcs = listOf("P0301"),
-                        readinessReady = null,
-                        milOn = true
-                    )
+                    // No demo before/after is fabricated here. If the user
+                    // taps an existing session, the report screen shows only
+                    // the data that has been actually recorded for it.
+                    pendingBefore = null
+                    pendingAfter = null
                     pushDetail(CarDiagRoute.REPORT)
                 }
             )
@@ -156,9 +184,12 @@ fun CarDiagNavGraph(
                 padding = padding,
                 arabic = arabic,
                 dark = dark,
+                mode = mode,
                 setDark = setDark,
                 setArabic = setArabic,
-                onOpenAdvanced = { pushDetail(CarDiagRoute.OBD) }
+                setMode = setMode,
+                onOpenAdvanced = { pushDetail(CarDiagRoute.OBD) },
+                onReopenOnboarding = onReopenOnboarding
             )
             CarDiagRoute.VEHICLE -> VehicleProfileScreen(
                 padding = padding,
@@ -213,13 +244,6 @@ fun CarDiagNavGraph(
                 onOpenAi = { code -> setDtc(code); pushDetail(CarDiagRoute.AI) },
                 onOpenObd = { pushDetail(CarDiagRoute.OBD) }
             )
-            CarDiagRoute.SYMPTOM -> SymptomDiagnosisScreen(
-                padding = padding,
-                arabic = arabic,
-                hasVehicle = pendingVehicleId != null,
-                onBack = ::pop,
-                onOpenAi = { pushDetail(CarDiagRoute.AI) }
-            )
             CarDiagRoute.LIVE_DATA -> LiveDataScreen(
                 padding = padding,
                 arabic = arabic,
@@ -270,6 +294,7 @@ private fun routePresentation(route: CarDiagRoute): Pair<String, androidx.compos
     CarDiagRoute.HOME -> stringResource(R.string.nav_home) to Icons.Default.Home
     CarDiagRoute.GARAGE -> stringResource(R.string.nav_garage) to Icons.Default.DirectionsCar
     CarDiagRoute.DIAGNOSE -> stringResource(R.string.nav_diagnose) to Icons.Default.Build
+    CarDiagRoute.SYMPTOM -> stringResource(R.string.nav_symptom) to Icons.Default.Search
     CarDiagRoute.HISTORY -> stringResource(R.string.nav_history) to Icons.Default.History
     CarDiagRoute.MORE -> stringResource(R.string.nav_more) to Icons.Default.MoreHoriz
     else -> "" to Icons.Default.Home

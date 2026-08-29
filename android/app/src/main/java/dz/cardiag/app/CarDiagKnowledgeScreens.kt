@@ -69,6 +69,7 @@ fun DtcDetailScreen(
     onOpenGuided: (String) -> Unit,
     onOpenBrowse: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var code by remember { mutableStateOf(initialCode?.uppercase() ?: "") }
     var record by remember { mutableStateOf<DtcRecord?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -87,11 +88,7 @@ fun DtcDetailScreen(
             error = null
             record = null
             record = lookupDtc(normalized)
-            if (record == null) error = contextStringPlain(
-                arabic,
-                "لا يوجد تعريف لهذا الرمز في قاعدة البيانات.",
-                "Code introuvable dans la base DTC."
-            )
+            if (record == null) error = context.getString(dz.cardiag.app.R.string.dtc_not_found)
             loading = false
         }
     }
@@ -319,7 +316,7 @@ fun GuidedDiagnosisScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = CarDiagShapes.Card) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.guided_current_step, stepIndex + 1, steps.size), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        Text(current.prompt, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(stringResource(resourceIdByName(current.prompt)), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = current.result == TestResult.PASSED, onClick = { current.result = TestResult.PASSED }, label = { Text(stringResource(R.string.guided_test_passed)) })
                             FilterChip(selected = current.result == TestResult.FAILED, onClick = { current.result = TestResult.FAILED }, label = { Text(stringResource(R.string.guided_test_failed)) })
@@ -334,7 +331,7 @@ fun GuidedDiagnosisScreen(
                     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = CarDiagShapes.Card) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(stringResource(R.string.guided_recommendation), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(recommendation)
+                            Text(stringResource(resourceIdByName(recommendation)))
                         }
                     }
                 }
@@ -410,8 +407,19 @@ fun AiDiagnosisScreen(
                         put("model_name", vehicleName ?: "")
                     }
                 )
-            }.onSuccess { response -> raw = response.toString() }
-                .onFailure { error = it.message ?: context.getString(R.string.ai_unavailable, "") }
+}.onSuccess { response -> raw = response.toString() }
+                .onFailure { failure ->
+                    val msg = failure.message.orEmpty()
+                    error = when {
+                        msg.contains("timeout", ignoreCase = true) || msg.contains("timed out", ignoreCase = true) ->
+                            context.getString(R.string.ai_service_timeout)
+                        msg.contains("Unable to create a guest session", ignoreCase = true) || msg.contains("Authentication", ignoreCase = true) ->
+                            context.getString(R.string.ai_service_error)
+                        msg.isBlank() ->
+                            if (arabic) "الذكاء الاصطناعي غير متوفر مؤقتا." else "L'assistant IA est temporairement indisponible."
+                        else -> msg
+                    }
+                }
             loading = false
         }
     }
@@ -423,6 +431,7 @@ fun AiDiagnosisScreen(
     ) {
         item { CarDiagTopBar(stringResource(R.string.ai_title), stringResource(R.string.ai_subtitle), onBack = onBack) }
         item { CarDiagInfoCard(stringResource(R.string.ai_disclaimer), stringResource(R.string.ai_interpretation_only)) }
+        item { CarDiagInfoCard(stringResource(R.string.ai_label), stringResource(R.string.ai_service_offline)) }
         item {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
@@ -549,3 +558,16 @@ internal fun contextStringPlain(arabic: Boolean, ar: String, fr: String): String
  * Avoids breaking on a missing field in an unexpected JsonPrimitive subtype.
  */
 private fun kotlinx.serialization.json.JsonPrimitive.contentOrNullSafe(): String? = runCatching { content }.getOrNull()
+
+
+/**
+ * Resolves a string resource by its name (as returned by
+ * [GuidedDecisionTree] and similar helpers). Returns the resource id when
+ * the name exists, otherwise falls back to the supplied default id.
+ */
+@androidx.compose.runtime.Composable
+private fun resourceIdByName(name: String, fallback: Int = R.string.guided_step_dtc_applicability): Int {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val id = ctx.resources.getIdentifier(name, "string", ctx.packageName)
+    return if (id != 0) id else fallback
+}
