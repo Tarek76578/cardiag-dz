@@ -24,6 +24,30 @@ MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
 export GEMINI_MODEL="$MODEL"
 export GEMINI_CLI_TRUST_WORKSPACE=true
 
+# Force Gemini CLI into API-key authentication. In CI there is no interactive
+# OAuth session. A persisted selectedType can otherwise make the CLI send the
+# API key as an OAuth Bearer token, which Gemini rejects with 401.
+export GEMINI_DEFAULT_AUTH_TYPE="gemini-api-key"
+export GEMINI_API_KEY_AUTH_MECHANISM="x-goog-api-key"
+unset GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA GOOGLE_APPLICATION_CREDENTIALS
+unset GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_PROJECT_ID GOOGLE_CLOUD_LOCATION GOOGLE_API_KEY
+
+mkdir -p "$HOME/.gemini"
+cat > "$HOME/.gemini/settings.json" <<'JSON'
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key",
+      "enforcedType": "gemini-api-key"
+    }
+  }
+}
+JSON
+
+echo "Gemini CLI auth mode: gemini-api-key"
+
+echo "Gemini API key transport: x-goog-api-key"
+
 if ! command -v gemini >/dev/null 2>&1; then
   echo "Gemini CLI is not installed." >&2
   exit 22
