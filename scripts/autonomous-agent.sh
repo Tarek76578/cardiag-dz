@@ -23,11 +23,6 @@ fi
 MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
 export GEMINI_MODEL="$MODEL"
 export GEMINI_CLI_TRUST_WORKSPACE=true
-
-# Force Gemini CLI into API-key authentication. In CI there is no interactive
-# OAuth session. A persisted selectedType can otherwise make the CLI send the
-# API key as an OAuth Bearer token, which Gemini rejects with 401.
-export GEMINI_DEFAULT_AUTH_TYPE="gemini-api-key"
 export GEMINI_API_KEY_AUTH_MECHANISM="x-goog-api-key"
 unset GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA GOOGLE_APPLICATION_CREDENTIALS
 unset GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_PROJECT_ID GOOGLE_CLOUD_LOCATION GOOGLE_API_KEY
@@ -45,7 +40,6 @@ cat > "$HOME/.gemini/settings.json" <<'JSON'
 JSON
 
 echo "Gemini CLI auth mode: gemini-api-key"
-
 echo "Gemini API key transport: x-goog-api-key"
 
 if ! command -v gemini >/dev/null 2>&1; then
@@ -54,26 +48,37 @@ if ! command -v gemini >/dev/null 2>&1; then
 fi
 
 echo "Gemini CLI version: $(gemini --version)"
-echo "Validating Gemini API through the official Gemini CLI: $MODEL"
 
+# Validate the Secret independently of Gemini CLI. This removes CLI auth state
+# from the diagnosis: the same GEMINI_API_KEY is sent exactly as Google's
+# Gemini API expects, using x-goog-api-key. The response body is retained only
+# for a short, redacted diagnostic and the key is never printed.
+echo "Validating Gemini API key directly against Generative Language API: $MODEL"
+validation_body="$(mktemp)"
+trap 'rm -f "$validation_body"' EXIT
 set +e
-validation_output="$(gemini -m "$MODEL" -p 'Reply with exactly GEMINI_READY' --output-format json --approval-mode=yolo 2>&1)"
-validation_status=$?
+validation_http="$(curl -sS -o "$validation_body" -w '%{http_code}' \
+  -H "Content-Type: application/json" \
+  -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+  --data "{\"contents\":[{\"parts\":[{\"text\":\"Reply with exactly GEMINI_READY\"}]}]}" \
+  "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent")"
+validation_curl_status=$?
 set -e
 
-if [ "$validation_status" -ne 0 ]; then
-  echo "Gemini API validation failed with exit code $validation_status." >&2
-  printf '%s\n' "$validation_output" | head -c 5000 >&2
+if [ "$validation_curl_status" -ne 0 ] || [ "$validation_http" != "200" ]; then
+  echo "Gemini API key validation failed (HTTP ${validation_http:-curl-error})." >&2
+  # Google error responses are useful for diagnosis; never print headers or the key.
+  sed -E 's/AIza[[:alnum:]_-]{20,}/[REDACTED]/g' "$validation_body" | head -c 5000 >&2 || true
   exit 21
 fi
 
-if ! printf '%s' "$validation_output" | grep -q 'GEMINI_READY'; then
-  echo "Gemini CLI responded, but the expected completion was not received." >&2
-  printf '%s\n' "$validation_output" | head -c 5000 >&2
+if ! grep -q 'GEMINI_READY' "$validation_body"; then
+  echo "Gemini API accepted the credentials but did not return the expected completion." >&2
+  sed -E 's/AIza[[:alnum:]_-]{20,}/[REDACTED]/g' "$validation_body" | head -c 5000 >&2 || true
   exit 21
 fi
 
-echo "Gemini API validation succeeded: $MODEL"
+echo "Gemini API key validation succeeded: $MODEL"
 echo "AI_PROVIDER_SUCCESS=gemini/$MODEL"
 echo "Starting autonomous Gemini CLI cycle with gemini/$MODEL"
 
