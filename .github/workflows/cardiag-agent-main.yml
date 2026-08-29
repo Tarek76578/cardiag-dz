@@ -33,14 +33,16 @@ jobs:
           test -f AGENTS.md
           test -f android/gradlew
           test -f android/app/build.gradle.kts
+          test -f docs/agent-next-task.md
           git diff --check
+          test -z "$(git status --porcelain)"
           echo CARdiag_AGENT_TRIGGER_OK
 
       - name: Cache Ollama model
         uses: actions/cache@v4
         with:
           path: ~/.ollama/models
-          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v3
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v4
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -88,8 +90,6 @@ jobs:
             ollama pull "$OLLAMA_MODEL"
           fi
           ollama list
-          # Do not use an LLM-generated response as the health check. A successful
-          # HTTP/API response and presence of the requested model are sufficient.
           curl -fsS "$OLLAMA_HOST/api/show" \
             -H 'Content-Type: application/json' \
             -d "{\"name\":\"$OLLAMA_MODEL\"}" >/tmp/ollama-show.json
@@ -127,19 +127,31 @@ jobs:
           git diff --check
           test -f AGENTS.md
           test -f android/app/build.gradle.kts
+          echo 'Changed files after validation:'
           git status --short
+          allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
+android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if ! printf '%s\n' "$allowed" | grep -Fxq "$file"; then
+              echo "UNEXPECTED_VALIDATED_CHANGE=$file" >&2
+              exit 40
+            fi
+          done < <(git diff --name-only)
 
-      - name: Commit verified improvements
+      - name: Commit only validated task files
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
+          git add -- \
+            android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt \
+            android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
           if git diff --cached --quiet; then
-            echo 'No verified changes to commit.'
-            exit 0
+            echo 'No validated code changes to commit.'
+            exit 41
           fi
-          git commit -m 'chore(agent): autonomous engineering cycle'
+          git commit -m 'feat(road): add live nearby service provider'
           git push origin HEAD:main
 
       - name: Upload results
@@ -149,7 +161,6 @@ jobs:
           path: |
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/bundle/release/*.aab
-            market-audit.md
             agent-state.md
           if-no-files-found: warn
           retention-days: 14
