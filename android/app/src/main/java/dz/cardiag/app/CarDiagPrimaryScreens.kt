@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
@@ -213,7 +215,8 @@ fun HomeScreen(
     onOpenGuided: () -> Unit,
     onOpenAi: () -> Unit,
     onOpenHistory: () -> Unit,
-    onOpenDtcSearch: () -> Unit
+    onOpenDtcSearch: () -> Unit,
+    onOpenRoadAssistant: () -> Unit = {}
 ) {
     val windowSize = rememberCarDiagWindowSize()
     var sessionCount by remember { mutableIntStateOf(0) }
@@ -333,6 +336,12 @@ fun HomeScreen(
                             icon = Icons.Default.AutoAwesome,
                             accentColor = MaterialTheme.colorScheme.tertiary,
                             onClick = onOpenAi
+                        )
+                        CarDiagActionCard(
+                            title = stringResource(R.string.driver_actions_find_service),
+                            subtitle = stringResource(R.string.driver_actions_find_service_desc),
+                            icon = Icons.Default.LocationOn,
+                            onClick = onOpenRoadAssistant
                         )
                     }
                 }
@@ -774,6 +783,8 @@ fun MoreScreen(
     setArabic: (Boolean) -> Unit,
     setMode: (AppMode) -> Unit,
     onOpenAdvanced: () -> Unit,
+    onOpenRoadAssistant: () -> Unit = {},
+    onOpenAuth: () -> Unit = {},
     onReopenOnboarding: () -> Unit = {}
 ) {
     Column(Modifier.fillMaxSize().padding(padding)) {
@@ -816,6 +827,18 @@ fun MoreScreen(
             value = stringResource(R.string.obd_title),
             icon = Icons.Default.Bolt,
             onClick = onOpenAdvanced
+        )
+        SettingRow(
+            title = stringResource(R.string.ra_title),
+            value = stringResource(R.string.ra_subtitle),
+            icon = Icons.Default.LocationOn,
+            onClick = onOpenRoadAssistant
+        )
+        SettingRow(
+            title = stringResource(R.string.more_login),
+            value = stringResource(R.string.auth_continue_guest),
+            icon = Icons.Default.Person,
+            onClick = onOpenAuth
         )
         SettingRow(
             title = stringResource(R.string.onboarding_welcome),

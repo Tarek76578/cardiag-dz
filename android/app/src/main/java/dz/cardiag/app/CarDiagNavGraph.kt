@@ -140,7 +140,8 @@ fun CarDiagNavGraph(
                 onOpenGuided = { pushDetail(CarDiagRoute.GUIDED_DIAGNOSIS) },
                 onOpenAi = { pushDetail(CarDiagRoute.AI) },
                 onOpenHistory = { navigateTo(CarDiagRoute.HISTORY) },
-                onOpenDtcSearch = { pushDetail(CarDiagRoute.DTC) }
+                onOpenDtcSearch = { pushDetail(CarDiagRoute.DTC) },
+                onOpenRoadAssistant = { pushDetail(CarDiagRoute.ROAD_ASSISTANT) }
             )
             CarDiagRoute.GARAGE -> GarageScreen(
                 padding = padding,
@@ -189,6 +190,8 @@ fun CarDiagNavGraph(
                 setArabic = setArabic,
                 setMode = setMode,
                 onOpenAdvanced = { pushDetail(CarDiagRoute.OBD) },
+                onOpenRoadAssistant = { pushDetail(CarDiagRoute.ROAD_ASSISTANT) },
+                onOpenAuth = { pushDetail(CarDiagRoute.AUTH) },
                 onReopenOnboarding = onReopenOnboarding
             )
             CarDiagRoute.VEHICLE -> VehicleProfileScreen(
@@ -199,6 +202,17 @@ fun CarDiagNavGraph(
                 onBack = ::pop,
                 onOpenDtc = { code -> setDtc(code); pushDetail(CarDiagRoute.DTC) },
                 onOpenObd = { pushDetail(CarDiagRoute.OBD) }
+            )
+            CarDiagRoute.ROAD_ASSISTANT -> RoadAssistantScreen(
+                padding = padding,
+                arabic = arabic,
+                onBack = ::pop
+            )
+            CarDiagRoute.AUTH -> AuthScreen(
+                padding = padding,
+                arabic = arabic,
+                onAuthenticated = ::pop,
+                onBack = ::pop
             )
             CarDiagRoute.OBD -> ObdOnboardingScreen(
                 padding = padding,

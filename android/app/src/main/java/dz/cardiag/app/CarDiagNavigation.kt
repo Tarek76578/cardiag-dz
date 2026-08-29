@@ -12,6 +12,8 @@ enum class CarDiagRoute {
     // Detail destinations
     VEHICLE,
     OBD,
+    ROAD_ASSISTANT,
+    AUTH,
     SCAN_RESULTS,
     DTC,
     DTC_BROWSE,

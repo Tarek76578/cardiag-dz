@@ -514,6 +514,7 @@
 
     <!-- AI service error -->
     <string name="ai_service_error">خدمة التشخيص غير متاحة مؤقتا.</string>
+    <string name="ai_unavailable_fallback">مساعد الذكاء الاصطناعي غير متوفر مؤقتا.</string>
     <string name="ai_service_timeout">استغرق التشخيص وقتا طويلا. أعد المحاولة.</string>
     <string name="ai_service_offline">تشخيص دون اتصال مبني على قاعدة المعرفة وقواعد محددة.</string>
 
@@ -553,4 +554,164 @@
     <string name="guided_reco_inconclusive">النتيجة غير حاسمة. أعد الاختبار في ظروف مضبوطة ثم تابع.</string>
     <string name="dtc_not_found">لا يوجد تعريف لهذا الرمز في قاعدة البيانات.</string>
     <string name="ai_unavailable_full">مساعد الذكاء الاصطناعي غير متوفر مؤقتا. أعد المحاولة أو استخدم قاعدة الرموز المحلية.</string>
+
+    <!-- Road Assistant / GPS -->
+    <string name="ra_title">مساعد الطريق</string>
+    <string name="ra_subtitle">اعثر على خدمات قريبة وتعرّف على حالة الطريق.</string>
+    <string name="ra_need_permission_title">الموقع مطلوب</string>
+    <string name="ra_need_permission_body">للعثور على خدمات قريبة، اسمح لـ CarDiag باستخدام موقع الجهاز. لا يُقرأ الموقع إلا بعد موافقتك ولا يُحفظ بعد إغلاق الشاشة.</string>
+    <string name="ra_request_permission">السماح بالموقع</string>
+    <string name="ra_permission_denied_title">الموقع غير مسموح</string>
+    <string name="ra_permission_denied_body">يمكنك متابعة استخدام CarDiag بدون الموقع. مساعد الطريق يحتاج إلى الموقع لاقتراح خدمات قريبة.</string>
+    <string name="ra_open_settings">فتح الإعدادات</string>
+    <string name="ra_continue_without">المتابعة بدون الموقع</string>
+    <string name="ra_categories">الفئات</string>
+    <string name="ra_category_mechanic">ميكانيكي / ورشة</string>
+    <string name="ra_category_auto_electrician">كهربائي سيارات</string>
+    <string name="ra_category_roadside">مساعدة على الطريق / سحب</string>
+    <string name="ra_category_spare_parts">قطع غيار</string>
+    <string name="ra_category_fuel">محطة وقود</string>
+    <string name="ra_category_hospital">مستشفى / طوارئ</string>
+    <string name="ra_category_towing">سحب</string>
+    <string name="ra_category_other">خدمة سيارات أخرى</string>
+    <string name="ra_radius">نطاق البحث</string>
+    <string name="ra_radius_value">%1$d كم</string>
+    <string name="ra_no_results">لا توجد خدمات لهذه الفئة في هذا الإصدار.</string>
+    <string name="ra_search_external">البحث في الخريطة</string>
+    <string name="ra_search_external_query">%1$s قريب</string>
+    <string name="ra_hazards_title">حالة الطريق</string>
+    <string name="ra_hazards_subtitle">تحتاج التنبيهات المباشرة إلى مزوّد خارجي؛ يعرض هذا الإصدار حالة عامة.</string>
+    <string name="ra_hazards_empty">لا توجد تنبيهات طريق منشورة حاليا.</string>
+    <string name="ra_live_source_required">البيانات المباشرة غير متوفرة: يجب دمج مزوّد خارجي (خريطة، Overpass، HERE…) لتقديم نتائج حقيقية.</string>
+    <string name="ra_source_label">المصدر: %1$s</string>
+    <string name="ra_offline_catalog">كتالوج عام</string>
+    <string name="ra_offline_explainer">لا يتم اختلاق الإحداثيات أو العناوين أو الملاحظات أو أرقام الهاتف الحقيقية. استخدم الخريطة الخارجية للحصول على أقرب النتائج.</string>
+    <string name="ra_distance_unknown">المسافة غير محسوبة</string>
+    <string name="ra_distance_km">%1$.1f كم</string>
+    <string name="ra_distance_m">%1$d م</string>
+    <string name="ra_search_hint">ابحث (ميكانيكي، ميكانيكي سيارات، كهربائي، dépannage، garage، قطع الغيار…)</string>
+    <string name="ra_search_no_match">لا توجد كلمات معروفة. جرب: ميكانيكي، ميكانيكي سيارات، كهربائي، garage، dépannage، قطع الغيار.</string>
+    <string name="ra_hazard_template_pothole">تم الإبلاغ عن حفرة قريبة</string>
+    <string name="ra_hazard_template_broken_down">تم الإبلاغ عن سيارة متعطلة</string>
+    <string name="ra_hazard_template_accident">تم الإبلاغ عن حادث في المنطقة</string>
+    <string name="ra_hazard_template_closure">طريق مغلقة أو مغلقة جزئيا</string>
+    <string name="ra_map_intent_failed">تعذر فتح تطبيق الخريطة.</string>
+    <string name="ra_call_intent_failed">لا يوجد تطبيق هاتف متاح.</string>
+    <string name="ra_call_action">اتصال</string>
+    <string name="ra_directions_action">الاتجاهات</string>
+    <string name="ra_category_label">الفئة: %1$s</string>
+    <string name="ra_gps_unavailable">موقع GPS غير متوفر. أعد المحاولة في الخارج أو أعد السماح بالموقع.</string>
+    <string name="ra_gps_timeout">استغرق تحديد الموقع وقتا طويلا. أعد المحاولة.</string>
+    <string name="ra_location_loading">تحديد الموقع جارٍ…</string>
+    <string name="ra_search_loading">البحث جارٍ…</string>
+    <string name="ra_error_offline">لا يوجد اتصال بالشبكة. لا يمكن تحديث الخدمات القريبة.</string>
+    <string name="ra_provider_unconfigured">لا يوجد مزوّد بيانات جغرافية مهيّأ. يُستخدم الكتالوج العام.</string>
+    <string name="ra_open_map">فتح الخريطة</string>
+    <string name="ra_search_button">بحث</string>
+    <string name="ra_filter">تصفية</string>
+    <string name="ra_results_count">%1$d فئة</string>
+    <string name="ra_no_category_selected">اختر فئة واحدة على الأقل.</string>
+
+    <string name="state_unauthorized">غير مصرّح</string>
+    <string name="more_login">تسجيل الدخول / إنشاء حساب</string>
+    <string name="auth_password_ar">كلمة المرور</string>
+    <string name="auth_email_ar">البريد الإلكتروني</string>
+    <string name="auth_email_placeholder">example@domain.com</string>
+    <string name="auth_have_account">لدي حساب</string>
+    <string name="auth_no_account">إنشاء حساب</string>
+    <string name="auth_continue_guest">متابعة كضيف</string>
+    <string name="auth_continue_guest_desc">الحساب اختياري. يمكنك استخدام كامل التطبيق بدون حساب. يتيح الحساب لاحقا مزامنة سياراتك وسجلك.</string>
+    <string name="auth_loading">جاري تسجيل الدخول…</string>
+    <string name="auth_failed_email_format">بريد إلكتروني غير صالح.</string>
+    <string name="auth_failed_password_short">كلمة المرور قصيرة جدا (8 أحرف على الأقل).</string>
+    <string name="auth_failed_invalid_credentials">البريد أو كلمة المرور غير صحيحة.</string>
+    <string name="auth_failed_already_registered">هذا البريد مسجل بالفعل. استخدم تسجيل الدخول.</string>
+    <string name="auth_failed_confirm_email">البريد غير مؤكد. افتح الرسالة وأكد العنوان ثم أعد تسجيل الدخول.</string>
+    <string name="auth_failed_generic">فشل المصادقة.</string>
+    <string name="auth_failed_no_session">تم تسجيل الدخول لكن لم تنشأ جلسة. أعد المحاولة.</string>
+    <string name="auth_failed_signup_confirm">تم إنشاء الحساب. إذا كان تأكيد البريد مفعّلا، افتح الرسالة وأكد العنوان ثم أعد تسجيل الدخول.</string>
+    <string name="auth_failed_guest">تعذر إنشاء جلسة الضيف.</string>
+    <string name="auth_signed_in_as">مسجّل الدخول باسم %1$s</string>
+    <string name="auth_signed_in_anon">مسجّل الدخول كضيف</string>
+    <string name="auth_sign_out_confirm">ستبقى في CarDiag لكن ستفقد مزامنة بياناتك مع Supabase حتى تعيد تسجيل الدخول.</string>
+    <string name="auth_password_required">كلمة المرور مطلوبة.</string>
+    <string name="auth_email_required">البريد الإلكتروني مطلوب.</string>
+
+    <!-- Driver guidance driver-mode-only actions -->
+    <string name="driver_actions_title">إجراءات السائق</string>
+    <string name="driver_actions_road">فتح مساعد الطريق</string>
+    <string name="driver_actions_emergency">طوارئ / سحب</string>
+    <string name="driver_actions_history">عرض السجل</string>
+    <string name="driver_actions_find_service">إيجاد خدمة قريبة</string>
+    <string name="driver_actions_find_service_desc">البحث عن ميكانيكيين، سحب، محطات وقود وقطع قريبة.</string>
+    <string name="driver_actions_emergency_desc">عرض الأرقام المفيدة وحالة الطريق.</string>
+    <string name="driver_actions_road_desc">الاتجاهات ونقاط الاهتمام القريبة.</string>
+
+    <!-- Emergency numbers (Algeria, public knowledge) -->
+    <string name="emergency_title">أرقام الطوارئ (الجزائر)</string>
+    <string name="emergency_subtitle">أرقام وطنية عامة — تحقق دائما من التوفر المحلي.</string>
+    <string name="emergency_police">الشرطة</string>
+    <string name="emergency_police_value">17</string>
+    <string name="emergency_fire">الإطفاء</string>
+    <string name="emergency_fire_value">14</string>
+    <string name="emergency_ambulance">الإسعاف</string>
+    <string name="emergency_ambulance_value">115</string>
+    <string name="emergency_protection_civile">الحماية المدنية</string>
+    <string name="emergency_protection_civile_value">1055</string>
+    <string name="emergency_call">اتصال</string>
+    <string name="emergency_call_unavailable">لا يوجد تطبيق هاتف على هذا الجهاز.</string>
+    <string name="road_assistant_nav_label">الطريق</string>
+    <string name="road_assistant_nav_desc">مساعد الطريق والخدمات والطوارئ</string>
+
+    <!-- Auth screen back navigation -->
+    <string name="auth_back">الرجوع إلى الرئيسية</string>
+    <string name="more_account_section">الحساب</string>
+
+    <!-- Account linking / guest mode messaging -->
+    <string name="guest_banner_title">وضع الضيف</string>
+    <string name="guest_banner_body">تبقى بياناتك على هذا الجهاز فقط. أنشئ حسابا لمزامنة سياراتك وسجلك عبر الأجهزة.</string>
+    <string name="guest_banner_create">إنشاء حساب</string>
+    <string name="guest_banner_dismiss">موافق</string>
+    <string name="guest_persisted_label">وضع الضيف مفعّل</string>
+    <!-- Vehicle profile (ExactVehicleProfileScreen) -->
+    <string name="vp_loading_error">تعذر تحميل البطاقة</string>
+    <string name="vp_loading_error_title">تعذر تحميل البيانات</string>
+    <string name="vp_loading_error_retry">إعادة المحاولة</string>
+    <string name="vp_loading_error_back">رجوع</string>
+    <string name="vp_loading_empty_title">لا توجد بيانات مفصّلة لهذا الموديل</string>
+    <string name="vp_loading_empty_body">الموديل موجود، لكن لم تُربط به بعد بطاقة سنة/جيل مفصّلة.</string>
+    <string name="vp_loading_empty_back">رجوع</string>
+    <string name="vp_tab_overview">نظرة عامة</string>
+    <string name="vp_tab_engine">المحرك</string>
+    <string name="vp_tab_specs">المواصفات</string>
+    <string name="vp_tab_ecu">ECU والتشخيص</string>
+    <string name="vp_year_selector">سنة الموديل</string>
+    <string name="vp_generation_unknown">جيل غير محدد</string>
+    <string name="vp_select_year_hint">اختر سنة السيارة؛ كل سنة مرتبطة بجيل ومحركاتها الخاصة.</string>
+    <string name="vp_year_selected">السنة المحددة: %1$s</string>
+    <string name="vp_section_engines_year">المحركات المتوفرة سنة %1$d</string>
+    <string name="vp_section_trims">الفئات والتجهيزات</string>
+    <string name="vp_section_engines_year_full">المحركات المتوفرة لسنة %1$d</string>
+    <string name="vp_section_specs_year">بطاقة المواصفات الكاملة لسنة %1$d</string>
+    <string name="vp_section_ecu_year">وحدات ECU المرتبطة بالسنة %1$d</string>
+    <string name="vp_no_ecu">لا توجد بيانات ECU مؤكدة لهذه السنة.</string>
+    <string name="vp_ecu_required">وحدة مطلوبة</string>
+    <string name="vp_ecu_optional">وحدة اختيارية</string>
+    <string name="vp_ecu_protocols">البروتوكولات: %1$s</string>
+    <string name="vp_ecu_part_numbers">أرقام القطع: %1$s</string>
+    <string name="vp_diagnose_action">شخّص هذه السيارة</string>
+    <string name="vp_diagnose_button">تشخيص</string>
+    <string name="vp_back">رجوع</string>
+    <string name="vp_spec_displacement">السعة</string>
+    <string name="vp_spec_cylinders">الأسطوانات</string>
+    <string name="vp_spec_power">القدرة</string>
+    <string name="vp_spec_power_kw">كيلوواط</string>
+    <string name="vp_spec_torque">العزم</string>
+    <string name="vp_spec_torque_nm">نيوتن متر</string>
+    <string name="vp_spec_aspiration">السحب</string>
+    <string name="vp_spec_injection">الحقن</string>
+    <string name="vp_spec_transmissions">ناقلات الحركة</string>
+    <string name="vp_spec_engine_years">سنوات المحرك</string>
+    <string name="vp_engine_year_range">%1$d — %2$d</string>
+    <string name="vp_loading_back">رجوع</string>
 </resources>

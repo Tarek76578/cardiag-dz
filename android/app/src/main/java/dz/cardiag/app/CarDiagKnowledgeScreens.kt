@@ -415,8 +415,7 @@ fun AiDiagnosisScreen(
                             context.getString(R.string.ai_service_timeout)
                         msg.contains("Unable to create a guest session", ignoreCase = true) || msg.contains("Authentication", ignoreCase = true) ->
                             context.getString(R.string.ai_service_error)
-                        msg.isBlank() ->
-                            if (arabic) "الذكاء الاصطناعي غير متوفر مؤقتا." else "L'assistant IA est temporairement indisponible."
+                        msg.isBlank() -> context.getString(R.string.ai_unavailable_fallback)
                         else -> msg
                     }
                 }

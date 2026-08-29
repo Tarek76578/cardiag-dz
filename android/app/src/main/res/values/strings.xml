@@ -514,6 +514,7 @@
 
     <!-- AI service error -->
     <string name="ai_service_error">Le service de diagnostic est temporairement indisponible.</string>
+    <string name="ai_unavailable_fallback">L\'assistant IA est temporairement indisponible.</string>
     <string name="ai_service_timeout">Le diagnostic a pris trop de temps. Réessayez.</string>
     <string name="ai_service_offline">Diagnostic hors ligne basé sur la base de connaissances et les règles déterministes.</string>
 
@@ -553,4 +554,164 @@
     <string name="guided_reco_inconclusive">Résultat non concluant. Refaites le test en conditions contrôlées, puis continuez.</string>
     <string name="dtc_not_found">Code introuvable dans la base DTC.</string>
     <string name="ai_unavailable_full">L\'assistant IA est momentanément indisponible. Réessayez ou utilisez la base DTC locale.</string>
+
+    <!-- Road Assistant / GPS -->
+    <string name="ra_title">Assistant route</string>
+    <string name="ra_subtitle">Trouver des services à proximité et obtenir des informations sur l\'état de la route.</string>
+    <string name="ra_need_permission_title">Localisation requise</string>
+    <string name="ra_need_permission_body">Pour trouver des services à proximité, autorisez CarDiag à utiliser la position de l\'appareil. La position n\'est lue qu\'après votre accord et n\'est pas conservée après la fermeture de l\'écran.</string>
+    <string name="ra_request_permission">Autoriser la position</string>
+    <string name="ra_permission_denied_title">Position non autorisée</string>
+    <string name="ra_permission_denied_body">Vous pouvez continuer à utiliser CarDiag sans la position. L\'assistant route nécessite la position pour proposer des services à proximité.</string>
+    <string name="ra_open_settings">Ouvrir les paramètres</string>
+    <string name="ra_continue_without">Continuer sans la position</string>
+    <string name="ra_categories">Catégories</string>
+    <string name="ra_category_mechanic">Mécanicien / Garage</string>
+    <string name="ra_category_auto_electrician">Électricien automobile</string>
+    <string name="ra_category_roadside">Dépannage / Assistance</string>
+    <string name="ra_category_spare_parts">Pièces détachées</string>
+    <string name="ra_category_fuel">Station-service</string>
+    <string name="ra_category_hospital">Hôpital / Urgences</string>
+    <string name="ra_category_towing">Remorquage</string>
+    <string name="ra_category_other">Autre service auto</string>
+    <string name="ra_radius">Rayon de recherche</string>
+    <string name="ra_radius_value">%1$d km</string>
+    <string name="ra_no_results">Aucun service disponible pour cette catégorie dans cette version.</string>
+    <string name="ra_search_external">Rechercher sur la carte</string>
+    <string name="ra_search_external_query">%1$s à proximité</string>
+    <string name="ra_hazards_title">État de la route</string>
+    <string name="ra_hazards_subtitle">Les alertes en direct nécessitent un fournisseur externe ; cette version affiche un état générique.</string>
+    <string name="ra_hazards_empty">Aucune alerte de route publiée pour le moment.</string>
+    <string name="ra_live_source_required">Données en direct non disponibles : un fournisseur externe (carte, Overpass, HERE…) doit être intégré pour proposer des résultats réels.</string>
+    <string name="ra_source_label">Source : %1$s</string>
+    <string name="ra_offline_catalog">Catalogue générique</string>
+    <string name="ra_offline_explainer">Les coordonnées, adresses, notes et numéros de téléphone réels ne sont jamais inventés. Utilisez la carte externe pour obtenir les résultats les plus proches.</string>
+    <string name="ra_distance_unknown">Distance non calculée</string>
+    <string name="ra_distance_km">%1$.1f km</string>
+    <string name="ra_distance_m">%1$d m</string>
+    <string name="ra_search_hint">Rechercher (ميكانيكي, ميكانيكي سيارات, كهربائي, dépannage, garage, قطع الغيار…)</string>
+    <string name="ra_search_no_match">Aucun terme reconnu. Essayez: ميكانيكي, ميكانيكي سيارات, كهربائي, garage, dépannage, قطع الغيار.</string>
+    <string name="ra_hazard_template_pothole">Nid-de-poule signalé à proximité</string>
+    <string name="ra_hazard_template_broken_down">Véhicule en panne signalé</string>
+    <string name="ra_hazard_template_accident">Accident signalé dans le secteur</string>
+    <string name="ra_hazard_template_closure">Route barrée ou partiellement fermée</string>
+    <string name="ra_map_intent_failed">Impossible d\'ouvrir l\'application de carte.</string>
+    <string name="ra_call_intent_failed">Aucun composeur téléphonique disponible.</string>
+    <string name="ra_call_action">Appeler</string>
+    <string name="ra_directions_action">Itinéraire</string>
+    <string name="ra_category_label">Catégorie : %1$s</string>
+    <string name="ra_gps_unavailable">Position GPS indisponible. Réessayez en extérieur ou réautorisez la position.</string>
+    <string name="ra_gps_timeout">La géolocalisation a pris trop de temps. Réessayez.</string>
+    <string name="ra_location_loading">Localisation en cours…</string>
+    <string name="ra_search_loading">Recherche en cours…</string>
+    <string name="ra_error_offline">Aucune connexion réseau. Les services à proximité ne peuvent pas être actualisés.</string>
+    <string name="ra_provider_unconfigured">Aucun fournisseur de données géographiques n\'est configuré. Le catalogue générique est utilisé.</string>
+    <string name="ra_open_map">Ouvrir la carte</string>
+    <string name="ra_search_button">Rechercher</string>
+    <string name="ra_filter">Filtrer</string>
+    <string name="ra_results_count">%1$d catégorie(s)</string>
+    <string name="ra_no_category_selected">Sélectionnez au moins une catégorie.</string>
+
+    <string name="state_unauthorized">Non autorisé</string>
+    <string name="more_login">Se connecter / Créer un compte</string>
+    <string name="auth_password_ar">كلمة المرور</string>
+    <string name="auth_email_ar">البريد الإلكتروني</string>
+    <string name="auth_email_placeholder">exemple@domaine.com</string>
+    <string name="auth_have_account">J\'ai déjà un compte</string>
+    <string name="auth_no_account">Créer un compte</string>
+    <string name="auth_continue_guest">Continuer en invité</string>
+    <string name="auth_continue_guest_desc">Le compte est facultatif. Vous pouvez utiliser l\'ensemble de l\'application sans compte. Un compte permet plus tard de synchroniser vos véhicules et votre historique.</string>
+    <string name="auth_loading">Connexion en cours…</string>
+    <string name="auth_failed_email_format">Email invalide.</string>
+    <string name="auth_failed_password_short">Mot de passe trop court (8 caractères minimum).</string>
+    <string name="auth_failed_invalid_credentials">Email ou mot de passe incorrect.</string>
+    <string name="auth_failed_already_registered">Cet email est déjà enregistré. Utilisez Connexion.</string>
+    <string name="auth_failed_confirm_email">Email non confirmé. Confirmez votre adresse puis reconnectez-vous.</string>
+    <string name="auth_failed_generic">Échec de l\'authentification.</string>
+    <string name="auth_failed_no_session">Connexion effectuée mais aucune session n\'a été créée. Réessayez.</string>
+    <string name="auth_failed_signup_confirm">Compte créé. Si la confirmation email est activée, confirmez votre adresse puis reconnectez-vous.</string>
+    <string name="auth_failed_guest">Impossible de créer la session invité.</string>
+    <string name="auth_signed_in_as">Connecté en tant que %1$s</string>
+    <string name="auth_signed_in_anon">Connecté en invité</string>
+    <string name="auth_sign_out_confirm">Vous resterez sur CarDiag mais perdrez la synchronisation de vos données avec Supabase tant que vous ne vous reconnectez pas.</string>
+    <string name="auth_password_required">Mot de passe requis.</string>
+    <string name="auth_email_required">Email requis.</string>
+
+    <!-- Driver guidance driver-mode-only actions -->
+    <string name="driver_actions_title">Actions Conducteur</string>
+    <string name="driver_actions_road">Ouvrir l\'assistant route</string>
+    <string name="driver_actions_emergency">Urgence / Dépannage</string>
+    <string name="driver_actions_history">Voir l\'historique</string>
+    <string name="driver_actions_find_service">Trouver un service à proximité</string>
+    <string name="driver_actions_find_service_desc">Recherche de mécaniciens, dépanneurs, stations et pièces à proximité.</string>
+    <string name="driver_actions_emergency_desc">Afficher les numéros utiles et l\'état de la route.</string>
+    <string name="driver_actions_road_desc">Itinéraire et points d\'intérêt à proximité.</string>
+
+    <!-- Emergency numbers (Algeria, public knowledge) -->
+    <string name="emergency_title">Numéros d\'urgence (Algérie)</string>
+    <string name="emergency_subtitle">Numéros publics nationaux — vérifiez toujours la disponibilité locale.</string>
+    <string name="emergency_police">Police</string>
+    <string name="emergency_police_value">17</string>
+    <string name="emergency_fire">Pompiers</string>
+    <string name="emergency_fire_value">14</string>
+    <string name="emergency_ambulance">SAMU / Ambulance</string>
+    <string name="emergency_ambulance_value">115</string>
+    <string name="emergency_protection_civile">Protection civile</string>
+    <string name="emergency_protection_civile_value">1055</string>
+    <string name="emergency_call">Appeler</string>
+    <string name="emergency_call_unavailable">Le composeur n\'est pas disponible sur cet appareil.</string>
+    <string name="road_assistant_nav_label">Route</string>
+    <string name="road_assistant_nav_desc">Assistant route, services et urgences</string>
+
+    <!-- Auth screen back navigation -->
+    <string name="auth_back">Retour à l\'accueil</string>
+    <string name="more_account_section">Compte</string>
+
+    <!-- Account linking / guest mode messaging -->
+    <string name="guest_banner_title">Mode invité</string>
+    <string name="guest_banner_body">Vos données restent sur cet appareil. Créez un compte pour synchroniser vos véhicules et votre historique sur plusieurs appareils.</string>
+    <string name="guest_banner_create">Créer un compte</string>
+    <string name="guest_banner_dismiss">OK</string>
+    <string name="guest_persisted_label">Mode invité actif</string>
+    <!-- Vehicle profile (ExactVehicleProfileScreen) -->
+    <string name="vp_loading_error">Impossible de charger la fiche</string>
+    <string name="vp_loading_error_title">Impossible de charger les données</string>
+    <string name="vp_loading_error_retry">Réessayer</string>
+    <string name="vp_loading_error_back">Retour</string>
+    <string name="vp_loading_empty_title">Aucune donnée détaillée pour ce modèle</string>
+    <string name="vp_loading_empty_body">Le modèle existe, mais aucune fiche année/génération détaillée n\'est encore liée.</string>
+    <string name="vp_loading_empty_back">Retour</string>
+    <string name="vp_tab_overview">Vue d\'ensemble</string>
+    <string name="vp_tab_engine">Moteur</string>
+    <string name="vp_tab_specs">Spécifications</string>
+    <string name="vp_tab_ecu">ECU &amp; Diagnostic</string>
+    <string name="vp_year_selector">Année du modèle</string>
+    <string name="vp_generation_unknown">Génération non renseignée</string>
+    <string name="vp_select_year_hint">Sélectionnez l\'année : chaque année est liée à sa génération et à ses moteurs.</string>
+    <string name="vp_year_selected">Année sélectionnée : %1$s</string>
+    <string name="vp_section_engines_year">Motorisations disponibles en %1$d</string>
+    <string name="vp_section_trims">Finitions et configurations</string>
+    <string name="vp_section_engines_year_full">Motorisations disponibles pour l\'année %1$d</string>
+    <string name="vp_section_specs_year">Fiche technique complète %1$d</string>
+    <string name="vp_section_ecu_year">ECU associés à l\'année %1$d</string>
+    <string name="vp_no_ecu">Aucune donnée ECU vérifiée pour cette année.</string>
+    <string name="vp_ecu_required">Module requis</string>
+    <string name="vp_ecu_optional">Module optionnel</string>
+    <string name="vp_ecu_protocols">Protocoles : %1$s</string>
+    <string name="vp_ecu_part_numbers">Part numbers : %1$s</string>
+    <string name="vp_diagnose_action">Diagnostiquer ce véhicule</string>
+    <string name="vp_diagnose_button">Diagnostic</string>
+    <string name="vp_back">Retour</string>
+    <string name="vp_spec_displacement">Cylindrée</string>
+    <string name="vp_spec_cylinders">Cylindres</string>
+    <string name="vp_spec_power">Puissance</string>
+    <string name="vp_spec_power_kw">kW</string>
+    <string name="vp_spec_torque">Couple</string>
+    <string name="vp_spec_torque_nm">Nm</string>
+    <string name="vp_spec_aspiration">Aspiration</string>
+    <string name="vp_spec_injection">Injection</string>
+    <string name="vp_spec_transmissions">Transmissions</string>
+    <string name="vp_spec_engine_years">Années moteur</string>
+    <string name="vp_engine_year_range">%1$d — %2$d</string>
+    <string name="vp_loading_back">Retour</string>
 </resources>
