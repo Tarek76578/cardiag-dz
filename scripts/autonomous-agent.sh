@@ -24,50 +24,34 @@ MODEL="${GEMINI_MODEL:-gemini-3.7-flash}"
 export GEMINI_MODEL="$MODEL"
 export GEMINI_CLI_TRUST_WORKSPACE=true
 
-# Validate Gemini using Google's documented OpenAI-compatible Chat Completions
-# endpoint. Do not use curl -f so Google's actual error body remains visible.
-echo "Validating Gemini API: $MODEL"
-validation_payload="$(python3 - <<'PY'
-import json, os
-print(json.dumps({
-  "model": os.environ.get("GEMINI_MODEL", "gemini-3.7-flash"),
-  "messages": [{"role": "user", "content": "Reply with exactly GEMINI_READY"}],
-  "max_tokens": 16,
-}))
-PY
-)"
-validation_response="$(curl -sS --retry 2 --retry-delay 2 \
-  -w '\nHTTP_STATUS:%{http_code}' \
-  -X POST "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" \
-  -H "Authorization: Bearer ${GEMINI_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "$validation_payload")"
-
-http_status="${validation_response##*HTTP_STATUS:}"
-validation_body="${validation_response%$'\nHTTP_STATUS:'*}"
-if [ "$http_status" != "200" ]; then
-  echo "Gemini API validation failed (HTTP $http_status)." >&2
-  printf '%s\n' "$validation_body" | python3 -c 'import json,sys; s=sys.stdin.read();\ntry: print(json.dumps(json.loads(s), indent=2)[:4000])\nexcept Exception: print(s[:4000])'
-  exit 21
-fi
-
-if ! printf '%s' "$validation_body" | grep -q 'GEMINI_READY'; then
-  echo "Gemini API responded, but the expected completion was not received." >&2
-  printf '%s\n' "$validation_body" | head -c 4000 >&2
-  exit 21
-fi
-
-echo "Gemini API validation succeeded: $MODEL"
-echo "AI_PROVIDER_SUCCESS=gemini/$MODEL"
-
-echo "Starting autonomous Gemini CLI cycle with gemini/$MODEL"
-
 if ! command -v gemini >/dev/null 2>&1; then
   echo "Gemini CLI is not installed." >&2
   exit 22
 fi
 
 echo "Gemini CLI version: $(gemini --version)"
+echo "Validating Gemini API through the official Gemini CLI: $MODEL"
+
+set +e
+validation_output="$(gemini -m "$MODEL" -p 'Reply with exactly GEMINI_READY' --output-format json --approval-mode=yolo 2>&1)"
+validation_status=$?
+set -e
+
+if [ "$validation_status" -ne 0 ]; then
+  echo "Gemini API validation failed with exit code $validation_status." >&2
+  printf '%s\n' "$validation_output" | head -c 5000 >&2
+  exit 21
+fi
+
+if ! printf '%s' "$validation_output" | grep -q 'GEMINI_READY'; then
+  echo "Gemini CLI responded, but the expected completion was not received." >&2
+  printf '%s\n' "$validation_output" | head -c 5000 >&2
+  exit 21
+fi
+
+echo "Gemini API validation succeeded: $MODEL"
+echo "AI_PROVIDER_SUCCESS=gemini/$MODEL"
+echo "Starting autonomous Gemini CLI cycle with gemini/$MODEL"
 
 PROMPT="$(cat "$MISSION_FILE")
 
@@ -84,7 +68,7 @@ $(cat "$STATE_FILE")
 Continue from the existing repository state. Do not restart the project and do not discard valid previous work. This is an autonomous engineering cycle, not an audit. Select the highest-value unfinished requirement from agent-state.md and the mission, implement real changes, integrate them into the application, run relevant tests/build checks, fix failures, and update agent-state.md with exact completed and remaining work. Never fabricate GPS, businesses, diagnostic results, vehicle data, prices, or image identity. Never expose secrets. Do not claim a feature is complete unless it is implemented and verified."
 
 set +e
-gemini -p "$PROMPT" --output-format stream-json --approval-mode yolo
+gemini -m "$MODEL" -p "$PROMPT" --output-format stream-json --approval-mode=yolo
 status=$?
 set -e
 
