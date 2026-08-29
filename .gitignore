@@ -1,0 +1,4 @@
+# Local AI/editor artifacts
+.aider.chat.history.md
+.aider.tags.cache.v4/
+.codex/.tmp/
