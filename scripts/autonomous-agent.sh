@@ -20,12 +20,10 @@ PROMPT="$(cat "$MISSION_FILE")
 --- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
 $(cat "$REQUIREMENTS_FILE")"
 
-# Prefer provider paths that do not depend on OpenRouter's free-model quota.
-# GitHub Models uses the workflow GITHUB_TOKEN with models: read permission.
-# Gemini/Groq are optional secret-backed fallbacks when configured.
-# OpenRouter remains the final fallback, not the primary provider.
+# GitHub Models was retired on 2026-07-30, so do not use GITHUB_TOKEN as an
+# inference provider. Prefer direct provider APIs with explicit secrets, then
+# fall back to OpenRouter. A missing optional provider is skipped cleanly.
 candidates=(
-  "github|openai/gpt-4.1-mini|https://models.github.ai/inference|GITHUB_TOKEN"
   "gemini|gemini-2.5-flash|https://generativelanguage.googleapis.com/v1beta/openai/|GEMINI_API_KEY"
   "groq|openai/gpt-oss-120b|https://api.groq.com/openai/v1|GROQ_API_KEY"
   "openrouter|openrouter/free|https://openrouter.ai/api/v1|OPENROUTER_API_KEY"
