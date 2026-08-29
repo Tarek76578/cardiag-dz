@@ -36,6 +36,12 @@ jobs:
           git diff --check
           echo CARdiag_AGENT_TRIGGER_OK
 
+      - name: Cache Ollama model
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v1
+
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
@@ -81,12 +87,6 @@ jobs:
             >/tmp/ollama-probe.json
           grep -q 'OLLAMA_READY' /tmp/ollama-probe.json
           echo "AI_PROVIDER_SUCCESS=ollama/$OLLAMA_MODEL"
-
-      - name: Cache Ollama model
-        uses: actions/cache@v4
-        with:
-          path: ~/.ollama/models
-          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v1
 
       - name: Install Aider
         run: |
