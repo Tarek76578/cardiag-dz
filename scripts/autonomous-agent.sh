@@ -6,6 +6,7 @@ mkdir -p "$CODEX_HOME"
 
 MISSION_FILE="$PWD/docs/agent-professional-transformation-mission.md"
 REQUIREMENTS_FILE="$PWD/docs/agent-current-user-requirements.md"
+USER_PRIORITY_FILE="$PWD/docs/agent-user-priority-requirements.md"
 if [ ! -f "$MISSION_FILE" ]; then
   echo "Missing agent mission: $MISSION_FILE" >&2
   exit 1
@@ -14,11 +15,18 @@ if [ ! -f "$REQUIREMENTS_FILE" ]; then
   echo "Missing current user requirements: $REQUIREMENTS_FILE" >&2
   exit 1
 fi
+if [ ! -f "$USER_PRIORITY_FILE" ]; then
+  echo "Missing user-priority requirements: $USER_PRIORITY_FILE" >&2
+  exit 1
+fi
 
 PROMPT="$(cat "$MISSION_FILE")
 
 --- CURRENT USER REQUIREMENTS (MANDATORY ADDENDUM) ---
-$(cat "$REQUIREMENTS_FILE")"
+$(cat "$REQUIREMENTS_FILE")
+
+--- EXPLICIT USER-PRIORITY PRODUCT REQUIREMENTS (MANDATORY) ---
+$(cat "$USER_PRIORITY_FILE")"
 
 # GitHub Models was retired on 2026-07-30, so do not use GITHUB_TOKEN as an
 # inference provider. Prefer direct provider APIs with explicit secrets, then
