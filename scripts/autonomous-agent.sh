@@ -7,7 +7,7 @@ STATE_FILE="$ROOT/agent-state.md"
 AGENTS_FILE="$ROOT/AGENTS.md"
 for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }; done
 PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-groq}}"
-MODEL="${AI_MODEL:-llama-3.1-8b-instant}"
+MODEL="${AI_MODEL:-}"
 BASE_URL="${CODEX_BASE_URL:-https://api.groq.com/openai/v1}"
 ENV_KEY="${CODEX_ENV_KEY:-GROQ_API_KEY}"
 WIRE_API="${CODEX_WIRE_API:-responses}"
@@ -15,6 +15,7 @@ export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
 case "$PROVIDER" in groq) export GROQ_API_KEY="${GROQ_API_KEY:-}"; test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; };; *) echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses Groq only." >&2; exit 14;; esac
 case "$WIRE_API" in responses) ;; *) echo "Unsupported CODEX_WIRE_API=$WIRE_API; Codex 0.151+ requires responses." >&2; exit 15;; esac
+test -n "$MODEL" || { echo "AI_MODEL was not selected by the Groq model discovery step." >&2; exit 16; }
 echo "AI_AGENT=codex"; echo "AI_PROVIDER=$PROVIDER"; echo "AI_MODEL=$MODEL"; echo "CODEX_BASE_URL=$BASE_URL"; echo "CODEX_ENV_KEY=$ENV_KEY"; echo "CODEX_WIRE_API=$WIRE_API"; echo "CODEX_HOME=$CODEX_HOME"
 test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
 PROMPT_FILE="$(mktemp)"; trap 'rm -f "$PROMPT_FILE"' EXIT
