@@ -33,19 +33,15 @@ jobs:
         run: |
           set -euo pipefail
           if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
-            echo 'INVALID_CODEX_GITLINK=1'
-            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
-            rm -rf .codex/.tmp/plugins
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
+            rm -rf .codex/.tmp/plugins
             git commit -m 'chore: remove invalid codex plugins gitlink'
             git push origin HEAD:main
             git fetch origin main
             git reset --hard origin/main
             git clean -fdx
-            echo 'INVALID_CODEX_GITLINK_REPAIRED=1'
-          else
-            echo 'INVALID_CODEX_GITLINK=0'
           fi
 
       - name: Clean runtime files
@@ -55,9 +51,6 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
-          # Aider runtime files were accidentally committed by an earlier cycle.
-          # Keep their repository copies intact for the agent baseline and hide only
-          # their runtime mutations from Git until the cycle is complete.
           git update-index --assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
 
       - name: Baseline
@@ -135,8 +128,8 @@ jobs:
               if p in x.lower() and x not in out: out.append(x)
           for x in ids:
             if x not in out: out.append(x)
-          open('/tmp/model-candidates','w').write('\n'.join(out[:30]))
-          print('FREE_MODEL_CANDIDATES=',len(out[:30]))
+          open('/tmp/model-candidates','w').write('\n'.join(out))
+          print('FREE_MODEL_CANDIDATES=',len(out))
           PY
 
       - name: Local OpenAI proxy
@@ -166,7 +159,7 @@ jobs:
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
           sleep 1
 
-      - name: Autonomous agent with automatic free-model fallback
+      - name: Autonomous agent with build-gated free-model fallback
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
@@ -177,36 +170,48 @@ jobs:
           export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
           export AIDER_LLM_HISTORY_FILE=/tmp/cardiag-aider-llm-history
           export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
+          success=0
           while IFS= read -r model; do
             [ -n "$model" ] || continue
-            echo "Trying free coding model: $model"
+            echo "=== TRYING FREE MODEL: $model ==="
             export FREELLMAPI_MODEL="$model"
             export AIDER_MODEL="openai/$model"
             rm -rf "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history /tmp/cardiag-aider-llm-history
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
             set +e
             ./scripts/autonomous-agent.sh
-            status=$?
+            agent_status=$?
             set -e
-            if [ "$status" -eq 0 ]; then
-              echo "FREE_MODEL_SUCCESS=$model"
-              exit 0
+            if [ "$agent_status" -ne 0 ]; then
+              echo "FREE_MODEL_FAILED=$model stage=aider status=$agent_status"
+              git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
+              sleep 5
+              continue
             fi
+            echo "FREE_MODEL_AIDER_SUCCESS=$model"
+            set +e
+            (cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace)
+            build_status=$?
+            set -e
+            if [ "$build_status" -eq 0 ]; then
+              echo "FREE_MODEL_BUILD_SUCCESS=$model"
+              success=1
+              break
+            fi
+            echo "FREE_MODEL_FAILED=$model stage=android-build status=$build_status"
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-            echo "FREE_MODEL_FAILED=$model status=$status; falling back to next free model"
-            sleep 8
+            rm -rf "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history /tmp/cardiag-aider-llm-history
+            sleep 5
           done < /tmp/model-candidates
-          echo 'All free coding models failed'
-          exit 1
+          [ "$success" -eq 1 ] || { echo 'No free model produced build-valid CarDiag code'; exit 1; }
 
-      - name: Android validation
+      - name: Final Android validation
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
       - name: Scope and cleanup
         run: |
           set -euo pipefail
-          # Restore Aider runtime files and remove assume-unchanged flags before scope checks.
           git update-index --no-assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
           git restore -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
           rm -rf .codex/.tmp/plugins 2>/dev/null || true
