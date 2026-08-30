@@ -1,0 +1,140 @@
+name: CarDiag Kaggle GPU Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cardiag-kaggle-gpu-smoke
+  cancel-in-progress: true
+
+jobs:
+  kaggle-gpu-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Kaggle credential without exposing it
+        run: |
+          set -euo pipefail
+          test -n "${KAGGLE_API_TOKEN:-}"
+          python3 -m pip install --disable-pip-version-check --no-input --upgrade kaggle
+          kaggle --version
+          python3 - <<'PY'
+          import os
+          token=os.environ.get("KAGGLE_API_TOKEN", "")
+          assert token and len(token) >= 20, "KAGGLE_API_TOKEN is missing or unexpectedly short"
+          print("KAGGLE_TOKEN_PRESENT=1")
+          print("KAGGLE_TOKEN_LENGTH_CLASS=" + ("short" if len(token) < 40 else "normal"))
+          PY
+
+      - name: Initialize a private Kaggle kernel and discover account slug
+        id: kernel
+        working-directory: /tmp
+        run: |
+          set -euo pipefail
+          rm -rf cardiag-kaggle-smoke
+          mkdir -p cardiag-kaggle-smoke
+          cd cardiag-kaggle-smoke
+          kaggle kernels init -p .
+          test -s kernel-metadata.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("kernel-metadata.json")
+          data=json.loads(p.read_text())
+          print("KERNEL_INIT_ID=" + str(data.get("id", "")))
+          if not data.get("id"):
+              raise SystemExit("Kaggle CLI did not populate a kernel id; cannot safely infer the account slug")
+          owner=data["id"].split("/",1)[0]
+          if not owner or owner in {"your-username", "username"}:
+              raise SystemExit("Kaggle CLI returned a placeholder owner")
+          print("KAGGLE_OWNER=" + owner)
+          Path("owner.txt").write_text(owner)
+          PY
+          owner="$(cat owner.txt)"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("kernel-metadata.json")
+          data=json.loads(p.read_text())
+          owner=data["id"].split("/",1)[0]
+          slug="cardiag-gpu-smoke"
+          data.update({
+              "id": f"{owner}/{slug}",
+              "title": "CarDiag GPU Smoke",
+              "code_file": "cardiag_gpu_smoke.py",
+              "language": "python",
+              "kernel_type": "script",
+              "is_private": True,
+              "enable_gpu": True,
+              "enable_internet": False,
+              "machine_shape": "NvidiaTeslaT4",
+              "dataset_sources": [],
+              "competition_sources": [],
+              "kernel_sources": [],
+              "model_sources": [],
+          })
+          p.write_text(json.dumps(data, indent=2) + "\n")
+          print("KERNEL_REF=" + data["id"])
+          Path("kernel-ref.txt").write_text(data["id"])
+          PY
+          cp "$GITHUB_WORKSPACE/kaggle/cardiag_gpu_smoke.py" .
+          test -f cardiag_gpu_smoke.py
+          test "$(python3 -c 'import json; print(json.load(open("kernel-metadata.json"))["enable_gpu"])')" = "True"
+          echo "kernel_ref=$(cat kernel-ref.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Push Kaggle GPU worker
+        working-directory: /tmp/cardiag-kaggle-smoke
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          kaggle kernels push -p .
+
+      - name: Wait for Kaggle worker
+        working-directory: /tmp/cardiag-kaggle-smoke
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$(cat kernel-ref.txt)"
+          final=""
+          for i in $(seq 1 30); do
+            status="$(kaggle kernels status "$ref" 2>&1 | tee /tmp/kaggle-status.log || true)"
+            echo "$status"
+            if printf '%s\n' "$status" | grep -qE 'COMPLETE|Complete|successful|Successful'; then final=success; break; fi
+            if printf '%s\n' "$status" | grep -qE 'ERROR|Error|failed|Failed'; then final=failure; break; fi
+            sleep 20
+          done
+          test "$final" = success
+
+      - name: Download and verify worker output
+        working-directory: /tmp/cardiag-kaggle-smoke
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ref="$(cat kernel-ref.txt)"
+          rm -rf output
+          mkdir -p output
+          kaggle kernels output "$ref" -p output --force
+          grep -R -q 'CARDIAG_KAGGLE_WORKER=OK' output
+          echo 'KAGGLE_GPU_WORKER=OK'
+
+      - name: Cleanup remote test kernel
+        if: always()
+        working-directory: /tmp/cardiag-kaggle-smoke
+        env:
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+        run: |
+          set +e
+          if [ -s kernel-ref.txt ]; then
+            kaggle kernels delete "$(cat kernel-ref.txt)" --yes || true
+          fi
