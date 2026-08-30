@@ -1,7 +1,5 @@
 name: CarDiag Agent
 
-# GitHub workflow-dispatch registration refresh
-
 on:
   workflow_dispatch:
     inputs:
@@ -12,9 +10,6 @@ on:
         type: choice
         options:
           - next
-
-  # Fallback trigger because GitHub's workflow-dispatch registration
-  # is currently returning HTTP 422 for this workflow.
   push:
     branches:
       - main
@@ -27,8 +22,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  OLLAMA_MODEL: qwen2.5-coder:3b
-  OLLAMA_HOST: http://127.0.0.1:11434
+  FREELLMAPI_PORT: '3001'
+  FREELLMAPI_PROXY_PORT: '3002'
   GITHUB_EVENT_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
 
 jobs:
@@ -61,12 +56,6 @@ jobs:
           test -z "$(git status --porcelain)"
           echo CARdiag_AGENT_TRIGGER_OK
 
-      - name: Cache Ollama model
-        uses: actions/cache@v4
-        with:
-          path: ~/.ollama/models
-          key: ollama-${{ runner.os }}-${{ env.OLLAMA_MODEL }}-v4
-
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
@@ -84,40 +73,96 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: npm
 
-      - name: Setup Ollama
+      - name: Start FreeLLMAPI-Extended gateway
+        working-directory: /tmp
         run: |
           set -euo pipefail
-          if ! command -v ollama >/dev/null 2>&1; then
-            curl -fsSL https://ollama.com/install.sh | sh
-          fi
-          ollama --version
-          nohup ollama serve >/tmp/ollama.log 2>&1 &
-          echo $! >/tmp/ollama.pid
+          rm -rf freellmapi
+          git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git freellmapi
+          cd freellmapi
+          npm ci
+          export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+          export PORT="$FREELLMAPI_PORT"
+          export NODE_ENV=development
+          npm run dev > /tmp/freellmapi.log 2>&1 &
+          echo $! >/tmp/freellmapi.pid
           ready=0
-          for i in $(seq 1 60); do
-            if curl -fsS "$OLLAMA_HOST/api/tags" >/tmp/ollama-tags.json 2>/dev/null; then
+          for i in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/health" >/tmp/freellmapi-health.json 2>/dev/null; then
               ready=1
-              echo "OLLAMA_HTTP_READY attempt=$i"
+              echo "FREELLMAPI_GATEWAY_READY attempt=$i"
+              cat /tmp/freellmapi-health.json
               break
             fi
             sleep 2
           done
-          if [ "$ready" -ne 1 ]; then
-            echo 'Ollama did not become ready.' >&2
-            cat /tmp/ollama.log >&2 || true
-            exit 20
-          fi
-          if ! grep -q 'qwen2.5-coder:3b' /tmp/ollama-tags.json; then
-            echo "Pulling $OLLAMA_MODEL"
-            ollama pull "$OLLAMA_MODEL"
-          fi
-          ollama list
-          curl -fsS "$OLLAMA_HOST/api/show" \
-            -H 'Content-Type: application/json' \
-            -d "{\"name\":\"$OLLAMA_MODEL\"}" >/tmp/ollama-show.json
-          grep -q 'qwen2.5-coder' /tmp/ollama-show.json
-          echo "AI_PROVIDER_SUCCESS=ollama/$OLLAMA_MODEL"
+          test "$ready" = 1 || { cat /tmp/freellmapi.log >&2 || true; exit 20; }
+          curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/freellmapi-models.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/freellmapi-models.json'))
+          items=d.get('data', d if isinstance(d,list) else [])
+          print('FREELLMAPI_MODEL_COUNT=', len(items))
+          for m in items[:30]: print(m.get('id','<unknown>'))
+          if not items: raise SystemExit('FreeLLMAPI returned no models')
+          PY
+
+      - name: Validate keyless FreeLLMAPI chat + tool calling
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.request
+          body={
+            'model':'',
+            'messages':[{'role':'system','content':'You are a coding-agent probe. Call the supplied tool before answering.'},{'role':'user','content':'Read the project status file and return its first line.'}],
+            'tools':[{'type':'function','function':{'name':'read_project_file','description':'Read a UTF-8 project file.','parameters':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}}],
+            'tool_choice':'required'
+          }
+          req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+          with urllib.request.urlopen(req,timeout=120) as r:
+            data=json.load(r)
+          msg=data['choices'][0]['message']
+          calls=msg.get('tool_calls') or []
+          if not calls or calls[0].get('function',{}).get('name')!='read_project_file':
+            raise SystemExit('FreeLLMAPI keyless tool-calling probe failed')
+          print('FREELLMAPI_KEYLESS_TOOL_CALLING_SUCCESS')
+          PY
+
+      - name: Start keyless OpenAI compatibility shim
+        run: |
+          set -euo pipefail
+          cat >/tmp/keyless_proxy.py <<'PY'
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          from urllib.request import Request, urlopen
+          import os
+          UP='http://127.0.0.1:3001'
+          class H(BaseHTTPRequestHandler):
+              def do_POST(self): self.proxy()
+              def do_GET(self): self.proxy()
+              def proxy(self):
+                  n=int(self.headers.get('Content-Length','0'))
+                  body=self.rfile.read(n) if n else None
+                  headers={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
+                  req=Request(UP+self.path,data=body,headers=headers,method=self.command)
+                  try:
+                      with urlopen(req,timeout=180) as r:
+                          data=r.read(); self.send_response(r.status)
+                          for k,v in r.headers.items():
+                              if k.lower() not in ('transfer-encoding','content-length','connection'):
+                                  self.send_header(k,v)
+                          self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
+                  except Exception as e:
+                      self.send_response(502); self.send_header('Content-Type','text/plain'); self.end_headers(); self.wfile.write(str(e).encode())
+              def log_message(self,*args): pass
+          ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
+          PY
+          nohup python3 /tmp/keyless_proxy.py >/tmp/keyless-proxy.log 2>&1 &
+          echo $! >/tmp/keyless-proxy.pid
+          sleep 1
+          curl -fsS http://127.0.0.1:3002/health >/tmp/proxy-health.json
+          echo KEYLESS_PROXY_READY
 
       - name: Install Aider
         run: |
@@ -126,12 +171,32 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/aider" --version
 
-      - name: Run autonomous agent
+      - name: Select coding model from FreeLLMAPI catalog
+        run: |
+          set -euo pipefail
+          MODEL="$(python3 - <<'PY'
+          import json
+          items=json.load(open('/tmp/freellmapi-models.json')).get('data',[])
+          ids=[str(x.get('id','')) for x in items if x.get('id')]
+          preferred=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
+          for needle in preferred:
+              for mid in ids:
+                  if needle in mid.lower():
+                      print(mid); raise SystemExit
+          print(ids[0])
+          PY
+          )"
+          test -n "$MODEL"
+          echo "FREELLMAPI_MODEL=$MODEL" >> "$GITHUB_ENV"
+          echo "Selected FreeLLMAPI model: $MODEL"
+
+      - name: Run autonomous agent through FreeLLMAPI
         timeout-minutes: 30
         env:
-          OLLAMA_API_BASE: http://127.0.0.1:11434
-          OLLAMA_MODEL: qwen2.5-coder:3b
-          AIDER_MODEL: ollama_chat/qwen2.5-coder:3b
+          AI_PROVIDER: freellmapi
+          OPENAI_API_BASE: http://127.0.0.1:3002/v1
+          OPENAI_API_KEY: keyless-local-gateway
+          AIDER_MODEL: openai/${{ env.FREELLMAPI_MODEL }}
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
@@ -150,8 +215,6 @@ jobs:
           git diff --check
           test -f AGENTS.md
           test -f android/app/build.gradle.kts
-          echo 'Changed files after validation:'
-          git status --short
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
 android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           while IFS= read -r file; do
@@ -161,6 +224,7 @@ android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
               exit 40
             fi
           done < <(git diff --name-only)
+          echo 'VALIDATED_SCOPE_OK'
 
       - name: Commit only validated task files
         run: |
@@ -174,7 +238,7 @@ android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
             echo 'No validated code changes to commit.'
             exit 41
           fi
-          git commit -m 'feat(road): add live nearby service provider'
+          git commit -m 'feat(road): add live nearby service provider [agent-run]'
           git push origin HEAD:main
 
       - name: Upload results
@@ -188,7 +252,8 @@ android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Stop Ollama
+      - name: Stop services
         if: always()
         run: |
-          if [ -f /tmp/ollama.pid ]; then kill "$(cat /tmp/ollama.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/keyless-proxy.pid ]; then kill "$(cat /tmp/keyless-proxy.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/freellmapi.pid ]; then kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true; fi
