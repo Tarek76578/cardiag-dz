@@ -14,6 +14,8 @@ concurrency:
 
 env:
   FREELLMAPI_PORT: 3001
+  CODEX_SHIM_PORT: 8787
+  CODEX_SHIM_VERSION: v0.6.6
 
 jobs:
   agent:
@@ -68,15 +70,16 @@ jobs:
           export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" PORT="$FREELLMAPI_PORT"
           npm run dev >/tmp/freellmapi.log 2>&1 & echo $! >/tmp/freellmapi.pid
           for i in $(seq 1 45); do
-            curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null && break
+            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null; then break; fi
             sleep 2
           done
           test -s /tmp/models.json || { tail -n 100 /tmp/freellmapi.log; exit 20; }
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/models.json'))
-          print('FREELLMAPI_MODELS=',len(d.get('data',[])))
-          assert d.get('data')
+          ids=[m.get('id') for m in d.get('data',[]) if m.get('id')]
+          print('FREELLMAPI_MODELS=',len(ids))
+          assert ids
           PY
           DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"
           test -n "$DB_PATH"
@@ -85,7 +88,7 @@ jobs:
           const db=new Database(process.env.DB_PATH,{readonly:true});
           const rows=db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all();
           const c=rows.map(r=>String(r.value||'').trim()).filter(v=>v.length>=20&&!/^your-/i.test(v));
-          if(!c.length) process.exit(2);
+          if(!c.length)process.exit(2);
           process.stdout.write(c.sort((a,b)=>b.length-a.length)[0]);
           NODE
           )"
@@ -103,18 +106,22 @@ jobs:
           out=[]
           for key in priority:
               out += [x for x in ids if key in x.lower() and x not in out]
+          # Keep the loop bounded. FreeLLMAPI itself performs provider fallback.
           open('/tmp/model-candidates','w').write('\n'.join(out[:8]))
           print('FREE_MODEL_CANDIDATES=',len(out[:8]))
           print('\n'.join(out[:8]))
           PY
 
-      - name: Install Codex CLI
+      - name: Install Codex CLI and Responses shim
         run: |
           set -euo pipefail
           rm -rf /tmp/codex-cli
           npm install --prefix /tmp/codex-cli --no-save @openai/codex
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
+          curl -fsSL "https://github.com/pige0n-ai/codex-shim/releases/download/${CODEX_SHIM_VERSION}/codex-shim-${CODEX_SHIM_VERSION}-x86_64-unknown-linux-musl" -o /tmp/codex-shim
+          chmod +x /tmp/codex-shim
+          /tmp/codex-shim --version
 
       - name: Codex Agent with build-gated fallback
         run: |
@@ -122,6 +129,7 @@ jobs:
           chmod +x scripts/autonomous-agent.sh
           export GATEWAY_KEY="$GATEWAY_KEY"
           export CODEX_HOME=/tmp/cardiag-codex-home
+          export CODEX_BASE_URL="http://127.0.0.1:${CODEX_SHIM_PORT}/v1"
           rm -rf "$CODEX_HOME"
           mkdir -p "$CODEX_HOME"
           success=0
@@ -129,11 +137,83 @@ jobs:
             [ -n "$model" ] || continue
             echo "=== TRYING FREE MODEL: $model ==="
             export FREELLMAPI_MODEL="$model"
+            rm -rf "$CODEX_HOME/.codex-shim" /tmp/cardiag-shim
+            mkdir -p /tmp/cardiag-shim
+            cat >/tmp/cardiag-shim/config.yaml <<YAML
+          server:
+            listen: 127.0.0.1:${CODEX_SHIM_PORT}
+            base_path: /v1
+            auth:
+              mode: optional-bearer
+              accepted_bearer_tokens: []
+          upstream:
+            base_url: http://127.0.0.1:${FREELLMAPI_PORT}/v1
+            chat_path: /chat/completions
+            responses_path: /responses
+            models_path: /models
+            api_key_env: GATEWAY_KEY
+            timeout_seconds: 90
+            connect_timeout_seconds: 5
+            max_retries: 0
+            stream_max_retries: 0
+            downstream_heartbeat_seconds: 15
+          provider:
+            kind: deepseek-chat
+            profile_config:
+              profile: deepseek-chat
+              capabilities:
+                endpoint_mode: null
+                tool_policy: function_tools_only
+                state_policy: adapter_stateful
+          models:
+            default: ${model}
+            catalog:
+              - slug: ${model}
+                display_name: ${model}
+                context_window: 131072
+                tool_calling: true
+                vision: false
+                reasoning_levels: []
+                priority: 10
+                supports_search_tool: false
+                apply_patch_tool_type: freeform
+                apply_patch_upstream_tool_type: structured
+                apply_patch_upstream_strict: false
+          reasoning:
+            enabled: false
+            effort: high
+            expose_reasoning_to_client: false
+            persist_reasoning_for_tool_calls: true
+          state:
+            backend: memory
+            ttl_seconds: 3600
+            debug_artifact_ttl_seconds: 300
+            failed_debug_artifact_ttl_seconds: 300
+            cleanup_interval_seconds: 600
+          logging:
+            level: warn
+            redact_api_keys: true
+            redact_message_content: true
+            log_sse_events: false
+          YAML
+            GATEWAY_KEY="$GATEWAY_KEY" /tmp/codex-shim --config /tmp/cardiag-shim/config.yaml >/tmp/cardiag-shim.log 2>&1 & echo $! >/tmp/codex-shim.pid
+            shim_ready=0
+            for i in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:${CODEX_SHIM_PORT}/v1/models" >/tmp/shim-models.json 2>/dev/null; then shim_ready=1; break; fi
+              sleep 1
+            done
+            if [ "$shim_ready" -ne 1 ]; then
+              echo "CODEX_SHIM_START_FAILED=$model"
+              tail -n 80 /tmp/cardiag-shim.log || true
+              kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
+              continue
+            fi
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
             set +e
             timeout 120s ./scripts/autonomous-agent.sh
             agent_status=$?
             set -e
+            kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
             if [ "$agent_status" -ne 0 ]; then
               echo "FREE_MODEL_FAILED=$model stage=codex status=$agent_status"
               git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
@@ -189,4 +269,5 @@ jobs:
       - name: Stop
         if: always()
         run: |
+          [ -f /tmp/codex-shim.pid ] && kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
           [ -f /tmp/freellmapi.pid ] && kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true
