@@ -2,6 +2,10 @@ name: CarDiag Kaggle GPU Smoke Test
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - kaggle/cardiag_gpu_smoke.py
+      - .github/workflows/kaggle-gpu-smoke.yml
 
 permissions:
   contents: read
@@ -58,7 +62,6 @@ jobs:
           print("KAGGLE_OWNER=" + owner)
           Path("owner.txt").write_text(owner)
           PY
-          owner="$(cat owner.txt)"
           python3 - <<'PY'
           import json
           from pathlib import Path
