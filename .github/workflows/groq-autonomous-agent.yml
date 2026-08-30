@@ -94,7 +94,7 @@ jobs:
           data=json.loads(os.environ["MODEL_LIST"])
           models=data.get("data",[])
           blocked=("whisper","tts","guard","safeguard","compound")
-          preferred=("qwen/","moonshotai/","meta-llama/","llama-","openai/gpt-oss")
+          preferred=("openai/gpt-oss", "qwen/", "moonshotai/", "meta-llama/", "llama-")
           rows=[]
           for m in models:
               mid=m.get("id","")
@@ -113,7 +113,7 @@ jobs:
             echo "=== REAL GROQ RESPONSES PROBE: $model ==="
             payload="$(MODEL="$model" python3 - <<'PY'
           import json,os
-          print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16,"store":False}))
+          print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
           PY
             )"
             probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
@@ -148,10 +148,10 @@ jobs:
             echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Start Codex payload capture proxy outside repository
+      - name: Start Groq compatibility adapter outside repository
         run: |
           set -euo pipefail
-          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
+          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
           nohup python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
@@ -163,7 +163,7 @@ jobs:
           grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
           test -z "$(git status --porcelain)"
 
-      - name: Autonomous Codex agent through capture proxy
+      - name: Autonomous Codex agent through Groq compatibility adapter
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
@@ -181,7 +181,7 @@ jobs:
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
           set -e
-          echo '=== CAPTURE PROXY LOG ==='
+          echo '=== GROQ ADAPTER LOG ==='
           cat /tmp/codex-groq-proxy.log || true
           if [ "$agent_status" -eq 0 ]; then exit 0; fi
           if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
@@ -191,13 +191,15 @@ jobs:
           echo "AI_PROVIDER_FAILED=groq status=$agent_status"
           exit "$agent_status"
 
-      - name: Upload captured Codex request for inspection
+      - name: Upload Groq compatibility diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codex-groq-payload-debug
+          name: codex-groq-compatibility-debug
           path: |
             /tmp/codex-groq-request.json
+            /tmp/codex-groq-adapted-request.json
+            /tmp/codex-groq-response.json
             /tmp/codex-groq-proxy.log
             /tmp/codex-agent.log
           if-no-files-found: ignore
