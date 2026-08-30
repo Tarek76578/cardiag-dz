@@ -243,3 +243,17 @@ jobs:
       - name: Final validation
         working-directory: android
         run: timeout 240s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Commit verified autonomous changes
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)" && { echo "No autonomous changes to commit"; exit 32; }
+          git diff --check
+          git status --short
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git diff --cached --name-status
+          git commit -m "feat: advance autonomous CarDiag milestone"
+          git push origin HEAD:main
