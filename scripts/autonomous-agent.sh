@@ -6,7 +6,9 @@ cd "$ROOT"
 TASK_FILE="$ROOT/docs/agent-next-task.md"
 STATE_FILE="$ROOT/agent-state.md"
 AGENTS_FILE="$ROOT/AGENTS.md"
-for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }; done
+for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
+  test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
+done
 
 MODEL="${FREELLMAPI_MODEL:-qwen/qwen3-coder:free}"
 CODEX_PROVIDER="${CODEX_PROVIDER:-codex_shim}"
@@ -19,8 +21,16 @@ echo "AI_AGENT=codex"
 echo "AI_PROVIDER=freellmapi-via-codex-shim"
 echo "AI_MODEL=$MODEL"
 
-auth_test_headers=( -H "Authorization: Bearer $GATEWAY_KEY" )
 curl -fsS "${CODEX_BASE_URL%/v1}/models" >/tmp/cardiag-codex-shim-models.json
+python3 - <<'PY'
+import json
+p='/tmp/cardiag-codex-shim-models.json'
+d=json.load(open(p, encoding='utf-8'))
+ids=[m.get('id') for m in d.get('data',[]) if m.get('id')]
+if not ids:
+    raise SystemExit('Codex shim returned no models')
+print('CODEX_SHIM_MODELS=', len(ids))
+PY
 
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
@@ -58,9 +68,13 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
+# Codex 0.151+ validates provider records strictly; the provider name is mandatory.
+# Pass the complete provider definition on every run so an incomplete CLI override
+# cannot shadow the checked-in configuration.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$CODEX_PROVIDER\"" \
+  -c 'model_providers.codex_shim.name="CarDiag Codex Responses Shim"' \
   -c "model_providers.codex_shim.base_url=\"$CODEX_BASE_URL\"" \
   -c 'model_providers.codex_shim.wire_api="responses"' \
   -c 'model_providers.codex_shim.request_max_retries=0' \
