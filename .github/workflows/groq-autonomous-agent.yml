@@ -1,0 +1,155 @@
+name: CarDiag Autonomous Agent (Groq)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cardiag-autonomous-agent
+  cancel-in-progress: false
+
+env:
+  GROQ_BASE_URL: https://api.groq.com/openai/v1
+  GROQ_MODEL: llama-3.3-70b-versatile
+  GROQ_WIRE_API: responses
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Repair and normalize git state
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
+            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
+            rm -rf .codex/.tmp/plugins
+            git commit -m 'chore: remove invalid codex plugins gitlink'
+            git push origin HEAD:main
+          fi
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+
+      - name: Baseline
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          test -f AGENTS.md
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          test -f docs/agent-next-task.md
+          test -f scripts/autonomous-agent.sh
+          test -n "${{ secrets.GROQ_API_KEY }}"
+          test -z "$(git status --porcelain)"
+
+      - name: Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Android
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Codex CLI
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/codex-cli
+          npm install --prefix /tmp/codex-cli --no-save @openai/codex
+          echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          /tmp/codex-cli/node_modules/.bin/codex --version
+
+      - name: Verify Groq provider
+        id: provider
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: |
+          set -euo pipefail
+          body="$(curl -sS --max-time 20 -w '\n%{http_code}' \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
+            -H 'Content-Type: application/json' \
+            "$GROQ_BASE_URL/models")" || exit 40
+          http_code="$(printf '%s\n' "$body" | tail -n1)"
+          response="$(printf '%s\n' "$body" | sed '$d')"
+          case "$http_code" in
+            200) ;;
+            401|403) echo "GROQ_API_AUTH_FAILED_HTTP=$http_code"; exit 41 ;;
+            429) echo 'GROQ_API_RATE_LIMITED=1'; exit 75 ;;
+            *) echo "GROQ_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
+          esac
+          MODEL_LIST="$response" python3 - "$GROQ_MODEL" <<'PY'
+          import json, os, sys
+          wanted = sys.argv[1]
+          data = json.loads(os.environ["MODEL_LIST"])
+          ids = {item.get("id") for item in data.get("data", [])}
+          if wanted not in ids:
+              print(f"GROQ_MODEL_UNAVAILABLE={wanted}", file=sys.stderr)
+              raise SystemExit(2)
+          print(f"GROQ_MODEL_AVAILABLE={wanted}")
+          PY
+          echo 'provider=groq' >> "$GITHUB_OUTPUT"
+          echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
+          echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo 'env_key=GROQ_API_KEY' >> "$GITHUB_OUTPUT"
+          echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
+
+      - name: Autonomous Codex agent
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_MODEL: ${{ steps.provider.outputs.model }}
+          CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
+          CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/autonomous-agent.sh
+          export CODEX_HOME="$HOME/.codex-cardiag"
+          mkdir -p "$CODEX_HOME"
+          set +e
+          ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
+          agent_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$agent_status" -eq 0 ]; then exit 0; fi
+          if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
+            echo "AI_PROVIDER_RATE_LIMITED=groq"
+            exit 75
+          fi
+          echo "AI_PROVIDER_FAILED=groq status=$agent_status"
+          exit "$agent_status"
+
+      - name: Final validation
+        working-directory: android
+        run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Commit verified autonomous changes
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No autonomous changes to commit"
+            exit 32
+          fi
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: advance autonomous CarDiag milestone"
+          git push origin HEAD:main
