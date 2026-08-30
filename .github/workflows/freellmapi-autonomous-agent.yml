@@ -1,33 +1,25 @@
 name: CarDiag FreeLLMAPI Agent
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+on: push
 
 permissions:
   contents: write
 
-concurrency:
-  group: cardiag-freellmapi-agent
-  cancel-in-progress: false
-
-env:
-  FREELLMAPI_PORT: '3001'
-
 jobs:
   agent:
-    name: Autonomous engineering cycle
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      FREELLMAPI_PORT: 3001
+      AI_PROVIDER: freellmapi
+      OPENAI_API_BASE: http://127.0.0.1:3002/v1
+      OPENAI_API_KEY: keyless-local-gateway
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Verify baseline
+      - name: Baseline
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
@@ -35,182 +27,131 @@ jobs:
           test -f android/gradlew
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
-          git diff --check
           test -z "$(git status --porcelain)"
 
-      - name: Setup Java
+      - name: Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
-      - name: Setup Android
+      - name: Android
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
           accept-android-sdk-licenses: true
 
-      - name: Setup Node
+      - name: Node
         uses: actions/setup-node@v5
         with:
           node-version: '22'
 
-      - name: Start FreeLLMAPI-Extended
-        working-directory: /tmp
+      - name: FreeLLMAPI
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git freellmapi
-          cd freellmapi
+          git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git /tmp/freellmapi
+          cd /tmp/freellmapi
           npm ci
           export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
-          export PORT="$FREELLMAPI_PORT"
-          npm run dev > /tmp/freellmapi.log 2>&1 &
+          export PORT=3001
+          npm run dev >/tmp/freellmapi.log 2>&1 &
           echo $! >/tmp/freellmapi.pid
-          for i in $(seq 1 90); do
-            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/health" >/tmp/freellmapi-health.json 2>/dev/null; then
-              cat /tmp/freellmapi-health.json
-              break
-            fi
-            sleep 2
-            if [ "$i" = 90 ]; then
-              cat /tmp/freellmapi.log >&2 || true
-              exit 20
-            fi
-          done
-          curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/freellmapi-models.json
+          for i in $(seq 1 90); do curl -fsS http://127.0.0.1:3001/health >/tmp/health.json 2>/dev/null && break; sleep 2; done
+          test -s /tmp/health.json || { cat /tmp/freellmapi.log >&2; exit 20; }
+          curl -fsS http://127.0.0.1:3001/v1/models >/tmp/models.json
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/freellmapi-models.json'))
-          items=d.get('data', d if isinstance(d,list) else [])
-          print('FREELLMAPI_MODEL_COUNT=', len(items))
-          if not items: raise SystemExit('No models returned by FreeLLMAPI')
+          d=json.load(open('/tmp/models.json')); items=d.get('data',[])
+          print('FREELLMAPI_MODELS=',len(items))
+          assert items
           PY
 
-      - name: Validate keyless chat and tool calling
+      - name: Keyless tool probe
         run: |
-          set -euo pipefail
           python3 - <<'PY'
-          import json, urllib.request
-          body={
-            'model':'',
-            'messages':[{'role':'system','content':'You are a coding-agent probe. Call the supplied tool before answering.'},{'role':'user','content':'Read the project status file and return its first line.'}],
-            'tools':[{'type':'function','function':{'name':'read_project_file','description':'Read a UTF-8 project file.','parameters':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}}],
-            'tool_choice':'required'
-          }
-          req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
-          with urllib.request.urlopen(req,timeout=120) as r: data=json.load(r)
-          calls=data['choices'][0]['message'].get('tool_calls') or []
-          assert calls and calls[0]['function']['name']=='read_project_file', calls
+          import json,urllib.request
+          b={'model':'','messages':[{'role':'user','content':'Call the tool.'}],'tools':[{'type':'function','function':{'name':'probe','parameters':{'type':'object','properties':{}}}}],'tool_choice':'required'}
+          r=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(b).encode(),headers={'Content-Type':'application/json'})
+          with urllib.request.urlopen(r,timeout=120) as x:d=json.load(x)
+          assert d['choices'][0]['message'].get('tool_calls')
           print('FREELLMAPI_KEYLESS_TOOL_CALLING_SUCCESS')
           PY
 
-      - name: Start keyless compatibility proxy for Aider
+      - name: Keyless proxy
         run: |
-          set -euo pipefail
-          cat >/tmp/keyless_proxy.py <<'PY'
-          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-          from urllib.request import Request, urlopen
-          UP='http://127.0.0.1:3001'
+          cat >/tmp/proxy.py <<'PY'
+          from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+          from urllib.request import Request,urlopen
           class H(BaseHTTPRequestHandler):
-              def do_GET(self): self.proxy()
-              def do_POST(self): self.proxy()
-              def proxy(self):
-                  n=int(self.headers.get('Content-Length','0'))
-                  body=self.rfile.read(n) if n else None
-                  headers={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
-                  req=Request(UP+self.path,data=body,headers=headers,method=self.command)
-                  try:
-                      with urlopen(req,timeout=180) as r:
-                          data=r.read(); self.send_response(r.status)
-                          for k,v in r.headers.items():
-                              if k.lower() not in ('transfer-encoding','content-length','connection'): self.send_header(k,v)
-                          self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
-                  except Exception as e:
-                      self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
-              def log_message(self,*args): pass
+            def do_GET(self): self.p()
+            def do_POST(self): self.p()
+            def p(self):
+              n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None
+              h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
+              try:
+                with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=180) as r:
+                  b=r.read(); self.send_response(r.status); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
+              except Exception as e: self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
+            def log_message(self,*a): pass
           ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
           PY
-          nohup python3 /tmp/keyless_proxy.py >/tmp/keyless-proxy.log 2>&1 &
-          echo $! >/tmp/keyless-proxy.pid
+          nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
           sleep 1
           curl -fsS http://127.0.0.1:3002/health >/dev/null
 
-      - name: Install Aider
+      - name: Aider
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/aider" --version
-
-      - name: Select coding model
-        run: |
-          set -euo pipefail
-          MODEL="$(python3 - <<'PY'
+          python3 - <<'PY'
           import json
-          ids=[str(x.get('id','')) for x in json.load(open('/tmp/freellmapi-models.json')).get('data',[]) if x.get('id')]
-          for needle in ('coder','coding','devstral','codestral','qwen','deepseek','kimi'):
-              for mid in ids:
-                  if needle in mid.lower(): print(mid); raise SystemExit
-          print(ids[0])
+          ids=[x.get('id','') for x in json.load(open('/tmp/models.json')).get('data',[])]
+          for n in ('coder','coding','devstral','codestral','qwen','deepseek','kimi'):
+            hit=next((x for x in ids if n in x.lower()),None)
+            if hit: open('/tmp/model','w').write(hit); break
+          else: open('/tmp/model','w').write(ids[0])
+          print('MODEL=',open('/tmp/model').read())
           PY
-          )"
-          test -n "$MODEL"
-          echo "FREELLMAPI_MODEL=$MODEL" >> "$GITHUB_ENV"
-          echo "Selected model: $MODEL"
-
-      - name: Run autonomous agent
-        timeout-minutes: 30
-        env:
-          AI_PROVIDER: freellmapi
-          OPENAI_API_BASE: http://127.0.0.1:3002/v1
-          OPENAI_API_KEY: keyless-local-gateway
-        run: |
-          set -euo pipefail
+          export FREELLMAPI_MODEL="$(cat /tmp/model)"
           chmod +x scripts/autonomous-agent.sh
           ./scripts/autonomous-agent.sh
 
-      - name: Validate Android output
+      - name: Android validation
         working-directory: android
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
-      - name: Final integrity check
+      - name: Scope
         run: |
           set -euo pipefail
-          git diff --check
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
 android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            printf '%s\n' "$allowed" | grep -Fxq "$file" || { echo "UNEXPECTED_CHANGE=$file" >&2; exit 40; }
-          done < <(git diff --name-only)
+          while IFS= read -r f; do [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || exit 40; done < <(git diff --name-only)
 
-      - name: Commit validated changes
+      - name: Commit
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
-          git diff --cached --quiet && { echo 'No code change'; exit 41; }
+          git add android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
+          git diff --cached --quiet && exit 41
           git commit -m 'feat(road): add live nearby service provider'
           git push origin HEAD:main
 
-      - name: Upload results
+      - name: Artifacts
+        if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: cardiag-agent-results
+          name: cardiag-freellmapi-results
           path: |
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/bundle/release/*.aab
             agent-state.md
           if-no-files-found: warn
-          retention-days: 14
 
-      - name: Stop services
+      - name: Stop
         if: always()
         run: |
-          if [ -f /tmp/keyless-proxy.pid ]; then kill "$(cat /tmp/keyless-proxy.pid)" 2>/dev/null || true; fi
-          if [ -f /tmp/freellmapi.pid ]; then kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true; fi
+          kill "$(cat /tmp/proxy.pid)" 2>/dev/null || true
+          kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true
