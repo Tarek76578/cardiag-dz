@@ -14,7 +14,7 @@ env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: qwen/qwen3-coder:free
   GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_MODEL: qwen/qwen3-32b
+  GROQ_MODEL: qwen/qwen3.6-27b
   GROQ_WIRE_API: responses
 
 jobs:
@@ -88,15 +88,34 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$GROQ_API_KEY" ]; then
-            echo "provider=groq" >> "$GITHUB_OUTPUT"
-            echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
-            echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
-            echo "env_key=GROQ_API_KEY" >> "$GITHUB_OUTPUT"
-            echo "wire_api=responses" >> "$GITHUB_OUTPUT"
-            echo "AI_PROVIDER_SELECTED=groq"
-            echo "AI_MODEL_SELECTED=$GROQ_MODEL"
-            echo "AI_WIRE_API_SELECTED=responses"
-            exit 0
+            models_json="$(curl -fsS --max-time 20 \
+              -H "Authorization: Bearer $GROQ_API_KEY" \
+              -H 'Content-Type: application/json' \
+              "$GROQ_BASE_URL/models")" || models_json=''
+            selected=''
+            for candidate in \
+              'qwen/qwen3.6-27b' \
+              'qwen/qwen3.8-27b' \
+              'llama-3.1-8b-instant' \
+              'openai/gpt-oss-20b'; do
+              if printf '%s' "$models_json" | python3 -c "import json,sys; d=json.load(sys.stdin); ids={x.get('id') for x in d.get('data',[])}; sys.exit(0 if '$candidate' in ids else 1)" 2>/dev/null; then
+                selected="$candidate"
+                break
+              fi
+            done
+            if [ -n "$selected" ]; then
+              echo "provider=groq" >> "$GITHUB_OUTPUT"
+              echo "model=$selected" >> "$GITHUB_OUTPUT"
+              echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
+              echo "env_key=GROQ_API_KEY" >> "$GITHUB_OUTPUT"
+              echo "wire_api=responses" >> "$GITHUB_OUTPUT"
+              echo "AI_PROVIDER_SELECTED=groq"
+              echo "AI_MODEL_SELECTED=$selected"
+              echo "AI_WIRE_API_SELECTED=responses"
+              exit 0
+            fi
+            echo 'GROQ_MODEL_PREFLIGHT=none-of-the-supported-agent-models-available'
+            echo 'GROQ will not be used with a guessed model id.'
           fi
           if [ -n "$OPENROUTER_API_KEY" ]; then
             echo "provider=openrouter" >> "$GITHUB_OUTPUT"
@@ -105,8 +124,9 @@ jobs:
             echo "env_key=OPENROUTER_API_KEY" >> "$GITHUB_OUTPUT"
             echo "wire_api=responses" >> "$GITHUB_OUTPUT"
             echo "AI_PROVIDER_SELECTED=openrouter"
+            echo "AI_MODEL_SELECTED=$OPENROUTER_MODEL"
             echo "AI_WIRE_API_SELECTED=responses"
-            echo "AI_PROVIDER_WARNING=GROQ_API_KEY is not configured; OpenRouter remains the last-resort provider"
+            echo "AI_PROVIDER_WARNING=Groq key exists but no supported current Groq model is exposed; using OpenRouter without guessing."
             exit 0
           fi
           echo 'No independent AI provider key is configured.' >&2
