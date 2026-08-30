@@ -1,0 +1,163 @@
+name: CarDiag Autonomous Agent (xAI Grok)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cardiag-autonomous-agent
+  cancel-in-progress: false
+
+env:
+  XAI_BASE_URL: https://api.x.ai/v1
+  XAI_MODEL: grok-4.6
+  XAI_WIRE_API: responses
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Repair and normalize git state
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
+            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
+            rm -rf .codex/.tmp/plugins
+            git commit -m 'chore: remove invalid codex plugins gitlink'
+            git push origin HEAD:main
+          fi
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+
+      - name: Baseline
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          test -f AGENTS.md
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          test -f docs/agent-next-task.md
+          test -f scripts/autonomous-agent.sh
+          test -n "${{ secrets.XAI_API_KEY }}"
+          test -z "$(git status --porcelain)"
+
+      - name: Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Android
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Codex CLI
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/codex-cli
+          npm install --prefix /tmp/codex-cli --no-save @openai/codex
+          echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          /tmp/codex-cli/node_modules/.bin/codex --version
+
+      - name: Verify xAI Grok provider
+        id: provider
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          models_json="$(curl -fsS --max-time 20 \
+            -H "Authorization: Bearer $XAI_API_KEY" \
+            -H 'Content-Type: application/json' \
+            "$XAI_BASE_URL/models")"
+          python3 - "$XAI_MODEL" <<'PY' <<<"$models_json"
+          import json, sys
+          wanted = sys.argv[1]
+          data = json.load(sys.stdin)
+          ids = {item.get('id') for item in data.get('data', [])}
+          if wanted not in ids:
+              print(f'XAI_MODEL_UNAVAILABLE={wanted}', file=sys.stderr)
+              raise SystemExit(2)
+          print(f'XAI_MODEL_AVAILABLE={wanted}')
+          PY
+          echo 'provider=xai' >> "$GITHUB_OUTPUT"
+          echo "model=$XAI_MODEL" >> "$GITHUB_OUTPUT"
+          echo "base_url=$XAI_BASE_URL" >> "$GITHUB_OUTPUT"
+          echo 'env_key=XAI_API_KEY' >> "$GITHUB_OUTPUT"
+          echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
+          echo 'AI_PROVIDER_SELECTED=xai'
+          echo "AI_MODEL_SELECTED=$XAI_MODEL"
+          echo 'AI_WIRE_API_SELECTED=responses'
+
+      - name: Autonomous Codex agent
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_MODEL: ${{ steps.provider.outputs.model }}
+          CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
+          CODEX_WIRE_API: responses
+        run: |
+          set -euo pipefail
+          chmod +x scripts/autonomous-agent.sh
+          export CODEX_HOME="$HOME/.codex-cardiag"
+          mkdir -p "$CODEX_HOME"
+
+          run_agent() {
+            local log_file="$1"
+            echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: responses ==="
+            set +e
+            ./scripts/autonomous-agent.sh 2>&1 | tee "$log_file"
+            local status=${PIPESTATUS[0]}
+            set -e
+            return "$status"
+          }
+
+          if run_agent /tmp/codex-agent.log; then
+            echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
+            exit 0
+          fi
+          agent_status=$?
+          if grep -qE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
+            echo "AI_PROVIDER_RATE_LIMITED=$CODEX_PROVIDER"
+            exit 75
+          fi
+          echo "AI_PROVIDER_FAILED=$CODEX_PROVIDER status=$agent_status"
+          exit "$agent_status"
+
+      - name: Final validation
+        working-directory: android
+        run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Commit verified autonomous changes
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No autonomous changes to commit"
+            exit 32
+          fi
+          git status --short
+          git add -A
+          git diff --cached --check
+          git diff --cached --name-status
+          git commit -m "feat: advance autonomous CarDiag milestone"
+          git push origin HEAD:main
