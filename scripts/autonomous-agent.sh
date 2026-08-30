@@ -10,7 +10,7 @@ for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
   test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
 done
 
-MODEL="${OPENROUTER_MODEL:-openrouter/free}"
+MODEL="${OPENROUTER_MODEL:-qwen/qwen3-coder:free}"
 CODEX_PROVIDER="${CODEX_PROVIDER:-openrouter}"
 OPENROUTER_BASE_URL="${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
@@ -20,9 +20,6 @@ test -n "$OPENROUTER_API_KEY" || { echo "OPENROUTER_API_KEY is missing" >&2; exi
 # Codex requires CODEX_HOME to exist before startup. GitHub Actions may export a
 # custom path (for example $HOME/.codex-cardiag) without creating it first.
 mkdir -p "$CODEX_HOME"
-
-# Keep the agent state isolated from any pre-existing Codex configuration while
-# allowing the CLI to create its own config/session files normally.
 chmod 700 "$CODEX_HOME"
 
 echo "AI_AGENT=codex"
@@ -65,6 +62,10 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
+# OpenRouter's free tier is tightly rate-limited. Codex's own automatic retries
+# can turn one provider failure into several quota-consuming requests, so this
+# autonomous run deliberately performs no provider-level retries. The workflow
+# also selects exactly one model per run.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$CODEX_PROVIDER\"" \
@@ -72,8 +73,8 @@ codex exec --ephemeral --color never \
   -c "model_providers.openrouter.base_url=\"$OPENROUTER_BASE_URL\"" \
   -c 'model_providers.openrouter.wire_api="responses"' \
   -c 'model_providers.openrouter.env_key="OPENROUTER_API_KEY"' \
-  -c 'model_providers.openrouter.request_max_retries=2' \
-  -c 'model_providers.openrouter.stream_max_retries=2' \
+  -c 'model_providers.openrouter.request_max_retries=0' \
+  -c 'model_providers.openrouter.stream_max_retries=0' \
   -c 'model_providers.openrouter.supports_websockets=false' \
   -c 'model_providers.openrouter.requires_openai_auth=false' \
   --sandbox danger-full-access \
