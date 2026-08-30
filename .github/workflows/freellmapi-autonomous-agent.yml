@@ -1,9 +1,16 @@
 name: CarDiag FreeLLMAPI Agent
 
-on: push
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: cardiag-freellmapi-agent
+  cancel-in-progress: false
 
 jobs:
   agent:
@@ -54,32 +61,39 @@ jobs:
           cd /tmp/freellmapi
           npm ci
           export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
-          export PORT=3001
+          export PORT="$FREELLMAPI_PORT"
           npm run dev >/tmp/freellmapi.log 2>&1 &
           echo $! >/tmp/freellmapi.pid
-          for i in $(seq 1 90); do curl -fsS http://127.0.0.1:3001/health >/tmp/health.json 2>/dev/null && break; sleep 2; done
+          for i in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/health" >/tmp/health.json 2>/dev/null; then break; fi
+            sleep 2
+          done
           test -s /tmp/health.json || { cat /tmp/freellmapi.log >&2; exit 20; }
-          curl -fsS http://127.0.0.1:3001/v1/models >/tmp/models.json
+          curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/models.json')); items=d.get('data',[])
+          d=json.load(open('/tmp/models.json'))
+          items=d.get('data',[])
           print('FREELLMAPI_MODELS=',len(items))
-          assert items
+          assert items, 'No models returned by FreeLLMAPI'
           PY
 
       - name: Keyless tool probe
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import json,urllib.request
-          b={'model':'','messages':[{'role':'user','content':'Call the tool.'}],'tools':[{'type':'function','function':{'name':'probe','parameters':{'type':'object','properties':{}}}}],'tool_choice':'required'}
+          b={'model':'','messages':[{'role':'user','content':'Call the tool.'}],'tools':[{'type':'function','function':{'name':'probe','description':'Probe tool calling.','parameters':{'type':'object','properties':{}}}}],'tool_choice':'required'}
           r=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(b).encode(),headers={'Content-Type':'application/json'})
           with urllib.request.urlopen(r,timeout=120) as x:d=json.load(x)
-          assert d['choices'][0]['message'].get('tool_calls')
+          calls=d['choices'][0]['message'].get('tool_calls') or []
+          assert calls, d
           print('FREELLMAPI_KEYLESS_TOOL_CALLING_SUCCESS')
           PY
 
       - name: Keyless proxy
         run: |
+          set -euo pipefail
           cat >/tmp/proxy.py <<'PY'
           from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
           from urllib.request import Request,urlopen
@@ -91,27 +105,37 @@ jobs:
               h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
               try:
                 with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=180) as r:
-                  b=r.read(); self.send_response(r.status); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
-              except Exception as e: self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
+                  b=r.read(); self.send_response(r.status)
+                  for k,v in r.headers.items():
+                    if k.lower() not in ('transfer-encoding','content-length','connection'): self.send_header(k,v)
+                  self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
+              except Exception as e:
+                self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
             def log_message(self,*a): pass
           ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
           PY
-          nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
+          nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 &
+          echo $! >/tmp/proxy.pid
           sleep 1
           curl -fsS http://127.0.0.1:3002/health >/dev/null
 
-      - name: Aider
+      - name: Aider autonomous cycle
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           python3 - <<'PY'
           import json
-          ids=[x.get('id','') for x in json.load(open('/tmp/models.json')).get('data',[])]
-          for n in ('coder','coding','devstral','codestral','qwen','deepseek','kimi'):
-            hit=next((x for x in ids if n in x.lower()),None)
-            if hit: open('/tmp/model','w').write(hit); break
-          else: open('/tmp/model','w').write(ids[0])
+          ids=[str(x.get('id','')) for x in json.load(open('/tmp/models.json')).get('data',[]) if x.get('id')]
+          assert ids
+          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
+          for needle in priority:
+            hit=next((x for x in ids if needle in x.lower()),None)
+            if hit:
+              open('/tmp/model','w').write(hit)
+              break
+          else:
+            open('/tmp/model','w').write(ids[0])
           print('MODEL=',open('/tmp/model').read())
           PY
           export FREELLMAPI_MODEL="$(cat /tmp/model)"
@@ -120,14 +144,18 @@ jobs:
 
       - name: Android validation
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
       - name: Scope
         run: |
           set -euo pipefail
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
-android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
-          while IFS= read -r f; do [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || exit 40; done < <(git diff --name-only)
+          android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
+          while IFS= read -r f; do
+            [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }
+          done < <(git diff --name-only)
 
       - name: Commit
         run: |
@@ -135,7 +163,7 @@ android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
-          git diff --cached --quiet && exit 41
+          git diff --cached --quiet && { echo 'No validated code change'; exit 41; }
           git commit -m 'feat(road): add live nearby service provider'
           git push origin HEAD:main
 
@@ -149,9 +177,10 @@ android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
             android/app/build/outputs/bundle/release/*.aab
             agent-state.md
           if-no-files-found: warn
+          retention-days: 14
 
       - name: Stop
         if: always()
         run: |
-          kill "$(cat /tmp/proxy.pid)" 2>/dev/null || true
-          kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true
+          if [ -f /tmp/proxy.pid ]; then kill "$(cat /tmp/proxy.pid)" 2>/dev/null || true; fi
+          if [ -f /tmp/freellmapi.pid ]; then kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true; fi
