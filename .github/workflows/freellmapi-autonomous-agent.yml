@@ -64,12 +64,14 @@ jobs:
           export PORT="$FREELLMAPI_PORT"
           npm run dev >/tmp/freellmapi.log 2>&1 &
           echo $! >/tmp/freellmapi.pid
+          rm -f /tmp/models.json
           for i in $(seq 1 90); do
-            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/health" >/tmp/health.json 2>/dev/null; then break; fi
+            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null; then
+              break
+            fi
             sleep 2
           done
-          test -s /tmp/health.json || { cat /tmp/freellmapi.log >&2; exit 20; }
-          curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json
+          test -s /tmp/models.json || { cat /tmp/freellmapi.log >&2; exit 20; }
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/models.json'))
@@ -83,12 +85,27 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json,urllib.request
-          b={'model':'','messages':[{'role':'user','content':'Call the tool.'}],'tools':[{'type':'function','function':{'name':'probe','description':'Probe tool calling.','parameters':{'type':'object','properties':{}}}}],'tool_choice':'required'}
-          r=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(b).encode(),headers={'Content-Type':'application/json'})
-          with urllib.request.urlopen(r,timeout=120) as x:d=json.load(x)
-          calls=d['choices'][0]['message'].get('tool_calls') or []
-          assert calls, d
-          print('FREELLMAPI_KEYLESS_TOOL_CALLING_SUCCESS')
+          models=json.load(open('/tmp/models.json')).get('data',[])
+          ids=[m.get('id') for m in models if m.get('id')]
+          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
+          candidates=[]
+          for p in priority:
+            candidates += [x for x in ids if p in x.lower() and x not in candidates]
+          candidates += [x for x in ids if x not in candidates]
+          last=None
+          for model in candidates[:10]:
+            b={'model':model,'messages':[{'role':'user','content':'Call the tool.'}],'tools':[{'type':'function','function':{'name':'probe','description':'Probe tool calling.','parameters':{'type':'object','properties':{}}}}],'tool_choice':'required'}
+            try:
+              r=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(b).encode(),headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(r,timeout=120) as x:d=json.load(x)
+              calls=d['choices'][0]['message'].get('tool_calls') or []
+              if calls:
+                open('/tmp/model','w').write(model)
+                print('FREELLMAPI_KEYLESS_TOOL_CALLING_SUCCESS',model)
+                break
+            except Exception as e: last=e
+          else:
+            raise SystemExit(f'No model passed tool calling. Last error: {last}')
           PY
 
       - name: Keyless proxy
@@ -117,27 +134,13 @@ jobs:
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 &
           echo $! >/tmp/proxy.pid
           sleep 1
-          curl -fsS http://127.0.0.1:3002/health >/dev/null
+          curl -fsS http://127.0.0.1:3002/v1/models >/dev/null
 
       - name: Aider autonomous cycle
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          python3 - <<'PY'
-          import json
-          ids=[str(x.get('id','')) for x in json.load(open('/tmp/models.json')).get('data',[]) if x.get('id')]
-          assert ids
-          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
-          for needle in priority:
-            hit=next((x for x in ids if needle in x.lower()),None)
-            if hit:
-              open('/tmp/model','w').write(hit)
-              break
-          else:
-            open('/tmp/model','w').write(ids[0])
-          print('MODEL=',open('/tmp/model').read())
-          PY
           export FREELLMAPI_MODEL="$(cat /tmp/model)"
           chmod +x scripts/autonomous-agent.sh
           ./scripts/autonomous-agent.sh
