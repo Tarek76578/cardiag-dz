@@ -11,10 +11,10 @@ for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
 done
 
 PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-groq}}"
-MODEL="${AI_MODEL:-groq/auto}"
+MODEL="${AI_MODEL:-groq/compound-mini}"
 BASE_URL="${CODEX_BASE_URL:-https://api.groq.com/openai/v1}"
 ENV_KEY="${CODEX_ENV_KEY:-GROQ_API_KEY}"
-WIRE_API="responses"
+WIRE_API="${CODEX_WIRE_API:-chat}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
@@ -28,6 +28,11 @@ case "$PROVIDER" in
     echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses Groq only." >&2
     exit 14
     ;;
+esac
+
+case "$WIRE_API" in
+  chat|responses) ;;
+  *) echo "Unsupported CODEX_WIRE_API=$WIRE_API" >&2; exit 15 ;;
 esac
 
 echo "AI_AGENT=codex"
