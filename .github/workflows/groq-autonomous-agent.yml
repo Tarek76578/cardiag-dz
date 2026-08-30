@@ -28,12 +28,6 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
-            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
-            rm -rf .codex/.tmp/plugins
-            git commit -m 'chore: remove invalid codex plugins gitlink'
-            git push origin HEAD:main
-          fi
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
@@ -76,7 +70,7 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Discover available Groq model
+      - name: Discover and probe Groq models
         id: provider
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -95,48 +89,65 @@ jobs:
             *) echo "GROQ_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
           esac
 
-          MODEL_LIST="$response" python3 <<'PY'
+          MODEL_LIST="$response" python3 <<'PY' > /tmp/groq-candidates.txt
           import json, os
-          models = json.loads(os.environ["MODEL_LIST"]).get("data", [])
-          available = {m.get("id") for m in models if m.get("id")}
-
-          # Prefer fast coding-capable Llama models. If the account does not expose
-          # them, choose another active non-Compound text model returned by Groq.
-          preferred = [
-              "llama-3.3-70b-versatile",
-              "llama-3.1-8b-instant",
-          ]
-          excluded_prefixes = ("groq/compound",)
-          selected = next((m for m in preferred if m in available), None)
-          if selected is None:
-              candidates = sorted(
-                  m for m in available
-                  if not m.startswith(excluded_prefixes)
-                  and "whisper" not in m.lower()
-                  and "tts" not in m.lower()
-                  and "guard" not in m.lower()
-                  and "safeguard" not in m.lower()
-              )
-              if candidates:
-                  selected = candidates[0]
-
-          if not selected:
-              print("GROQ_NO_CODE_MODEL_AVAILABLE=1")
-              print("GROQ_AVAILABLE_MODELS=" + ",".join(sorted(available)))
-              raise SystemExit(2)
-
-          print(f"GROQ_MODEL_SELECTED={selected}")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write("provider=groq\n")
-              f.write(f"model={selected}\n")
-              f.write("base_url=https://api.groq.com/openai/v1\n")
-              f.write("env_key=GROQ_API_KEY\n")
-              f.write("wire_api=responses\n")
+          data=json.loads(os.environ["MODEL_LIST"])
+          models=data.get("data",[])
+          blocked=("whisper","tts","guard","safeguard","compound")
+          preferred=("qwen/","moonshotai/","meta-llama/","llama-","openai/gpt-oss")
+          rows=[]
+          for m in models:
+              mid=m.get("id","")
+              if not mid or any(x in mid.lower() for x in blocked): continue
+              ctx=m.get("context_window",0) or 0
+              rows.append((0 if mid.startswith(preferred) else 1,-ctx,mid))
+          for _,__,mid in sorted(rows): print(mid)
           PY
 
-          echo 'AI_PROVIDER_SELECTED=groq'
-          echo "AI_MODEL_SELECTED=${{ steps.provider.outputs.model }}"
-          echo 'AI_WIRE_API_SELECTED=responses'
+          echo '=== GROQ MODELS EXPOSED TO THIS KEY ==='
+          cat /tmp/groq-candidates.txt
+
+          selected=''
+          while IFS= read -r model; do
+            [ -n "$model" ] || continue
+            echo "=== REAL GROQ INFERENCE PROBE: $model ==="
+            payload="$(MODEL="$model" python3 - <<'PY'
+          import json,os
+          print(json.dumps({"model":os.environ["MODEL"],"messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"temperature":0}))
+          PY
+            )"
+            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
+              -H "Authorization: Bearer $GROQ_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -d "$payload" \
+              "$GROQ_BASE_URL/chat/completions")" || true
+            code="$(printf '%s\n' "$probe" | tail -n1)"
+            resp="$(printf '%s\n' "$probe" | sed '$d')"
+            echo "GROQ_PROBE_HTTP=$code MODEL=$model"
+            if [ "$code" = 200 ]; then
+              selected="$model"
+              break
+            fi
+            if [ "$code" = 429 ]; then
+              echo "GROQ_PROBE_429_MODEL=$model"
+            else
+              printf '%s\n' "$resp" | head -c 400 || true
+              echo
+            fi
+          done < /tmp/groq-candidates.txt
+
+          if [ -z "$selected" ]; then
+            echo 'GROQ_NO_MODEL_PASSED_REAL_INFERENCE=1' >&2
+            exit 43
+          fi
+          echo "GROQ_MODEL_SELECTED=$selected"
+          {
+            echo 'provider=groq'
+            echo "model=$selected"
+            echo "base_url=$GROQ_BASE_URL"
+            echo 'env_key=GROQ_API_KEY'
+            echo 'wire_api=responses'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Autonomous Codex agent
         env:
