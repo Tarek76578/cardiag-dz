@@ -23,13 +23,11 @@ env:
 jobs:
   agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Repair invalid codex gitlink
+        with: {fetch-depth: 0}
+      - name: Repair and normalize git state
         run: |
           set -euo pipefail
           if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
@@ -39,99 +37,61 @@ jobs:
             rm -rf .codex/.tmp/plugins
             git commit -m 'chore: remove invalid codex plugins gitlink'
             git push origin HEAD:main
-            git fetch origin main
-            git reset --hard origin/main
-            git clean -fdx
           fi
-
-      - name: Clean runtime files
-        run: |
-          set -euo pipefail
-          rm -rf .codex/.tmp/plugins 2>/dev/null || true
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
           git update-index --assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
-
       - name: Baseline
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
-          test -f AGENTS.md
-          test -f android/gradlew
-          test -f android/app/build.gradle.kts
-          test -f docs/agent-next-task.md
+          test -f AGENTS.md && test -f android/gradlew && test -f android/app/build.gradle.kts && test -f docs/agent-next-task.md
           test -z "$(git status --porcelain)"
-
       - name: Java
         uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-
+        with: {distribution: temurin, java-version: '17', cache: gradle}
       - name: Android
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
           accept-android-sdk-licenses: true
-
       - name: Node
         uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-
+        with: {node-version: '22'}
       - name: Start FreeLLMAPI
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git /tmp/freellmapi
           cd /tmp/freellmapi
           npm ci
-          export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
-          export PORT="$FREELLMAPI_PORT"
+          export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" PORT="$FREELLMAPI_PORT"
           npm run dev >/tmp/freellmapi.log 2>&1 & echo $! >/tmp/freellmapi.pid
-          for i in $(seq 1 90); do
-            curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null && break
-            sleep 2
-          done
-          test -s /tmp/models.json || { cat /tmp/freellmapi.log >&2; exit 20; }
+          for i in $(seq 1 45); do curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null && break; sleep 2; done
+          test -s /tmp/models.json || { tail -n 100 /tmp/freellmapi.log; exit 20; }
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/models.json'))
-          assert d.get('data'), 'No models returned by FreeLLMAPI'
-          print('FREELLMAPI_MODELS=',len(d['data']))
+          d=json.load(open('/tmp/models.json')); print('FREELLMAPI_MODELS=',len(d.get('data',[]))); assert d.get('data')
           PY
-          DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"
-          test -n "$DB_PATH" || exit 21
+          DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"; test -n "$DB_PATH"
           GATEWAY_KEY="$(DB_PATH="$DB_PATH" node - <<'NODE'
-          const Database=require('/tmp/freellmapi/node_modules/better-sqlite3');
-          const db=new Database(process.env.DB_PATH,{readonly:true});
-          const rows=db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all();
-          const c=rows.map(r=>String(r.value||'').trim()).filter(v=>v.length>=20&&!/^your-/i.test(v));
-          if(!c.length)process.exit(2); process.stdout.write(c.sort((a,b)=>b.length-a.length)[0]);
+          const Database=require('/tmp/freellmapi/node_modules/better-sqlite3'); const db=new Database(process.env.DB_PATH,{readonly:true});
+          const rows=db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all(); const c=rows.map(r=>String(r.value||'').trim()).filter(v=>v.length>=20&&!/^your-/i.test(v)); if(!c.length)process.exit(2); process.stdout.write(c.sort((a,b)=>b.length-a.length)[0]);
           NODE
-          )" || { echo 'FreeLLMAPI unified API key not found'; exit 22; }
-          test "${#GATEWAY_KEY}" -ge 20
-          echo "::add-mask::$GATEWAY_KEY"
-          echo "GATEWAY_KEY=$GATEWAY_KEY" >> "$GITHUB_ENV"
-          echo 'FREELLMAPI_AUTH_KEY_RESOLVED=true'
-
-      - name: Build ordered free model list
+          )"
+          test "${#GATEWAY_KEY}" -ge 20; echo "::add-mask::$GATEWAY_KEY"; echo "GATEWAY_KEY=$GATEWAY_KEY" >> "$GITHUB_ENV"
+      - name: Build free-model list
         run: |
           python3 - <<'PY'
           import json
           ids=[m['id'] for m in json.load(open('/tmp/models.json')).get('data',[]) if m.get('id')]
-          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','gemma','llama')
+          p=('coder','coding','devstral','codestral','qwen','deepseek','kimi','gemma','llama')
           out=[]
-          for p in priority:
-            for x in ids:
-              if p in x.lower() and x not in out: out.append(x)
-          for x in ids:
-            if x not in out: out.append(x)
-          open('/tmp/model-candidates','w').write('\n'.join(out))
-          print('FREE_MODEL_CANDIDATES=',len(out))
+          for k in p:
+            out += [x for x in ids if k in x.lower() and x not in out]
+          open('/tmp/model-candidates','w').write('\n'.join(out[:8]))
+          print('FREE_MODEL_CANDIDATES=',len(out[:8]))
           PY
-
       - name: Local OpenAI proxy
         run: |
           cat >/tmp/proxy.py <<'PY'
@@ -143,94 +103,55 @@ jobs:
             def do_GET(self): self.p()
             def do_POST(self): self.p()
             def p(self):
-              n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None
-              h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}; h['Authorization']='Bearer '+KEY
+              n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None; h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}; h['Authorization']='Bearer '+KEY
               try:
-                with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=180) as r:
-                  b=r.read(); self.send_response(r.status)
-                  for k,v in r.headers.items():
-                    if k.lower() not in ('transfer-encoding','content-length','connection'): self.send_header(k,v)
-                  self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
-              except Exception as e:
-                self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
+                with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=90) as r:
+                  b=r.read(); self.send_response(r.status); [self.send_header(k,v) for k,v in r.headers.items() if k.lower() not in ('transfer-encoding','content-length','connection')]; self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
+              except Exception as e: self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
             def log_message(self,*a): pass
           ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
           PY
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
-          sleep 1
-
-      - name: Autonomous agent with build-gated free-model fallback
+      - name: Agent with fast build-gated fallback
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           chmod +x scripts/autonomous-agent.sh
           export OPENAI_API_KEY="$GATEWAY_KEY"
-          export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md
-          export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
-          export AIDER_LLM_HISTORY_FILE=/tmp/cardiag-aider-llm-history
-          export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
+          export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history AIDER_LLM_HISTORY_FILE=/tmp/cardiag-aider-llm-history AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
           success=0
           while IFS= read -r model; do
             [ -n "$model" ] || continue
             echo "=== TRYING FREE MODEL: $model ==="
-            export FREELLMAPI_MODEL="$model"
-            export AIDER_MODEL="openai/$model"
-            rm -rf "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history /tmp/cardiag-aider-llm-history
+            export FREELLMAPI_MODEL="$model" AIDER_MODEL="openai/$model"
+            rm -rf .aider* "$AIDER_CACHE_DIR" /tmp/cardiag-aider-*
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-            set +e
-            ./scripts/autonomous-agent.sh
-            agent_status=$?
-            set -e
-            if [ "$agent_status" -ne 0 ]; then
-              echo "FREE_MODEL_FAILED=$model stage=aider status=$agent_status"
-              git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-              sleep 5
-              continue
-            fi
+            set +e; timeout 180 ./scripts/autonomous-agent.sh; agent_status=$?; set -e
+            if [ "$agent_status" -ne 0 ]; then echo "FREE_MODEL_FAILED=$model stage=aider status=$agent_status"; git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true; continue; fi
             echo "FREE_MODEL_AIDER_SUCCESS=$model"
-            set +e
-            (cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace)
-            build_status=$?
-            set -e
-            if [ "$build_status" -eq 0 ]; then
-              echo "FREE_MODEL_BUILD_SUCCESS=$model"
-              success=1
-              break
-            fi
+            set +e; timeout 180 (cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace); build_status=$?; set -e
+            if [ "$build_status" -eq 0 ]; then echo "FREE_MODEL_BUILD_SUCCESS=$model"; success=1; break; fi
             echo "FREE_MODEL_FAILED=$model stage=android-build status=$build_status"
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-            rm -rf "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history /tmp/cardiag-aider-llm-history
-            sleep 5
           done < /tmp/model-candidates
-          [ "$success" -eq 1 ] || { echo 'No free model produced build-valid CarDiag code'; exit 1; }
-
-      - name: Final Android validation
+          [ "$success" -eq 1 ] || exit 1
+      - name: Final validation
         working-directory: android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
-
-      - name: Scope and cleanup
+        run: timeout 240 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+      - name: Scope and commit
         run: |
           set -euo pipefail
           git update-index --no-assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
           git restore -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
-          rm -rf .codex/.tmp/plugins 2>/dev/null || true
+          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
           android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
-          while IFS= read -r f; do
-            [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }
-          done < <(git diff --name-only)
-
-      - name: Commit validated code
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          while IFS= read -r f; do [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }; done < <(git diff --name-only)
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
           git diff --cached --quiet && { echo 'No validated code change'; exit 41; }
-          git commit -m 'feat(road): autonomous agent improvement'
-          git push origin HEAD:main
-
+          git commit -m 'feat(road): autonomous agent improvement'; git push origin HEAD:main
       - name: Artifacts
         if: always()
         uses: actions/upload-artifact@v6
@@ -242,13 +163,6 @@ jobs:
             agent-state.md
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Diagnostics
-        if: failure()
-        run: |
-          tail -n 200 /tmp/freellmapi.log 2>/dev/null || true
-          tail -n 100 /tmp/proxy.log 2>/dev/null || true
-
       - name: Stop
         if: always()
         run: |
