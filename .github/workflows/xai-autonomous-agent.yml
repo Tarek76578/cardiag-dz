@@ -1,4 +1,4 @@
-name: CarDiag Autonomous Agent (xAI Grok)
+name: CarDiag Autonomous Agent (Grok)
 
 on:
   workflow_dispatch:
@@ -48,7 +48,7 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f scripts/autonomous-agent.sh
-          test -n "${{ secrets.XAI_API_KEY }}"
+          test -n "${{ secrets.GROK_API_KEY }}"
           test -z "$(git status --porcelain)"
 
       - name: Java
@@ -77,14 +77,14 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Verify xAI Grok provider
+      - name: Verify Grok provider
         id: provider
         env:
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
         run: |
           set -euo pipefail
           models_json="$(curl -fsS --max-time 20 \
-            -H "Authorization: Bearer $XAI_API_KEY" \
+            -H "Authorization: Bearer $GROK_API_KEY" \
             -H 'Content-Type: application/json' \
             "$XAI_BASE_URL/models")"
           XAI_MODELS_JSON="$models_json" python3 - "$XAI_MODEL" <<'PY'
@@ -93,22 +93,22 @@ jobs:
           data = json.loads(os.environ['XAI_MODELS_JSON'])
           ids = {item.get('id') for item in data.get('data', [])}
           if wanted not in ids:
-              print(f'XAI_MODEL_UNAVAILABLE={wanted}', file=sys.stderr)
+              print(f'GROK_MODEL_UNAVAILABLE={wanted}', file=sys.stderr)
               raise SystemExit(2)
-          print(f'XAI_MODEL_AVAILABLE={wanted}')
+          print(f'GROK_MODEL_AVAILABLE={wanted}')
           PY
           echo 'provider=xai' >> "$GITHUB_OUTPUT"
           echo "model=$XAI_MODEL" >> "$GITHUB_OUTPUT"
           echo "base_url=$XAI_BASE_URL" >> "$GITHUB_OUTPUT"
-          echo 'env_key=XAI_API_KEY' >> "$GITHUB_OUTPUT"
+          echo 'env_key=GROK_API_KEY' >> "$GITHUB_OUTPUT"
           echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
-          echo 'AI_PROVIDER_SELECTED=xai'
+          echo 'AI_PROVIDER_SELECTED=grok'
           echo "AI_MODEL_SELECTED=$XAI_MODEL"
           echo 'AI_WIRE_API_SELECTED=responses'
 
       - name: Autonomous Codex agent
         env:
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_MODEL: ${{ steps.provider.outputs.model }}
