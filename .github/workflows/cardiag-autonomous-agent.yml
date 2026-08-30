@@ -73,7 +73,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
-          cache: npm
 
       - name: Start FreeLLMAPI-Extended gateway
         working-directory: /tmp
@@ -136,7 +135,6 @@ jobs:
           cat >/tmp/keyless_proxy.py <<'PY'
           from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
           from urllib.request import Request, urlopen
-          import os
           UP='http://127.0.0.1:3001'
           class H(BaseHTTPRequestHandler):
               def do_POST(self): self.proxy()
@@ -196,7 +194,6 @@ jobs:
           AI_PROVIDER: freellmapi
           OPENAI_API_BASE: http://127.0.0.1:3002/v1
           OPENAI_API_KEY: keyless-local-gateway
-          AIDER_MODEL: openai/${{ env.FREELLMAPI_MODEL }}
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
