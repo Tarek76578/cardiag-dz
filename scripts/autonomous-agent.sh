@@ -23,10 +23,14 @@ case "$PROVIDER" in
   openrouter)
     export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
     test -n "$OPENROUTER_API_KEY" || { echo "OPENROUTER_API_KEY is missing" >&2; exit 13; }
+    WIRE_API="responses"
     ;;
   groq)
     export GROQ_API_KEY="${GROQ_API_KEY:-}"
     test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; }
+    # Codex CLI 0.151+ only accepts Responses for custom model providers.
+    # Groq currently exposes an OpenAI-compatible Responses endpoint.
+    WIRE_API="responses"
     ;;
   *)
     echo "Unsupported CODEX_PROVIDER=$PROVIDER" >&2
@@ -76,11 +80,8 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
-# Exactly one provider is selected by the workflow. Codex retries are disabled so
-# a rate-limit response cannot fan out into repeated quota-consuming requests.
-# Groq is configured with Chat Completions because Codex's Responses request body
-# can contain OpenAI-specific fields that Groq rejects with HTTP 400. Groq documents
-# Chat Completions as OpenAI-compatible and supports tool use for GPT-OSS models.
+# Codex CLI 0.151+ rejects the legacy chat wire_api for custom providers.
+# Use Responses for both providers; Groq exposes an OpenAI-compatible Responses API.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
