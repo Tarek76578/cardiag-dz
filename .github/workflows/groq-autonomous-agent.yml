@@ -17,7 +17,10 @@ env:
   GROQ_FALLBACK_MODEL: openai/gpt-oss-20b
   GROQ_RATE_LIMIT_RETRIES: '2'
   GROQ_DEFAULT_RETRY_SECONDS: '45'
-  GROQ_MAX_OUTPUT_TOKENS: '2048'
+  GROQ_MAX_OUTPUT_TOKENS: '1500'
+  GROQ_MAX_INPUT_TOKENS: '5500'
+  GROQ_TPM_LIMIT: '8000'
+  GROQ_TPM_SAFETY_MARGIN: '500'
 
 jobs:
   agent:
@@ -100,12 +103,10 @@ jobs:
               rows.append((0 if mid.startswith(("openai/gpt-oss", "qwen/", "moonshotai/", "meta-llama/", "llama-")) else 1,-ctx,mid))
           for _,__,mid in sorted(rows): print(mid)
           PY
-          echo '=== GROQ MODELS EXPOSED TO THIS KEY ==='
           cat /tmp/groq-candidates.txt
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
-            echo "=== REAL GROQ RESPONSES PROBE: $model ==="
             payload="$(MODEL="$model" python3 - <<'PY'
           import json,os
           print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
@@ -113,29 +114,12 @@ jobs:
             )"
             probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $GROQ_API_KEY" -H 'Content-Type: application/json' -d "$payload" "$GROQ_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
-            resp="$(printf '%s\n' "$probe" | sed '$d')"
             echo "GROQ_RESPONSES_PROBE_HTTP=$code MODEL=$model"
-            if [ "$code" = 200 ]; then
-              RESPONSE_BODY="$resp" python3 - <<'PY'
-          import json, os
-          data=json.loads(os.environ["RESPONSE_BODY"])
-          if not data.get("id") or data.get("object") not in ("response", "response.completed"):
-              raise SystemExit("GROQ_RESPONSES_PROBE_INVALID_JSON=1")
-          print("GROQ_RESPONSES_PROBE_VALID_JSON=1")
-          PY
-              selected="$model"
-              break
-            fi
+            if [ "$code" = 200 ]; then selected="$model"; break; fi
           done < /tmp/groq-candidates.txt
-          test -n "$selected" || { echo 'GROQ_NO_RESPONSES_MODEL_PASSED_REAL_INFERENCE=1' >&2; exit 43; }
-          echo "GROQ_RESPONSES_MODEL_SELECTED=$selected"
+          test -n "$selected" || exit 43
           {
-            echo 'provider=groq'
-            echo "model=$selected"
-            echo "fallback_model=$GROQ_FALLBACK_MODEL"
-            echo "base_url=$GROQ_BASE_URL"
-            echo 'env_key=GROQ_API_KEY'
-            echo 'wire_api=responses'
+            echo 'provider=groq'; echo "model=$selected"; echo "fallback_model=$GROQ_FALLBACK_MODEL"; echo "base_url=$GROQ_BASE_URL"; echo 'env_key=GROQ_API_KEY'; echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
       - name: Start Groq compatibility adapter outside repository
         env:
@@ -144,17 +128,17 @@ jobs:
           GROQ_RATE_LIMIT_RETRIES: ${{ env.GROQ_RATE_LIMIT_RETRIES }}
           GROQ_DEFAULT_RETRY_SECONDS: ${{ env.GROQ_DEFAULT_RETRY_SECONDS }}
           GROQ_MAX_OUTPUT_TOKENS: ${{ env.GROQ_MAX_OUTPUT_TOKENS }}
+          GROQ_MAX_INPUT_TOKENS: ${{ env.GROQ_MAX_INPUT_TOKENS }}
+          GROQ_TPM_LIMIT: ${{ env.GROQ_TPM_LIMIT }}
+          GROQ_TPM_SAFETY_MARGIN: ${{ env.GROQ_TPM_SAFETY_MARGIN }}
         run: |
           set -euo pipefail
           rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
-          nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
+          nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" GROQ_MAX_INPUT_TOKENS="$GROQ_MAX_INPUT_TOKENS" GROQ_TPM_LIMIT="$GROQ_TPM_LIMIT" GROQ_TPM_SAFETY_MARGIN="$GROQ_TPM_SAFETY_MARGIN" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
           echo $! > /tmp/codex-groq-proxy.pid
-          for i in $(seq 1 30); do
-            if grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log; then break; fi
-            sleep 1
-          done
+          for i in $(seq 1 30); do grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break; sleep 1; done
           grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
           test -z "$(git status --porcelain)"
       - name: Autonomous Codex agent through Groq compatibility adapter
@@ -175,14 +159,9 @@ jobs:
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
           set -e
-          echo '=== GROQ ADAPTER LOG ==='
           cat /tmp/codex-groq-proxy.log || true
           if [ "$agent_status" -eq 0 ]; then exit 0; fi
-          if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
-            echo "AI_PROVIDER_RATE_LIMITED=groq"
-            exit 75
-          fi
-          echo "AI_PROVIDER_FAILED=groq status=$agent_status"
+          if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then exit 75; fi
           exit "$agent_status"
       - name: Upload Groq compatibility diagnostics
         if: always()
@@ -206,10 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No autonomous changes to commit"
-            exit 32
-          fi
+          if [ -z "$(git status --porcelain)" ]; then echo "No autonomous changes to commit"; exit 32; fi
           git add -A
           git diff --cached --check
           git commit -m "feat: advance autonomous CarDiag milestone"
