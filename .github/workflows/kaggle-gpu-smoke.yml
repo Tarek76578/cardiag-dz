@@ -14,18 +14,19 @@ concurrency:
   group: cardiag-kaggle-gpu-smoke
   cancel-in-progress: true
 
+env:
+  KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+  KAGGLE_GPU_MACHINE: NvidiaTeslaT4
+
 jobs:
   kaggle-gpu-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-      KAGGLE_GPU_MACHINE: NvidiaTeslaT4
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Validate Kaggle credential without exposing it
+      - name: Install and validate Kaggle CLI
         run: |
           set -euo pipefail
           test -n "${KAGGLE_API_TOKEN:-}"
@@ -38,6 +39,7 @@ jobs:
           print("KAGGLE_TOKEN_PRESENT=1")
           print("KAGGLE_TOKEN_LENGTH_CLASS=" + ("short" if len(token) < 40 else "normal"))
           PY
+          kaggle kernels push --help | grep -E -- '--accelerator|--acc' || true
 
       - name: Check Kaggle accelerator quota before scheduling
         run: |
@@ -47,7 +49,7 @@ jobs:
           echo "KAGGLE_QUOTA_EXIT=$rc"
           exit 0
 
-      - name: Run verified Kaggle GPU worker with allocation retries
+      - name: Run verified Kaggle T4 worker with explicit accelerator override
         id: gpu
         working-directory: /tmp
         run: |
@@ -93,8 +95,8 @@ jobs:
           print("KERNEL_REF=" + data["id"])
           PY
             ref="$(python3 -c 'import json; print(json.load(open("kernel-metadata.json"))["id"])')"
-            echo "--- attempt $attempt: $ref / $KAGGLE_GPU_MACHINE ---"
-            kaggle kernels push -p .
+            echo "--- attempt $attempt: $ref / metadata=$KAGGLE_GPU_MACHINE / explicit accelerator=$KAGGLE_GPU_MACHINE ---"
+            kaggle kernels push -p . --accelerator "$KAGGLE_GPU_MACHINE"
             final=""
             for i in $(seq 1 48); do
               status="$(kaggle kernels status "$ref" 2>&1 || true)"
@@ -126,7 +128,7 @@ jobs:
 
           echo "final_ref=$final_ref" >> "$GITHUB_OUTPUT"
           if [ "$success" -ne 1 ]; then
-            echo 'No verified CUDA-capable Kaggle worker was obtained after 3 attempts.'
+            echo 'No verified CUDA-capable Kaggle T4 worker was obtained after 3 attempts.'
             exit 1
           fi
           echo 'KAGGLE_GPU_WORKER=OK'
