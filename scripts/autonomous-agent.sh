@@ -9,14 +9,18 @@ AGENTS_FILE="$ROOT/AGENTS.md"
 for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }; done
 
 MODEL="${FREELLMAPI_MODEL:-qwen/qwen3-coder:free}"
-BASE_URL="${FREELLMAPI_BASE_URL:-http://127.0.0.1:3001/v1}"
+CODEX_PROVIDER="${CODEX_PROVIDER:-codex_shim}"
+CODEX_BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 export GATEWAY_KEY="${GATEWAY_KEY:-${OPENAI_API_KEY:-}}"
 test -n "$GATEWAY_KEY" || { echo "GATEWAY_KEY is missing" >&2; exit 13; }
 
 echo "AI_AGENT=codex"
-echo "AI_PROVIDER=freellmapi"
+echo "AI_PROVIDER=freellmapi-via-codex-shim"
 echo "AI_MODEL=$MODEL"
+
+auth_test_headers=( -H "Authorization: Bearer $GATEWAY_KEY" )
+curl -fsS "${CODEX_BASE_URL%/v1}/models" >/tmp/cardiag-codex-shim-models.json
 
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
@@ -38,7 +42,7 @@ $(cat "$STATE_FILE")
 $(cat "$AGENTS_FILE")
 
 --- AUTONOMOUS EXECUTION CONTRACT ---
-You are the CarDiag coding agent running in GitHub Actions through FreeLLMAPI.
+You are the CarDiag coding agent running in GitHub Actions through Codex.
 The task manifest above is the ONLY task. Do not choose another backlog item.
 ONLY these two project files may be edited:
 - android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
@@ -54,14 +58,15 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
-# codex exec is the supported non-interactive entry point; close stdin so CI cannot block.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
-  -c 'model_provider="freellmapi"' \
-  -c "model_providers.freellmapi.base_url=\"$BASE_URL\"" \
-  -c 'model_providers.freellmapi.env_key="GATEWAY_KEY"' \
-  -c 'model_providers.freellmapi.wire_api="chat"' \
-  -c 'model_providers.freellmapi.request_max_retries=0' \
+  -c "model_provider=\"$CODEX_PROVIDER\"" \
+  -c "model_providers.codex_shim.base_url=\"$CODEX_BASE_URL\"" \
+  -c 'model_providers.codex_shim.wire_api="responses"' \
+  -c 'model_providers.codex_shim.request_max_retries=0' \
+  -c 'model_providers.codex_shim.stream_max_retries=0' \
+  -c 'model_providers.codex_shim.supports_websockets=false' \
+  -c 'model_providers.codex_shim.env_key="GATEWAY_KEY"' \
   --sandbox danger-full-access \
   --skip-git-repo-check \
   "$(cat "$PROMPT_FILE")" < /dev/null
