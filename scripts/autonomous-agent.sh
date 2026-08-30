@@ -21,22 +21,27 @@ echo "AI_AGENT=codex"
 echo "AI_PROVIDER=freellmapi-via-codex-shim"
 echo "AI_MODEL=$MODEL"
 
-curl -fsS "${CODEX_BASE_URL%/v1}/models" >/tmp/cardiag-codex-shim-models.json
-python3 - <<'PY'
-import json
-p='/tmp/cardiag-codex-shim-models.json'
-d=json.load(open(p, encoding='utf-8'))
-ids=[m.get('id') for m in d.get('data',[]) if m.get('id')]
-if not ids:
-    raise SystemExit('Codex shim returned no models')
-print('CODEX_SHIM_MODELS=', len(ids))
-PY
+# Do not require a model catalog from the shim. Some shim versions intentionally
+# expose an empty /models catalog while their Responses endpoint is ready.
+SHIM_BASE="${CODEX_BASE_URL%/v1}"
+if curl -fsS --max-time 10 "$SHIM_BASE/health" >/tmp/cardiag-codex-shim-health.json 2>/dev/null; then
+  echo "CODEX_SHIM_HEALTH=ok"
+elif curl -fsS --max-time 10 "$SHIM_BASE/v1/models" >/tmp/cardiag-codex-shim-models.json 2>/dev/null; then
+  echo "CODEX_SHIM_HTTP=ok"
+else
+  echo "Codex shim is not reachable at $SHIM_BASE" >&2
+  exit 14
+fi
+
+echo "CODEX_SHIM_READY=1"
 
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt"
 )
-for file in "${ALLOWED_FILES[@]}"; do test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }; done
+for file in "${ALLOWED_FILES[@]}"; do
+  test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }
+done
 
 test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
 
@@ -68,9 +73,6 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
-# Codex 0.151+ validates provider records strictly; the provider name is mandatory.
-# Pass the complete provider definition on every run so an incomplete CLI override
-# cannot shadow the checked-in configuration.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$CODEX_PROVIDER\"" \
