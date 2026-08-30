@@ -48,7 +48,7 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f scripts/autonomous-agent.sh
-          test -n "${{ secrets.GROK_API_KEY }}"
+          test -n "${{ secrets.GROQ_API_KEY }}"
           test -z "$(git status --porcelain)"
 
       - name: Java
@@ -80,11 +80,11 @@ jobs:
       - name: Verify Grok provider
         id: provider
         env:
-          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
           models_json="$(curl -fsS --max-time 20 \
-            -H "Authorization: Bearer $GROK_API_KEY" \
+            -H "Authorization: Bearer $GROQ_API_KEY" \
             -H 'Content-Type: application/json' \
             "$XAI_BASE_URL/models")"
           XAI_MODELS_JSON="$models_json" python3 - "$XAI_MODEL" <<'PY'
@@ -100,7 +100,7 @@ jobs:
           echo 'provider=xai' >> "$GITHUB_OUTPUT"
           echo "model=$XAI_MODEL" >> "$GITHUB_OUTPUT"
           echo "base_url=$XAI_BASE_URL" >> "$GITHUB_OUTPUT"
-          echo 'env_key=GROK_API_KEY' >> "$GITHUB_OUTPUT"
+          echo 'env_key=GROQ_API_KEY' >> "$GITHUB_OUTPUT"
           echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
           echo 'AI_PROVIDER_SELECTED=grok'
           echo "AI_MODEL_SELECTED=$XAI_MODEL"
@@ -108,7 +108,7 @@ jobs:
 
       - name: Autonomous Codex agent
         env:
-          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_MODEL: ${{ steps.provider.outputs.model }}
