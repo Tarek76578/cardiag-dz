@@ -134,12 +134,7 @@ jobs:
           mkdir -p "$CODEX_HOME"
           success=0
           ROAD_DIR="android/app/src/main/java/dz/cardiag/app/core/road"
-          ALLOWED_ROAD_FILES=(
-            "$ROAD_DIR/RoadAssistantService.kt"
-            "$ROAD_DIR/RoadAssistantProviders.kt"
-          )
           clean_attempt_artifacts() {
-            git restore -- "${ALLOWED_ROAD_FILES[@]}" 2>/dev/null || true
             git clean -fd -- "$ROAD_DIR" 2>/dev/null || true
           }
           while IFS= read -r model; do
