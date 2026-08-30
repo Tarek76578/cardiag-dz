@@ -11,15 +11,47 @@ for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
   test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
 done
 
+AI_PROVIDER="${AI_PROVIDER:-ollama}"
 MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
-OLLAMA_BASE="${OLLAMA_API_BASE:-http://127.0.0.1:11434}"
-export OLLAMA_API_BASE="$OLLAMA_BASE"
-export AIDER_MODEL="ollama_chat/$MODEL"
+
 export AIDER_YES_ALWAYS=true AIDER_AUTO_COMMITS=false AIDER_DIRTY_COMMITS=false
 export AIDER_ANALYTICS=false AIDER_CHECK_UPDATE=false AIDER_STREAM=true AIDER_PRETTY=false
 
-# The task manifest is intentionally executable as policy: these are the only files
-# the model receives in chat. This prevents Aider from constructing a repo-wide map.
+if [ "$AI_PROVIDER" = "freellmapi" ]; then
+  OPENAI_BASE="${OPENAI_API_BASE:-http://127.0.0.1:3002/v1}"
+  MODEL="${FREELLMAPI_MODEL:?FREELLMAPI_MODEL is required}"
+  export OPENAI_API_BASE="$OPENAI_BASE"
+  export OPENAI_API_KEY="${OPENAI_API_KEY:-keyless-local-gateway}"
+  AIDER_MODEL="openai/$MODEL"
+  export AIDER_MODEL
+  echo "AI_PROVIDER=freellmapi"
+  echo "AI_MODEL=$MODEL"
+  curl -fsS "$OPENAI_BASE/models" >/tmp/cardiag-freellmapi-models.json
+  python3 - <<'PY'
+  import json
+  d=json.load(open('/tmp/cardiag-freellmapi-models.json'))
+  ids=[x.get('id') for x in d.get('data',[]) if x.get('id')]
+  if not ids: raise SystemExit('FreeLLMAPI compatibility endpoint returned no models')
+  print('FREELLMAPI_VISIBLE_MODELS=', len(ids))
+  PY
+elif [ "$AI_PROVIDER" = "ollama" ]; then
+  MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
+  OLLAMA_BASE="${OLLAMA_API_BASE:-http://127.0.0.1:11434}"
+  export OLLAMA_API_BASE="$OLLAMA_BASE"
+  AIDER_MODEL="ollama_chat/$MODEL"
+  export AIDER_MODEL
+  command -v ollama >/dev/null || { echo "Ollama is not installed." >&2; exit 20; }
+  curl -fsS "$OLLAMA_BASE/api/tags" >/tmp/cardiag-ollama-tags.json || { echo "Ollama server is not reachable." >&2; exit 22; }
+  grep -q "$MODEL" /tmp/cardiag-ollama-tags.json || { echo "Required Ollama model is not available: $MODEL" >&2; exit 23; }
+  echo "AI_PROVIDER=ollama"
+  echo "AI_MODEL=$MODEL"
+else
+  echo "Unsupported AI_PROVIDER=$AI_PROVIDER" >&2
+  exit 24
+fi
+
+command -v aider >/dev/null || { echo "Aider is not installed." >&2; exit 21; }
+
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt"
@@ -39,11 +71,6 @@ if grep -qE '^.M|^ M|^A |^ D|^D |^R |^C |^\?\?' "$BASELINE_FILE"; then
   exit 12
 fi
 
-command -v ollama >/dev/null || { echo "Ollama is not installed." >&2; exit 20; }
-command -v aider >/dev/null || { echo "Aider is not installed." >&2; exit 21; }
-curl -fsS "$OLLAMA_BASE/api/tags" >/tmp/cardiag-ollama-tags.json || { echo "Ollama server is not reachable." >&2; exit 22; }
-grep -q 'qwen2.5-coder:3b' /tmp/cardiag-ollama-tags.json || { echo "Required Ollama model is not available: $MODEL" >&2; exit 23; }
-
 PROMPT="$(cat "$TASK_FILE")
 
 --- CURRENT AGENT STATE ---
@@ -52,11 +79,11 @@ $(cat "$STATE_FILE")
 --- REPOSITORY RULES ---
 $(cat "$AGENTS_FILE")
 
---- STRICT 3B EXECUTION CONTRACT ---
-You are Qwen2.5-Coder 3B operating as a constrained autonomous coding agent.
+--- AUTONOMOUS EXECUTION CONTRACT ---
+You are the coding model operating through $AI_PROVIDER.
 
 The task manifest above is the ONLY task. Do not choose another backlog item.
-The two paths listed in the manifest are the ONLY files you may edit.
+The two paths listed in the manifest are the ONLY files you may edit in this cycle.
 They are the ONLY project source files supplied to your chat context.
 Do not ask Aider to add, read, or edit any other source/config file.
 Do not create any new file.
@@ -80,14 +107,12 @@ QUALITY GATE:
 "
 printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
 
-echo "AI_PROVIDER=ollama"
-echo "AI_MODEL=$MODEL"
 echo "AGENT_SCOPE=exactly-2-files"
 echo "AGENT_TASK_FILE=$TASK_FILE"
 echo "Starting deterministic autonomous engineering cycle"
 
 aider \
-  --model "ollama_chat/$MODEL" \
+  --model "$AIDER_MODEL" \
   --message-file "$PROMPT_FILE" \
   --yes-always \
   --no-auto-commits \
@@ -100,7 +125,6 @@ aider \
   --no-gitignore \
   "${ALLOWED_FILES[@]}"
 
-# Hard security/quality gate: reject any modification outside the two declared files.
 CHANGED_FILES="$(git diff --name-only && git ls-files --others --exclude-standard)"
 if [ -n "$CHANGED_FILES" ]; then
   while IFS= read -r changed; do
@@ -128,10 +152,9 @@ if git diff --quiet -- "${ALLOWED_FILES[@]}"; then
   exit 32
 fi
 
-# Print a compact audit trail for the workflow log without dumping the whole diff.
 echo "AGENT_CHANGED_FILES:"
 git diff --name-status -- "${ALLOWED_FILES[@]}"
 echo "AGENT_DIFF_STATS:"
 git diff --stat -- "${ALLOWED_FILES[@]}"
-echo "AI_PROVIDER_SUCCESS=ollama/$MODEL"
-echo "Ollama/Aider deterministic autonomous engineering cycle completed successfully."
+echo "AI_PROVIDER_SUCCESS=$AI_PROVIDER/$MODEL"
+echo "FreeLLMAPI/Aider deterministic autonomous engineering cycle completed successfully."
