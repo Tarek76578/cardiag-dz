@@ -15,6 +15,9 @@ env:
   OPENROUTER_MODEL: qwen/qwen3-coder:free
   GROQ_BASE_URL: https://api.groq.com/openai/v1
   GROQ_MODEL: openai/gpt-oss-120b
+  GROQ_WIRE_API: chat
+
+auto_cancel: false
 
 jobs:
   agent:
@@ -49,7 +52,7 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f scripts/autonomous-agent.sh
-          test -n "${{ secrets.OPENROUTER_API_KEY }}"
+          test -n "${{ secrets.GROQ_API_KEY }}" || test -n "${{ secrets.OPENROUTER_API_KEY }}"
           test -z "$(git status --porcelain)"
 
       - name: Java
@@ -90,7 +93,9 @@ jobs:
             echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
             echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
             echo "env_key=GROQ_API_KEY" >> "$GITHUB_OUTPUT"
+            echo "wire_api=$GROQ_WIRE_API" >> "$GITHUB_OUTPUT"
             echo "AI_PROVIDER_SELECTED=groq"
+            echo "AI_WIRE_API_SELECTED=$GROQ_WIRE_API"
             exit 0
           fi
           if [ -n "$OPENROUTER_API_KEY" ]; then
@@ -98,7 +103,9 @@ jobs:
             echo "model=$OPENROUTER_MODEL" >> "$GITHUB_OUTPUT"
             echo "base_url=$OPENROUTER_BASE_URL" >> "$GITHUB_OUTPUT"
             echo "env_key=OPENROUTER_API_KEY" >> "$GITHUB_OUTPUT"
+            echo "wire_api=responses" >> "$GITHUB_OUTPUT"
             echo "AI_PROVIDER_SELECTED=openrouter"
+            echo "AI_WIRE_API_SELECTED=responses"
             echo "AI_PROVIDER_WARNING=GROQ_API_KEY is not configured; OpenRouter remains the last-resort provider"
             exit 0
           fi
@@ -139,12 +146,13 @@ jobs:
           AI_MODEL: ${{ steps.provider.outputs.model }}
           CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
           CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
+          CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL ==="
+          echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: $CODEX_WIRE_API ==="
           set +e
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
