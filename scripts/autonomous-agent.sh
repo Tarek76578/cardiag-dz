@@ -72,11 +72,11 @@ PROMPT_FILE="$(mktemp)"
 cat > "$PROMPT_FILE" <<'EOF'
 Execute ONLY the current Road Assistant milestone.
 
-First read docs/agent-next-task.md, agent-state.md, and the repository rules in AGENTS.md. Then inspect the existing Road Assistant implementation, tests, networking, localization, and conventions.
+Read docs/agent-next-task.md, agent-state.md, and AGENTS.md first. Inspect the existing Road Assistant implementation, tests, networking, localization, and conventions.
 
-Implement the milestone as a minimal production-quality increment. Use the existing Ktor/kotlinx.serialization stack for a real Overpass nearby-service provider. Never invent OSM/business data. Preserve public interfaces, offline fallback semantics, Arabic RTL/French localization, least privilege, bounded timeouts, and no location persistence/background tracking. Do not implement live road hazards.
+Implement only the milestone: a real Overpass nearby-service provider using the existing Ktor/kotlinx.serialization stack. Never invent OSM/business data. Preserve public interfaces, offline fallback semantics, Arabic RTL/French localization, least privilege, bounded timeouts, and no location persistence/background tracking. Do not implement live road hazards.
 
-Add regression tests where appropriate. Run relevant unit tests, lint, debug build, and release validation when feasible; diagnose real failures without weakening tests. Update agent-state.md with actual evidence and remaining blockers. Review the diff for secrets, generated files, regressions, and unrelated changes. Do not commit or push.
+Add appropriate regression tests. Run relevant tests, lint, debug build, and release validation when feasible; diagnose real failures without weakening tests. Update agent-state.md with actual evidence and blockers. Review the diff for secrets, generated files, regressions, and unrelated changes. Do not commit or push.
 EOF
 
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
@@ -93,7 +93,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.stream_max_retries=0" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
-  -c "project_doc_max_bytes=3000" \
+  -c "project_doc_max_bytes=1500" \
   -c "web_search=\"disabled\"" \
   --sandbox danger-full-access \
   --skip-git-repo-check \
