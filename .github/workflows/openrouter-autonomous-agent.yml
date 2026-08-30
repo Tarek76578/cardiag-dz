@@ -2,8 +2,6 @@ name: CarDiag OpenRouter Autonomous Agent
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: write
@@ -18,10 +16,6 @@ env:
 
 jobs:
   agent:
-    # Contents-API commits are authored by github-actions[bot]. Allow our
-    # repair commits to trigger a cycle, but never recurse on the final agent
-    # commit produced below.
-    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'feat: advance autonomous CarDiag milestone'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -106,7 +100,6 @@ jobs:
           print('OPENROUTER_KEY_USAGE=', info.get('usage'))
           print('OPENROUTER_FREE_QUOTA_NOTE=free-model quota is enforced at the model endpoint; do not probe models with completion requests')
           PY
-
           curl -fsS --connect-timeout 10 --max-time 20 \
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
