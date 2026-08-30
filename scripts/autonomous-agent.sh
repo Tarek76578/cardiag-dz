@@ -14,7 +14,7 @@ PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-groq}}"
 MODEL="${AI_MODEL:-groq/compound-mini}"
 BASE_URL="${CODEX_BASE_URL:-https://api.groq.com/openai/v1}"
 ENV_KEY="${CODEX_ENV_KEY:-GROQ_API_KEY}"
-WIRE_API="${CODEX_WIRE_API:-chat}"
+WIRE_API="${CODEX_WIRE_API:-responses}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
@@ -31,8 +31,8 @@ case "$PROVIDER" in
 esac
 
 case "$WIRE_API" in
-  chat|responses) ;;
-  *) echo "Unsupported CODEX_WIRE_API=$WIRE_API" >&2; exit 15 ;;
+  responses) ;;
+  *) echo "Unsupported CODEX_WIRE_API=$WIRE_API; Codex 0.151+ requires responses." >&2; exit 15 ;;
 esac
 
 echo "AI_AGENT=codex"
