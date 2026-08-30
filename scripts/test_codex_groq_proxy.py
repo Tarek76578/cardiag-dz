@@ -18,6 +18,13 @@ def assert_budget(obj):
     return est, total
 
 
+def assert_has_user(obj, expected=None):
+    users = [x for x in obj.get("input", []) if isinstance(x, dict) and x.get("role") == "user"]
+    assert users, "compaction must retain at least one user message"
+    if expected is not None:
+        assert any(expected in str(x.get("content", "")) for x in users), users
+
+
 def run():
     huge = [{"role": "system", "content": "system " * 5000}]
     huge += [{"role": "user", "content": "old " * 3000} for _ in range(8)]
@@ -29,7 +36,9 @@ def run():
     assert est < before
     assert_budget(compacted)
     assert isinstance(compacted["input"], list)
-    assert compacted["input"][-1]["role"] == "user"
+    # The invariant is preserving the latest user request, not requiring user to be the
+    # final Responses item. Codex can legitimately append assistant/tool items afterward.
+    assert_has_user(compacted, "finish this task")
 
     text = {"model": "openai/gpt-oss-120b", "input": "x" * 100000, "max_output_tokens": 800}
     compacted, changed, est, total = mod.enforce_budget(text)
