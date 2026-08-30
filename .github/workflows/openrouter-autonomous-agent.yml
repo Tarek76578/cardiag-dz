@@ -1,4 +1,4 @@
-name: CarDiag OpenRouter Autonomous Agent
+name: CarDiag Autonomous Agent
 
 on:
   workflow_dispatch:
@@ -7,12 +7,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: cardiag-openrouter-agent
+  group: cardiag-autonomous-agent
   cancel-in-progress: false
 
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: qwen/qwen3-coder:free
+  GROQ_BASE_URL: https://api.groq.com/openai/v1
+  GROQ_MODEL: openai/gpt-oss-120b
 
 jobs:
   agent:
@@ -76,12 +78,39 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: OpenRouter quota preflight
+      - name: Select independent provider
+        id: provider
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$GROQ_API_KEY" ]; then
+            echo "provider=groq" >> "$GITHUB_OUTPUT"
+            echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
+            echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
+            echo "env_key=GROQ_API_KEY" >> "$GITHUB_OUTPUT"
+            echo "AI_PROVIDER_SELECTED=groq"
+            exit 0
+          fi
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            echo "provider=openrouter" >> "$GITHUB_OUTPUT"
+            echo "model=$OPENROUTER_MODEL" >> "$GITHUB_OUTPUT"
+            echo "base_url=$OPENROUTER_BASE_URL" >> "$GITHUB_OUTPUT"
+            echo "env_key=OPENROUTER_API_KEY" >> "$GITHUB_OUTPUT"
+            echo "AI_PROVIDER_SELECTED=openrouter"
+            echo "AI_PROVIDER_WARNING=GROQ_API_KEY is not configured; OpenRouter remains the last-resort provider"
+            exit 0
+          fi
+          echo 'No independent AI provider key is configured.' >&2
+          exit 13
+
+      - name: OpenRouter key preflight
+        if: steps.provider.outputs.provider == 'openrouter'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "$OPENROUTER_API_KEY"
           python3 - <<'PY'
           import json, os, sys, urllib.request, urllib.error
           base = os.environ['OPENROUTER_BASE_URL'].rstrip('/')
@@ -98,67 +127,38 @@ jobs:
           print('OPENROUTER_KEY_VALID=1')
           print('OPENROUTER_KEY_LIMIT=', info.get('limit'))
           print('OPENROUTER_KEY_USAGE=', info.get('usage'))
-          print('OPENROUTER_FREE_QUOTA_NOTE=free-model quota is enforced at the model endpoint; do not probe models with completion requests')
-          PY
-          curl -fsS --connect-timeout 10 --max-time 20 \
-            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
-            "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
-
-      - name: Select one tool-capable coding model without quota-burning probes
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          data = json.load(open('/tmp/openrouter-models.json'))
-          models = {str(m.get('id')): m for m in data.get('data', []) if m.get('id')}
-          preferred = [
-              'qwen/qwen3-coder:free',
-              'qwen/qwen3-coder-next:free',
-              'nvidia/nemotron-3-ultra-550b-a55b:free',
-              'google/gemma-4-31b-it:free',
-          ]
-          candidates = []
-          for model_id in preferred:
-              m = models.get(model_id)
-              if not m:
-                  continue
-              params = set(m.get('supported_parameters') or [])
-              if 'tools' in params:
-                  candidates.append(model_id)
-          if not candidates:
-              raise SystemExit('No known free coding model with tool calling is currently listed by OpenRouter')
-          model = candidates[0]
-          open('/tmp/openrouter-model', 'w').write(model + '\n')
-          print('OPENROUTER_AGENT_MODEL=', model)
-          print('OPENROUTER_AGENT_MODEL_SUPPORTS_TOOLS=1')
-          print('OPENROUTER_AGENT_SINGLE_ATTEMPT=1')
+          print('OPENROUTER_NO_INFERENCE_PROBE=1')
           PY
 
       - name: Autonomous Codex agent
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_MODEL: ${{ steps.provider.outputs.model }}
+          CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
-          export OPENROUTER_API_KEY
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          model="$(cat /tmp/openrouter-model)"
-          echo "=== TRYING OPENROUTER AGENT MODEL: $model ==="
+          echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL ==="
           set +e
-          OPENROUTER_MODEL="$model" ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
+          ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
           set -e
           if grep -qE '429 Too Many Requests|free-models-per-day|Rate limit exceeded' /tmp/codex-agent.log; then
-            echo 'OPENROUTER_QUOTA_EXHAUSTED=1'
-            echo 'No fallback model will be attempted; doing so would spend additional free requests.'
+            echo "AI_PROVIDER_RATE_LIMITED=$CODEX_PROVIDER"
+            echo 'Provider was rate-limited; no second provider is attempted inside the same run.'
             exit 75
           fi
           if [ "$agent_status" -ne 0 ]; then
-            echo "OPENROUTER_MODEL_FAILED=$model stage=codex status=$agent_status"
+            echo "AI_PROVIDER_FAILED=$CODEX_PROVIDER status=$agent_status"
             exit "$agent_status"
           fi
-          echo "OPENROUTER_CODEX_SUCCESS=$model"
+          echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
 
       - name: Final validation
         working-directory: android
