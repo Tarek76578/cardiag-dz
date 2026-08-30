@@ -1,5 +1,7 @@
 name: CarDiag Agent
 
+# GitHub workflow-dispatch registration refresh
+
 on:
   workflow_dispatch:
     inputs:
