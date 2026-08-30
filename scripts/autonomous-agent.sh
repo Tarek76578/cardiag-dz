@@ -3,58 +3,33 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-
 TASK_FILE="$ROOT/docs/agent-next-task.md"
 STATE_FILE="$ROOT/agent-state.md"
 AGENTS_FILE="$ROOT/AGENTS.md"
-for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
-  test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
-done
+for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }; done
 
-AI_PROVIDER="${AI_PROVIDER:-freellmapi}"
 MODEL="${FREELLMAPI_MODEL:-qwen/qwen3-coder:free}"
-OPENAI_BASE="${OPENAI_API_BASE:-http://127.0.0.1:3002/v1}"
-export OPENAI_API_BASE="$OPENAI_BASE"
-export OPENAI_API_KEY="${OPENAI_API_KEY:-keyless-local-gateway}"
+BASE_URL="${FREELLMAPI_BASE_URL:-http://127.0.0.1:3001/v1}"
+export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
+export GATEWAY_KEY="${GATEWAY_KEY:-${OPENAI_API_KEY:-}}"
+test -n "$GATEWAY_KEY" || { echo "GATEWAY_KEY is missing" >&2; exit 13; }
 
-if [ "$AI_PROVIDER" != "freellmapi" ]; then
-  echo "This autonomous GitHub agent is configured for FreeLLMAPI only; got AI_PROVIDER=$AI_PROVIDER" >&2
-  exit 20
-fi
-
+echo "AI_AGENT=codex"
 echo "AI_PROVIDER=freellmapi"
 echo "AI_MODEL=$MODEL"
-curl -fsS "$OPENAI_BASE/models" >/tmp/cardiag-freellmapi-models.json
-
-python3 - <<'PY'
-import json
-with open('/tmp/cardiag-freellmapi-models.json', encoding='utf-8') as f:
-    d=json.load(f)
-ids=[x.get('id') for x in d.get('data',[]) if x.get('id')]
-if not ids: raise SystemExit('FreeLLMAPI compatibility endpoint returned no models')
-print('FREELLMAPI_VISIBLE_MODELS=',len(ids))
-PY
 
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt"
 )
-for file in "${ALLOWED_FILES[@]}"; do
-  test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }
-done
+for file in "${ALLOWED_FILES[@]}"; do test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }; done
 
-BASELINE_FILE="$(mktemp)"
+test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
+
 PROMPT_FILE="$(mktemp)"
-trap 'rm -f "$BASELINE_FILE" "$PROMPT_FILE"' EXIT
-
-git status --short > "$BASELINE_FILE"
-if grep -qE '^.M|^ M|^A |^ D|^D |^R |^C |^\?\?' "$BASELINE_FILE"; then
-  echo "Working tree must be clean before the autonomous edit." >&2
-  cat "$BASELINE_FILE" >&2
-  exit 12
-fi
-
-PROMPT="$(cat "$TASK_FILE")
+trap 'rm -f "$PROMPT_FILE"' EXIT
+cat > "$PROMPT_FILE" <<EOF
+$(cat "$TASK_FILE")
 
 --- CURRENT AGENT STATE ---
 $(cat "$STATE_FILE")
@@ -63,75 +38,49 @@ $(cat "$STATE_FILE")
 $(cat "$AGENTS_FILE")
 
 --- AUTONOMOUS EXECUTION CONTRACT ---
-You are the CarDiag coding agent operating through FreeLLMAPI.
-
+You are the CarDiag coding agent running in GitHub Actions through FreeLLMAPI.
 The task manifest above is the ONLY task. Do not choose another backlog item.
-The two paths listed in the manifest are the ONLY files you may edit in this cycle.
-Do not create files or modify any other project file.
+ONLY these two project files may be edited:
+- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
+- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
+Do not create, delete, rename, or modify any other project file. Do not commit or push.
+Implement the acceptance criteria exactly and minimally. Reuse existing dependencies; do not add dependencies.
+Preserve public interfaces and existing behavior unless explicitly required.
+Never fabricate OSM/business data. Only map fields actually returned by the API.
+Use bounded network timeouts and safe failure handling. Do not store location data. Do not implement hazards in this cycle.
+Before finishing, review git diff and leave only intended changes in the two allowed files.
+EOF
 
-IMPLEMENTATION:
-- Inspect only the supplied two files and the task manifest/state/rules.
-- Implement the acceptance criteria exactly and minimally.
-- Reuse dependencies already present in the project; do not add dependencies.
-- Preserve public interfaces and existing behavior unless explicitly required.
-- Never fabricate OSM/business data. Only map fields actually returned by the API.
-- Use bounded network timeouts and safe failure handling.
-- Do not store location data.
-- Do not implement hazards in this cycle.
+command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
+codex --version
 
-QUALITY GATE:
-- Make a small targeted diff.
-- Review the final diff before stopping.
-- Do not commit.
-- If the task cannot be completed safely within the two-file scope, STOP without speculative changes.
-"
-printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
-
-echo "AGENT_SCOPE=exactly-2-files"
-echo "AGENT_TASK_FILE=$TASK_FILE"
-echo "Starting GitHub autonomous engineering cycle"
-
-# GitHub's installed coding agent/CLI is invoked here when available.
-if command -v copilot >/dev/null 2>&1; then
-  copilot --help >/dev/null 2>&1 || true
-  copilot --prompt "$(cat "$PROMPT_FILE")" "${ALLOWED_FILES[@]}"
-elif command -v gh >/dev/null 2>&1 && gh extension list 2>/dev/null | grep -qi 'copilot'; then
-  gh copilot suggest "$(cat "$PROMPT_FILE")"
-else
-  echo "GitHub coding agent CLI is not installed on this runner." >&2
-  echo "Install/enable the repository's GitHub Agent before running this script." >&2
-  exit 21
-fi
+# codex exec is the supported non-interactive entry point; close stdin so CI cannot block.
+codex exec --ephemeral --color never \
+  -c "model=\"$MODEL\"" \
+  -c 'model_provider="freellmapi"' \
+  -c "model_providers.freellmapi.base_url=\"$BASE_URL\"" \
+  -c 'model_providers.freellmapi.env_key="GATEWAY_KEY"' \
+  -c 'model_providers.freellmapi.wire_api="chat"' \
+  -c 'model_providers.freellmapi.request_max_retries=0' \
+  --sandbox danger-full-access \
+  --skip-git-repo-check \
+  "$(cat "$PROMPT_FILE")" < /dev/null
 
 CHANGED_FILES="$(git diff --name-only && git ls-files --others --exclude-standard)"
-if [ -n "$CHANGED_FILES" ]; then
-  while IFS= read -r changed; do
-    [ -z "$changed" ] && continue
-    allowed=0
-    for file in "${ALLOWED_FILES[@]}"; do
-      if [ "$changed" = "$file" ]; then allowed=1; break; fi
-    done
-    if [ "$allowed" -ne 1 ]; then
-      echo "UNAUTHORIZED_FILE_CHANGE=$changed" >&2
-      git diff --name-status >&2 || true
-      exit 30
-    fi
-  done <<< "$CHANGED_FILES"
-fi
+while IFS= read -r changed; do
+  [ -z "$changed" ] && continue
+  case "$changed" in
+    "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"|"android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt") ;;
+    *) echo "UNAUTHORIZED_FILE_CHANGE=$changed" >&2; git diff --name-status >&2 || true; exit 30 ;;
+  esac
+done <<< "$CHANGED_FILES"
 
-if ! git diff --check; then
-  echo "git diff --check failed." >&2
-  exit 31
-fi
-
-if git diff --quiet -- "${ALLOWED_FILES[@]}"; then
-  echo "AGENT_NO_CODE_CHANGE=1"
-  exit 32
-fi
+git diff --check
+if git diff --quiet -- "${ALLOWED_FILES[@]}"; then echo "AGENT_NO_CODE_CHANGE=1"; exit 32; fi
 
 echo "AGENT_CHANGED_FILES:"
 git diff --name-status -- "${ALLOWED_FILES[@]}"
 echo "AGENT_DIFF_STATS:"
 git diff --stat -- "${ALLOWED_FILES[@]}"
-echo "AI_PROVIDER_SUCCESS=$AI_PROVIDER/$MODEL"
-echo "GitHub autonomous engineering cycle completed successfully."
+echo "AI_AGENT_SUCCESS=codex"
+echo "AI_PROVIDER_SUCCESS=freellmapi/$MODEL"
