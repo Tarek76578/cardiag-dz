@@ -10,46 +10,22 @@ for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
   test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
 done
 
-PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-openrouter}}"
-MODEL="${AI_MODEL:-${OPENROUTER_MODEL:-qwen/qwen3-coder:free}}"
-BASE_URL="${CODEX_BASE_URL:-${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}}"
-ENV_KEY="${CODEX_ENV_KEY:-OPENROUTER_API_KEY}"
+PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-xai}}"
+MODEL="${AI_MODEL:-${XAI_MODEL:-grok-4.6}}"
+BASE_URL="${CODEX_BASE_URL:-${XAI_BASE_URL:-https://api.x.ai/v1}}"
+ENV_KEY="${CODEX_ENV_KEY:-XAI_API_KEY}"
 WIRE_API="responses"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
 
-PROXY_PID=""
-PROXY_LOG="/tmp/groq-codex-proxy.log"
-cleanup_proxy() {
-  if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
-    kill "$PROXY_PID" 2>/dev/null || true
-    wait "$PROXY_PID" 2>/dev/null || true
-  fi
-}
-trap 'cleanup_proxy; rm -f "$PROMPT_FILE"' EXIT
-
 case "$PROVIDER" in
-  openrouter)
-    export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
-    test -n "$OPENROUTER_API_KEY" || { echo "OPENROUTER_API_KEY is missing" >&2; exit 13; }
-    ;;
-  groq)
-    export GROQ_API_KEY="${GROQ_API_KEY:-}"
-    test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; }
-    test -f "$ROOT/scripts/groq-codex-proxy.py"
-    python3 "$ROOT/scripts/groq-codex-proxy.py" >"$PROXY_LOG" 2>&1 &
-    PROXY_PID=$!
-    for _ in $(seq 1 50); do
-      if curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1; then break; fi
-      sleep 0.1
-    done
-    curl -fsS http://127.0.0.1:8787/health >/dev/null
-    BASE_URL="http://127.0.0.1:8787/v1"
-    ENV_KEY="GROQ_API_KEY"
+  xai)
+    export XAI_API_KEY="${XAI_API_KEY:-}"
+    test -n "$XAI_API_KEY" || { echo "XAI_API_KEY is missing" >&2; exit 13; }
     ;;
   *)
-    echo "Unsupported CODEX_PROVIDER=$PROVIDER" >&2
+    echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses xAI Grok only." >&2
     exit 14
     ;;
 esac
@@ -69,6 +45,7 @@ test -z "$(git status --porcelain)" || {
 }
 
 PROMPT_FILE="$(mktemp)"
+trap 'rm -f "$PROMPT_FILE"' EXIT
 cat > "$PROMPT_FILE" <<'EOF'
 Execute only the current Road Assistant milestone.
 Read docs/agent-next-task.md, agent-state.md, and AGENTS.md. Implement the real Overpass nearby-service provider using existing Ktor/kotlinx.serialization. Preserve interfaces/fallback, Arabic RTL/French, least privilege, bounded timeouts, no location persistence/background tracking, and no live hazards.
@@ -85,8 +62,8 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
   -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
-  -c "model_providers.$PROVIDER.request_max_retries=0" \
-  -c "model_providers.$PROVIDER.stream_max_retries=0" \
+  -c "model_providers.$PROVIDER.request_max_retries=3" \
+  -c "model_providers.$PROVIDER.stream_max_retries=3" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
   -c "project_doc_max_bytes=0" \
