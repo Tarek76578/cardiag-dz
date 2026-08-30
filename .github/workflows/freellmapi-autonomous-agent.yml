@@ -21,6 +21,8 @@ jobs:
       AI_PROVIDER: freellmapi
       OPENAI_API_BASE: http://127.0.0.1:3002/v1
       AIDER_API_BASE: http://127.0.0.1:3002/v1
+      AIDER_ANALYTICS: "false"
+      AIDER_CHECK_UPDATE: "false"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -72,14 +74,9 @@ jobs:
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/models.json'))
-          items=d.get('data',[])
-          print('FREELLMAPI_MODELS=',len(items))
-          assert items, 'No models returned by FreeLLMAPI'
+          assert d.get('data'), 'No models returned by FreeLLMAPI'
+          print('FREELLMAPI_MODELS=',len(d['data']))
           PY
-
-          # FreeLLMAPI authenticates /v1/chat/completions with its generated
-          # unified API key. Resolve it from the runner-local SQLite database;
-          # never print the secret to the Actions log.
           DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"
           test -n "$DB_PATH" || { echo 'FreeLLMAPI database not found'; exit 21; }
           GATEWAY_KEY="$(DB_PATH="$DB_PATH" node - <<'NODE'
@@ -90,36 +87,35 @@ jobs:
           if (!candidates.length) process.exit(2);
           process.stdout.write(candidates.sort((a,b)=>b.length-a.length)[0]);
           NODE
-          )" || { echo 'FreeLLMAPI unified API key was not found in local DB'; exit 22; }
+          )" || { echo 'FreeLLMAPI unified API key was not found'; exit 22; }
           test "${#GATEWAY_KEY}" -ge 20 || exit 23
-          printf 'GATEWAY_KEY=%s\n' "$GATEWAY_KEY" >> "$GITHUB_ENV"
+          echo "GATEWAY_KEY=$GATEWAY_KEY" >> "$GITHUB_ENV"
           echo 'FREELLMAPI_AUTH_KEY_RESOLVED=true'
 
-      - name: Chat probe
+      - name: Select working free coding model
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,urllib.request
-          models=json.load(open('/tmp/models.json')).get('data',[])
-          ids=[m.get('id') for m in models if m.get('id')]
-          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
+          import json,os,time,urllib.request,urllib.error
+          ids=[m['id'] for m in json.load(open('/tmp/models.json')).get('data',[]) if m.get('id')]
+          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','gemma')
           candidates=[]
-          for p in priority:
-            candidates += [x for x in ids if p in x.lower() and x not in candidates]
+          for p in priority: candidates += [x for x in ids if p in x.lower() and x not in candidates]
           candidates += [x for x in ids if x not in candidates]
-          last=None
-          for model in candidates[:15]:
-            body={'model':model,'messages':[{'role':'user','content':'Reply with exactly OK.'}],'max_tokens':8}
-            try:
-              req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(body).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+__import__('os').environ['GATEWAY_KEY']})
-              with urllib.request.urlopen(req,timeout=120) as x: d=json.load(x)
-              if d.get('choices'):
-                open('/tmp/model','w').write(model)
-                print('FREELLMAPI_CHAT_SUCCESS',model)
-                break
-            except Exception as e: last=e; print('model failed:',model,e)
-          else:
-            raise SystemExit(f'No model passed chat probe. Last error: {last}')
+          key=os.environ['GATEWAY_KEY']; last=None
+          for model in candidates[:20]:
+            body=json.dumps({'model':model,'messages':[{'role':'user','content':'Reply with exactly OK.'}],'max_tokens':8}).encode()
+            for attempt in range(2):
+              try:
+                req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=body,headers={'Content-Type':'application/json','Authorization':'Bearer '+key})
+                with urllib.request.urlopen(req,timeout=90) as r: d=json.load(r)
+                if d.get('choices'):
+                  open('/tmp/model','w').write(model); print('WORKING_FREE_MODEL=',model); raise SystemExit(0)
+              except Exception as e:
+                last=e
+                if '429' in str(e): time.sleep(8)
+                else: break
+          raise SystemExit(f'No free model passed chat probe. Last error: {last}')
           PY
 
       - name: Local OpenAI proxy
@@ -135,8 +131,7 @@ jobs:
             def do_POST(self): self.p()
             def p(self):
               n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None
-              h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
-              h['Authorization']='Bearer '+KEY
+              h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}; h['Authorization']='Bearer '+KEY
               try:
                 with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=180) as r:
                   b=r.read(); self.send_response(r.status)
@@ -148,12 +143,10 @@ jobs:
             def log_message(self,*a): pass
           ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
           PY
-          nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 &
-          echo $! >/tmp/proxy.pid
+          nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
           sleep 1
-          curl -fsS -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:3002/v1/models >/dev/null
 
-      - name: Aider autonomous cycle
+      - name: Aider autonomous cycle with rate-limit fallback
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
@@ -161,14 +154,30 @@ jobs:
           export OPENAI_API_KEY="$GATEWAY_KEY"
           export FREELLMAPI_MODEL="$(cat /tmp/model)"
           export AIDER_MODEL="openai/$FREELLMAPI_MODEL"
+          export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md
+          export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
+          export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
           chmod +x scripts/autonomous-agent.sh
-          ./scripts/autonomous-agent.sh
+          rm -rf .aider* "$AIDER_CACHE_DIR"
+          for attempt in 1 2 3; do
+            set +e
+            ./scripts/autonomous-agent.sh
+            status=$?
+            set -e
+            rm -rf .aider* "$AIDER_CACHE_DIR"
+            if [ "$status" -eq 0 ]; then exit 0; fi
+            echo "Aider attempt $attempt failed with status $status"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Remove runtime files
+        if: always()
+        run: rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
 
       - name: Android validation
         working-directory: android
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
       - name: Scope
         run: |
@@ -186,7 +195,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
           git diff --cached --quiet && { echo 'No validated code change'; exit 41; }
-          git commit -m 'feat(road): add live nearby service provider'
+          git commit -m 'feat(road): autonomous agent improvement'
           git push origin HEAD:main
 
       - name: Artifacts
@@ -201,8 +210,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          tail -n 200 /tmp/freellmapi.log 2>/dev/null || true
+          tail -n 100 /tmp/proxy.log 2>/dev/null || true
+
       - name: Stop
         if: always()
         run: |
-          if [ -f /tmp/proxy.pid ]; then kill "$(cat /tmp/proxy.pid)" 2>/dev/null || true; fi
-          if [ -f /tmp/freellmapi.pid ]; then kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true; fi
+          [ -f /tmp/proxy.pid ] && kill "$(cat /tmp/proxy.pid)" 2>/dev/null || true
+          [ -f /tmp/freellmapi.pid ] && kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true
