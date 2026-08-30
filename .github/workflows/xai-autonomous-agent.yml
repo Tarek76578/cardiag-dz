@@ -12,8 +12,8 @@ concurrency:
 
 env:
   GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_MODEL: openai/gpt-oss-20b
-  GROQ_WIRE_API: responses
+  GROQ_MODEL: groq/compound-mini
+  GROQ_WIRE_API: chat
 
 jobs:
   agent:
@@ -83,28 +83,30 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           set -euo pipefail
-          models_json="$(curl -fsS --retry 5 --retry-all-errors --retry-delay 2 --max-time 30 \
+          echo 'Checking Groq API authentication...'
+          body="$(curl -sS --max-time 20 -w '\n%{http_code}' \
             -H "Authorization: Bearer $GROQ_API_KEY" \
             -H 'Content-Type: application/json' \
-            "$GROQ_BASE_URL/models")"
-          GROQ_MODELS_JSON="$models_json" python3 - "$GROQ_MODEL" <<'PY'
-          import json, os, sys
-          wanted = sys.argv[1]
-          data = json.loads(os.environ['GROQ_MODELS_JSON'])
-          ids = {item.get('id') for item in data.get('data', [])}
-          if wanted not in ids:
-              print(f'GROQ_MODEL_UNAVAILABLE={wanted}', file=sys.stderr)
-              raise SystemExit(2)
-          print(f'GROQ_MODEL_AVAILABLE={wanted}')
-          PY
+            "$GROQ_BASE_URL/models")" || {
+              echo 'GROQ_PREFLIGHT_CURL_FAILED=1'
+              exit 40
+            }
+          http_code="$(printf '%s\n' "$body" | tail -n1)"
+          response="$(printf '%s\n' "$body" | sed '$d')"
+          case "$http_code" in
+            200) echo 'GROQ_API_AUTH=ok' ;;
+            401|403) echo "GROQ_API_AUTH_FAILED_HTTP=$http_code"; exit 41 ;;
+            429) echo 'GROQ_API_RATE_LIMITED=1'; exit 75 ;;
+            *) echo "GROQ_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
+          esac
           echo 'provider=groq' >> "$GITHUB_OUTPUT"
           echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
           echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
           echo 'env_key=GROQ_API_KEY' >> "$GITHUB_OUTPUT"
-          echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
+          echo 'wire_api=chat' >> "$GITHUB_OUTPUT"
           echo 'AI_PROVIDER_SELECTED=groq'
           echo "AI_MODEL_SELECTED=$GROQ_MODEL"
-          echo 'AI_WIRE_API_SELECTED=responses'
+          echo 'AI_WIRE_API_SELECTED=chat'
 
       - name: Autonomous Codex agent
         env:
@@ -114,7 +116,7 @@ jobs:
           AI_MODEL: ${{ steps.provider.outputs.model }}
           CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
           CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
-          CODEX_WIRE_API: responses
+          CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
         run: |
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
@@ -123,7 +125,7 @@ jobs:
 
           run_agent() {
             local log_file="$1"
-            echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: responses ==="
+            echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: $CODEX_WIRE_API ==="
             set +e
             ./scripts/autonomous-agent.sh 2>&1 | tee "$log_file"
             local status=${PIPESTATUS[0]}
