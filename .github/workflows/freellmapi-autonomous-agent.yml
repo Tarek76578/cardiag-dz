@@ -128,7 +128,6 @@ jobs:
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
           export GATEWAY_KEY="$GATEWAY_KEY"
-          # Keep Codex state in the runner home, not /tmp; Codex may need helper binaries.
           export CODEX_HOME="$HOME/.codex-cardiag"
           export CODEX_BASE_URL="http://127.0.0.1:${CODEX_SHIM_PORT}/v1"
           rm -rf "$CODEX_HOME"
@@ -219,6 +218,7 @@ jobs:
             if [ "$agent_status" -ne 0 ]; then
               echo "FREE_MODEL_FAILED=$model stage=codex status=$agent_status"
               git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
+              find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
               continue
             fi
             echo "FREE_MODEL_CODEX_SUCCESS=$model"
@@ -233,6 +233,7 @@ jobs:
             fi
             echo "FREE_MODEL_FAILED=$model stage=android-build status=$build_status"
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
+            find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
           done < /tmp/model-candidates
           [ "$success" -eq 1 ] || { echo 'All free models failed'; exit 1; }
 
