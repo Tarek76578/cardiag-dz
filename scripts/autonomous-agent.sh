@@ -13,10 +13,10 @@ done
 MODEL="${FREELLMAPI_MODEL:-qwen/qwen3-coder:free}"
 CODEX_PROVIDER="${CODEX_PROVIDER:-codex_shim}"
 SHIM_UPSTREAM_BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"
-# Codex 0.151 emits reasoning.encrypted_content on Responses requests. The
-# FreeLLMAPI-backed shim rejects that OpenAI-internal include, so place a tiny
-# local compatibility filter in front of the shim and strip only unsupported
-# request metadata before forwarding. The actual model/tool traffic is kept.
+# Codex may send OpenAI-hosted tools such as web_search in Responses requests.
+# FreeLLMAPI-backed adapters cannot execute OpenAI server-side hosted tools, so
+# the local compatibility filter removes only unsupported hosted tool entries.
+# Normal project tools (shell/apply_patch/etc.) and model traffic are preserved.
 CODEX_BASE_URL="${CODEX_FILTER_BASE_URL:-http://127.0.0.1:8788/v1}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 export GATEWAY_KEY="${GATEWAY_KEY:-${OPENAI_API_KEY:-}}"
@@ -34,6 +34,35 @@ from urllib.parse import urlsplit
 from http.client import HTTPConnection
 
 TARGET = "http://127.0.0.1:8787"
+UNSUPPORTED_HOSTED_TOOL_TYPES = {"web_search", "web_search_preview"}
+
+
+def strip_unsupported_hosted_tools(obj):
+    """Remove OpenAI-hosted tools that the FreeLLMAPI adapter cannot execute."""
+    removed = []
+    if not isinstance(obj, dict):
+        return removed
+
+    tools = obj.get("tools")
+    if isinstance(tools, list):
+        kept = []
+        for tool in tools:
+            if isinstance(tool, dict) and tool.get("type") in UNSUPPORTED_HOSTED_TOOL_TYPES:
+                removed.append(tool.get("type"))
+            else:
+                kept.append(tool)
+        if len(kept) != len(tools):
+            obj["tools"] = kept
+
+    # A tool-specific choice referring to a hosted web-search tool is also
+    # unusable after the tool has been removed. Let the model choose normally.
+    choice = obj.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") in UNSUPPORTED_HOSTED_TOOL_TYPES:
+        removed.append("tool_choice:" + str(choice.get("type")))
+        obj.pop("tool_choice", None)
+
+    return removed
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -53,6 +82,7 @@ class Handler(BaseHTTPRequestHandler):
                     if "client_metadata" in obj:
                         removed.append("client_metadata")
                         obj.pop("client_metadata", None)
+                    removed.extend(strip_unsupported_hosted_tools(obj))
                     if removed:
                         print("CODEX_FILTER_STRIPPED=" + ",".join(removed), flush=True)
                     body = json.dumps(obj, separators=(",", ":")).encode()
@@ -99,6 +129,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
     def log_message(self, *_):
         pass
+
 
 ThreadingHTTPServer(("127.0.0.1", 8788), Handler).serve_forever()
 PY
