@@ -20,7 +20,7 @@ env:
 jobs:
   agent:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
@@ -221,7 +221,7 @@ jobs:
               continue
             fi
             set +e
-            timeout 120s ./scripts/autonomous-agent.sh
+            ./scripts/autonomous-agent.sh
             agent_status=$?
             set -e
             kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
