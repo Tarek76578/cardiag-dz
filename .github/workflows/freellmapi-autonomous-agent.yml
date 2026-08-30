@@ -133,10 +133,20 @@ jobs:
           rm -rf "$CODEX_HOME"
           mkdir -p "$CODEX_HOME"
           success=0
+          ROAD_DIR="android/app/src/main/java/dz/cardiag/app/core/road"
+          ALLOWED_ROAD_FILES=(
+            "$ROAD_DIR/RoadAssistantService.kt"
+            "$ROAD_DIR/RoadAssistantProviders.kt"
+          )
+          clean_attempt_artifacts() {
+            git restore -- "${ALLOWED_ROAD_FILES[@]}" 2>/dev/null || true
+            git clean -fd -- "$ROAD_DIR" 2>/dev/null || true
+          }
           while IFS= read -r model; do
             [ -n "$model" ] || continue
             echo "=== TRYING FREE MODEL: $model ==="
             export FREELLMAPI_MODEL="$model"
+            clean_attempt_artifacts
             rm -rf /tmp/cardiag-shim
             mkdir -p /tmp/cardiag-shim
             cat >/tmp/cardiag-shim/config.yaml <<YAML
@@ -207,10 +217,9 @@ jobs:
               echo "CODEX_SHIM_START_FAILED=$model"
               tail -n 80 /tmp/cardiag-shim.log || true
               kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
+              clean_attempt_artifacts
               continue
             fi
-            git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-            find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
             set +e
             timeout 120s ./scripts/autonomous-agent.sh
             agent_status=$?
@@ -218,8 +227,7 @@ jobs:
             kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
             if [ "$agent_status" -ne 0 ]; then
               echo "FREE_MODEL_FAILED=$model stage=codex status=$agent_status"
-              git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-              find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
+              clean_attempt_artifacts
               continue
             fi
             echo "FREE_MODEL_CODEX_SUCCESS=$model"
@@ -233,8 +241,7 @@ jobs:
               break
             fi
             echo "FREE_MODEL_FAILED=$model stage=android-build status=$build_status"
-            git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
-            find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
+            clean_attempt_artifacts
           done < /tmp/model-candidates
           [ "$success" -eq 1 ] || { echo 'All free models failed'; exit 1; }
 
