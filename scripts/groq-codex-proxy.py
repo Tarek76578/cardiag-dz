@@ -15,12 +15,6 @@ UNSUPPORTED_TOP_LEVEL = {
     "safety_identifier", "prompt_cache_key", "prompt", "client_metadata",
 }
 
-# Codex 0.151 + the current Groq Responses bridge is unreliable with
-# gpt-oss tool-call argument generation (Groq can reject /cmd as an array).
-# Llama 3.1 8B has native function calling and is the safer compatibility
-# target for this local exec_command tool loop.
-FORCED_CODEX_MODEL = "llama-3.1-8b-instant"
-
 
 def sanitize_tool(tool):
     if not isinstance(tool, dict):
@@ -41,14 +35,8 @@ def sanitize_body(raw):
     for key in UNSUPPORTED_TOP_LEVEL:
         body.pop(key, None)
 
-    # Never trust the selected model from an incompatible Codex/Groq pairing.
-    requested_model = body.get("model")
-    if requested_model != FORCED_CODEX_MODEL:
-        print(f"GROQ_PROXY_MODEL_REWRITE={requested_model}->{FORCED_CODEX_MODEL}", flush=True)
-        body["model"] = FORCED_CODEX_MODEL
-
     # Codex 0.151 can emit reasoning.summary. Groq accepts reasoning.effort,
-    # but currently rejects the request-side reasoning.summary field.
+    # but rejects the request-side reasoning.summary field.
     reasoning = body.get("reasoning")
     if isinstance(reasoning, dict):
         reasoning.pop("summary", None)
@@ -102,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
                 "Authorization": "Bearer " + API_KEY,
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
-                "User-Agent": "cardiag-codex-groq-proxy/1.2",
+                "User-Agent": "cardiag-codex-groq-proxy/1.3",
                 "Content-Length": str(len(payload)),
             }
             conn.request("POST", path, body=payload, headers=headers)
