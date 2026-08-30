@@ -2,6 +2,8 @@ name: CarDiag OpenRouter Autonomous Agent
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: write
@@ -12,10 +14,13 @@ concurrency:
 
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
-  OPENROUTER_MODEL: openrouter/free
+  OPENROUTER_MODEL: qwen/qwen3-coder:free
 
 jobs:
   agent:
+    # Run automatically for human/connector pushes, but never recursively for
+    # the bot commit produced by the final step.
+    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -98,35 +103,42 @@ jobs:
           print('OPENROUTER_KEY_VALID=1')
           print('OPENROUTER_KEY_LIMIT=', info.get('limit'))
           print('OPENROUTER_KEY_USAGE=', info.get('usage'))
-          print('OPENROUTER_FREE_QUOTA_NOTE=free-model daily quota is enforced by the model endpoint and is not exposed as a remaining counter by /key')
+          print('OPENROUTER_FREE_QUOTA_NOTE=free-model quota is enforced at the model endpoint; do not probe models with completion requests')
           PY
 
           curl -fsS --connect-timeout 10 --max-time 20 \
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
 
-      - name: Select one agent model without quota-burning probes
+      - name: Select one tool-capable coding model without quota-burning probes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json
           data = json.load(open('/tmp/openrouter-models.json'))
-          ids = {str(m.get('id')) for m in data.get('data', []) if m.get('id')}
+          models = {str(m.get('id')): m for m in data.get('data', []) if m.get('id')}
           preferred = [
-              'openrouter/free',
-              'cohere/north-mini-code:free',
-              'poolside/laguna-s-2.1:free',
+              'qwen/qwen3-coder:free',
+              'qwen/qwen3-coder-next:free',
               'nvidia/nemotron-3-ultra-550b-a55b:free',
-              'minimax/minimax-m3:free',
+              'google/gemma-4-31b-it:free',
           ]
-          candidates = [m for m in preferred if m in ids]
+          candidates = []
+          for model_id in preferred:
+              m = models.get(model_id)
+              if not m:
+                  continue
+              params = set(m.get('supported_parameters') or [])
+              if 'tools' in params:
+                  candidates.append(model_id)
           if not candidates:
-              raise SystemExit('No known free agent model is currently listed by OpenRouter')
-          # Exactly one model per autonomous run. A second free-model attempt can
-          # consume another request after a provider-side failure and is unsafe on
-          # the 50-request daily free quota.
-          open('/tmp/openrouter-model', 'w').write(candidates[0] + '\n')
-          print('OPENROUTER_AGENT_MODEL=', candidates[0])
+              raise SystemExit('No known free coding model with tool calling is currently listed by OpenRouter')
+          # Exactly one model per autonomous run. Do not probe or fall back with
+          # another completion request: failed free requests can count against quota.
+          model = candidates[0]
+          open('/tmp/openrouter-model', 'w').write(model + '\n')
+          print('OPENROUTER_AGENT_MODEL=', model)
+          print('OPENROUTER_AGENT_MODEL_SUPPORTS_TOOLS=1')
           PY
 
       - name: Autonomous Codex agent
