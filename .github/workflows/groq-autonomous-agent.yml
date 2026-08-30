@@ -41,7 +41,6 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f scripts/autonomous-agent.sh
-          test -f scripts/codex-groq-capture-proxy.py
           test -n "${{ secrets.GROQ_API_KEY }}"
           test -z "$(git status --porcelain)"
 
@@ -149,18 +148,20 @@ jobs:
             echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Start Codex payload capture proxy
+      - name: Start Codex payload capture proxy outside repository
         run: |
           set -euo pipefail
-          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-proxy.log
-          chmod +x scripts/codex-groq-capture-proxy.py
-          nohup python3 scripts/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
+          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
+          cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
+          chmod +x /tmp/codex-groq-capture-proxy.py
+          nohup python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
           echo $! > /tmp/codex-groq-proxy.pid
           for i in $(seq 1 30); do
             if grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log; then break; fi
             sleep 1
           done
           grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
+          test -z "$(git status --porcelain)"
 
       - name: Autonomous Codex agent through capture proxy
         env:
@@ -180,7 +181,8 @@ jobs:
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
           set -e
-          echo "CAPTURE_PROXY_LOG:"; cat /tmp/codex-groq-proxy.log || true
+          echo '=== CAPTURE PROXY LOG ==='
+          cat /tmp/codex-groq-proxy.log || true
           if [ "$agent_status" -eq 0 ]; then exit 0; fi
           if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
             echo "AI_PROVIDER_RATE_LIMITED=groq"
