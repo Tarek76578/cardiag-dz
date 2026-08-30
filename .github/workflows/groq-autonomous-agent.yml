@@ -17,9 +17,6 @@ env:
   GROQ_FALLBACK_MODEL: openai/gpt-oss-20b
   GROQ_RATE_LIMIT_RETRIES: '2'
   GROQ_DEFAULT_RETRY_SECONDS: '45'
-  # Groq's observed 8k TPM ceiling is provider-side; keep a deliberately
-  # conservative request budget because Codex/tool serialization can tokenize
-  # substantially higher than a byte-based local estimate.
   GROQ_MAX_OUTPUT_TOKENS: '800'
   GROQ_MAX_INPUT_TOKENS: '4000'
   GROQ_TPM_LIMIT: '8000'
@@ -49,7 +46,10 @@ jobs:
           test -f android/gradlew
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
+          test -f agent-state.md
           test -f scripts/autonomous-agent.sh
+          test -f scripts/codex-groq-capture-proxy.py
+          test -f scripts/test_codex_groq_proxy.py
           test -n "${{ secrets.GROQ_API_KEY }}"
           test -z "$(git status --porcelain)"
       - name: Java
@@ -67,6 +67,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22'
+          cache: npm
       - name: Install Codex CLI
         run: |
           set -euo pipefail
@@ -74,6 +75,12 @@ jobs:
           npm install --prefix /tmp/codex-cli --no-save @openai/codex
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
+      - name: Static and proxy regression gate
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/codex-groq-capture-proxy.py scripts/test_codex_groq_proxy.py
+          python3 scripts/test_codex_groq_proxy.py
+          git diff --check
       - name: Discover and probe Groq Responses models
         id: provider
         env:
