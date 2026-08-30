@@ -38,10 +38,6 @@ case "$PROVIDER" in
     export GROQ_API_KEY="${GROQ_API_KEY:-}"
     test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; }
     test -f "$ROOT/scripts/groq-codex-proxy.py"
-    # Codex 0.151+ requires Responses for custom providers. Groq also exposes
-    # Responses, but rejects several OpenAI-only optional fields that Codex can
-    # serialize. Use the local compatibility bridge to sanitize those fields
-    # and normalize tool definitions before forwarding to Groq.
     python3 "$ROOT/scripts/groq-codex-proxy.py" >"$PROXY_LOG" 2>&1 &
     PROXY_PID=$!
     for _ in $(seq 1 50); do
@@ -73,27 +69,21 @@ test -z "$(git status --porcelain)" || {
 }
 
 PROMPT_FILE="$(mktemp)"
-cat > "$PROMPT_FILE" <<EOF
-$(cat "$TASK_FILE")
+cat > "$PROMPT_FILE" <<'EOF'
+You are the CarDiag autonomous coding agent. Execute ONLY the current Road Assistant milestone.
 
---- CURRENT AGENT STATE ---
-$(cat "$STATE_FILE")
+Before editing, read these repository files yourself:
+- docs/agent-next-task.md — exact milestone and acceptance criteria
+- agent-state.md — current state and validation evidence
+- AGENTS.md — repository rules and autonomous execution contract
 
---- REPOSITORY RULES ---
-$(cat "$AGENTS_FILE")
+Then inspect the existing implementation, tests, networking, localization, and project conventions. Implement the milestone in the smallest coherent production-quality increment. Do not invent OSM/business data. Preserve Arabic RTL/French localization, least privilege, public interfaces, offline fallback semantics, and bounded network behavior. Do not implement live road hazards.
 
---- AUTONOMOUS EXECUTION CONTRACT ---
-You are the CarDiag coding agent running in GitHub Actions through Codex.
-The task manifest above is the ONLY task. Do not choose another backlog item.
-You may modify any project files required to complete the task.
-Do not make unrelated changes.
-Keep the implementation minimal, coherent, production-quality, and scoped to the task manifest.
-Add or update regression tests when appropriate.
-Do not commit or push; the workflow handles repository commits.
-Preserve public interfaces and existing behavior unless explicitly required.
-Never fabricate OSM/business data. Only map fields actually returned by the API.
-Use bounded network timeouts and safe failure handling. Do not store location data. Do not implement hazards unless explicitly required by the task manifest.
-Before finishing, review git diff and leave only intended changes required by the task.
+Add/update regression tests where appropriate. Run the strongest relevant unit tests, lint, debug build, and release validation when feasible. If validation fails, diagnose and fix the actual cause; never weaken or skip tests.
+
+Update agent-state.md with the completed work, real validation evidence, remaining blockers, and next priorities. Review git diff for secrets, generated files, unrelated changes, regressions, and RTL/localization issues. Do not commit or push; the workflow owns the commit/push.
+
+When starting, first inspect the three files above and the current Road Assistant code. Do not spend time restating this prompt; perform the engineering work.
 EOF
 
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
