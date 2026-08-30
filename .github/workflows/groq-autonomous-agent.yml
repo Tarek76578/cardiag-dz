@@ -135,8 +135,15 @@ jobs:
           {
             echo 'provider=groq'; echo "model=$selected"; echo "fallback_model=$GROQ_FALLBACK_MODEL"; echo "base_url=$GROQ_BASE_URL"; echo 'env_key=GROQ_API_KEY'; echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
-      - name: Start Groq compatibility adapter outside repository
+      - name: Autonomous Codex agent through Groq compatibility adapter
         env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
+          AI_MODEL: ${{ steps.provider.outputs.model }}
+          CODEX_BASE_URL: http://127.0.0.1:8787/openai/v1
+          CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
+          CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
           GROQ_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
           GROQ_FALLBACK_MODEL: ${{ env.GROQ_FALLBACK_MODEL }}
           GROQ_RATE_LIMIT_RETRIES: ${{ env.GROQ_RATE_LIMIT_RETRIES }}
@@ -147,32 +154,28 @@ jobs:
           GROQ_TPM_SAFETY_MARGIN: ${{ env.GROQ_TPM_SAFETY_MARGIN }}
         run: |
           set -euo pipefail
-          cleanup() { if [ -n "${PROXY_PID:-}" ]; then kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true; fi; }
+          cleanup() {
+            if [ -n "${PROXY_PID:-}" ]; then
+              kill "$PROXY_PID" 2>/dev/null || true
+              wait "$PROXY_PID" 2>/dev/null || true
+            fi
+          }
           trap cleanup EXIT INT TERM
-          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
+          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log /tmp/codex-groq-health.json /tmp/codex-groq-proxy.pid
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
           python3 -m py_compile /tmp/codex-groq-capture-proxy.py
           nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" GROQ_MAX_INPUT_TOKENS="$GROQ_MAX_INPUT_TOKENS" GROQ_TPM_LIMIT="$GROQ_TPM_LIMIT" GROQ_TPM_SAFETY_MARGIN="$GROQ_TPM_SAFETY_MARGIN" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
           PROXY_PID=$!
           echo "$PROXY_PID" > /tmp/codex-groq-proxy.pid
-          for i in $(seq 1 30); do grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break; sleep 1; done
+          for i in $(seq 1 30); do
+            grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break
+            sleep 1
+          done
           grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
           kill -0 "$PROXY_PID"
           curl -fsS --max-time 5 http://127.0.0.1:8787/health >/tmp/codex-groq-health.json
           grep -q '"status":"ok"' /tmp/codex-groq-health.json
-          test -z "$(git status --porcelain)"
-      - name: Autonomous Codex agent through Groq compatibility adapter
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
-          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
-          AI_MODEL: ${{ steps.provider.outputs.model }}
-          CODEX_BASE_URL: http://127.0.0.1:8787/openai/v1
-          CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
-          CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
-        run: |
-          set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
