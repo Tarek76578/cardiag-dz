@@ -10,22 +10,22 @@ for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do
   test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }
 done
 
-PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-xai}}"
-MODEL="${AI_MODEL:-${XAI_MODEL:-grok-4.6}}"
-BASE_URL="${CODEX_BASE_URL:-${XAI_BASE_URL:-https://api.x.ai/v1}}"
-ENV_KEY="${CODEX_ENV_KEY:-XAI_API_KEY}"
+PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-groq}}"
+MODEL="${AI_MODEL:-groq/auto}"
+BASE_URL="${CODEX_BASE_URL:-https://api.groq.com/openai/v1}"
+ENV_KEY="${CODEX_ENV_KEY:-GROQ_API_KEY}"
 WIRE_API="responses"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
 
 case "$PROVIDER" in
-  xai)
-    export XAI_API_KEY="${XAI_API_KEY:-}"
-    test -n "$XAI_API_KEY" || { echo "XAI_API_KEY is missing" >&2; exit 13; }
+  groq)
+    export GROQ_API_KEY="${GROQ_API_KEY:-}"
+    test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; }
     ;;
   *)
-    echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses xAI Grok only." >&2
+    echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses Groq only." >&2
     exit 14
     ;;
 esac
@@ -62,8 +62,8 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
   -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
-  -c "model_providers.$PROVIDER.request_max_retries=3" \
-  -c "model_providers.$PROVIDER.stream_max_retries=3" \
+  -c "model_providers.$PROVIDER.request_max_retries=5" \
+  -c "model_providers.$PROVIDER.stream_max_retries=5" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
   -c "project_doc_max_bytes=0" \
