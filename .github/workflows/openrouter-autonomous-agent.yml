@@ -14,7 +14,7 @@ env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: qwen/qwen3-coder:free
   GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_MODEL: qwen/qwen3.6-27b
+  GROQ_MODEL: llama-3.1-8b-instant
   GROQ_WIRE_API: responses
 
 jobs:
@@ -93,9 +93,10 @@ jobs:
               -H 'Content-Type: application/json' \
               "$GROQ_BASE_URL/models")" || models_json=''
             selected=''
+            # Prefer models whose chat templates are compatible with Codex's
+            # Responses-to-chat proxy. Do not select Qwen models here: the
+            # current Groq Qwen templates reject Codex's message roles.
             for candidate in \
-              'qwen/qwen3.6-27b' \
-              'qwen/qwen3.8-27b' \
               'llama-3.1-8b-instant' \
               'openai/gpt-oss-20b'; do
               if printf '%s' "$models_json" | python3 -c "import json,sys; d=json.load(sys.stdin); ids={x.get('id') for x in d.get('data',[])}; sys.exit(0 if '$candidate' in ids else 1)" 2>/dev/null; then
@@ -114,8 +115,8 @@ jobs:
               echo "AI_WIRE_API_SELECTED=responses"
               exit 0
             fi
-            echo 'GROQ_MODEL_PREFLIGHT=none-of-the-supported-agent-models-available'
-            echo 'GROQ will not be used with a guessed model id.'
+            echo 'GROQ_MODEL_PREFLIGHT=none-of-the-codex-compatible-models-available'
+            echo 'GROQ will not be used with an incompatible or guessed model id.'
           fi
           if [ -n "$OPENROUTER_API_KEY" ]; then
             echo "provider=openrouter" >> "$GITHUB_OUTPUT"
@@ -126,7 +127,7 @@ jobs:
             echo "AI_PROVIDER_SELECTED=openrouter"
             echo "AI_MODEL_SELECTED=$OPENROUTER_MODEL"
             echo "AI_WIRE_API_SELECTED=responses"
-            echo "AI_PROVIDER_WARNING=Groq key exists but no supported current Groq model is exposed; using OpenRouter without guessing."
+            echo "AI_PROVIDER_WARNING=No Codex-compatible Groq model is exposed; using OpenRouter."
             exit 0
           fi
           echo 'No independent AI provider key is configured.' >&2
