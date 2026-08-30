@@ -1,0 +1,166 @@
+name: CarDiag OpenRouter Autonomous Agent
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cardiag-openrouter-agent
+  cancel-in-progress: false
+
+env:
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  OPENROUTER_MODEL: openrouter/free
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Repair and normalize git state
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git ls-files --stage -- .codex/.tmp/plugins | grep -q '^160000 '; then
+            git rm --cached --force --ignore-unmatch .codex/.tmp/plugins
+            rm -rf .codex/.tmp/plugins
+            git commit -m 'chore: remove invalid codex plugins gitlink'
+            git push origin HEAD:main
+          fi
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
+
+      - name: Baseline
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          test -f AGENTS.md
+          test -f android/gradlew
+          test -f android/app/build.gradle.kts
+          test -f docs/agent-next-task.md
+          test -f scripts/autonomous-agent.sh
+          test -n "${{ secrets.OPENROUTER_API_KEY }}"
+          test -z "$(git status --porcelain)"
+
+      - name: Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Android
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Codex CLI
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/codex-cli
+          npm install --prefix /tmp/codex-cli --no-save @openai/codex
+          echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          /tmp/codex-cli/node_modules/.bin/codex --version
+
+      - name: Verify OpenRouter API and discover free coding models
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$OPENROUTER_API_KEY"
+          curl -fsS --retry 3 --connect-timeout 10 --max-time 30 \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/openrouter-models.json'))
+          ids=[str(m.get('id')) for m in data.get('data',[]) if m.get('id')]
+          free=[x for x in ids if x.endswith(':free')]
+          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','glm','llama','mistral')
+          ranked=[]
+          for key in priority:
+              ranked.extend(x for x in free if key in x.lower() and x not in ranked)
+          ranked.extend(x for x in free if x not in ranked)
+          ranked=ranked[:6]
+          if not ranked:
+              raise SystemExit('No OpenRouter :free models are currently available')
+          open('/tmp/openrouter-model-candidates','w').write('\n'.join(ranked)+'\n')
+          print('OPENROUTER_FREE_MODELS=',len(ranked))
+          print('\n'.join(ranked))
+          PY
+
+      - name: Autonomous Codex agent with OpenRouter fallback
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/autonomous-agent.sh
+          export OPENROUTER_API_KEY
+          export CODEX_HOME="$HOME/.codex-cardiag"
+          success=0
+          ROAD_DIR="android/app/src/main/java/dz/cardiag/app/core/road"
+          clean_attempt_artifacts() {
+            git clean -fd -- "$ROAD_DIR" 2>/dev/null || true
+          }
+          while IFS= read -r model; do
+            [ -n "$model" ] || continue
+            echo "=== TRYING OPENROUTER FREE MODEL: $model ==="
+            clean_attempt_artifacts
+            set +e
+            OPENROUTER_MODEL="$model" ./scripts/autonomous-agent.sh
+            agent_status=$?
+            set -e
+            if [ "$agent_status" -ne 0 ]; then
+              echo "OPENROUTER_MODEL_FAILED=$model stage=codex status=$agent_status"
+              clean_attempt_artifacts
+              continue
+            fi
+            echo "OPENROUTER_CODEX_SUCCESS=$model"
+            set +e
+            timeout 180s bash -lc 'cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace'
+            build_status=$?
+            set -e
+            if [ "$build_status" -eq 0 ]; then
+              echo "OPENROUTER_MODEL_BUILD_SUCCESS=$model"
+              success=1
+              break
+            fi
+            echo "OPENROUTER_MODEL_FAILED=$model stage=android-build status=$build_status"
+            clean_attempt_artifacts
+          done < /tmp/openrouter-model-candidates
+          [ "$success" -eq 1 ] || { echo 'All OpenRouter free models failed'; exit 1; }
+
+      - name: Final validation
+        working-directory: android
+        run: timeout 240s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
+
+      - name: Commit verified autonomous changes
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No autonomous changes to commit"
+            exit 32
+          fi
+          git status --short
+          git add -A
+          git diff --cached --check
+          git diff --cached --name-status
+          git commit -m "feat: advance autonomous CarDiag milestone"
+          git push origin HEAD:main
