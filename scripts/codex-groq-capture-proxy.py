@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Codex -> Groq Responses compatibility proxy with hard TPM/context enforcement."""
-import http.client, json, os, re, time
+"""Codex -> Groq Responses compatibility proxy with deterministic context budgeting."""
+import http.client
+import json
+import os
+import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -66,209 +70,194 @@ def adapt_request(parsed):
     return a, removed
 
 
-def item_role(item):
-    return item.get("role") if isinstance(item, dict) else None
+def role(x):
+    return x.get("role") if isinstance(x, dict) else None
 
 
-def is_tool_item(item):
-    if not isinstance(item, dict):
+def is_tool(x):
+    if not isinstance(x, dict):
         return False
-    t = str(item.get("type", "")).lower()
+    t = str(x.get("type", "")).lower()
     return "tool" in t or t in {"function_call", "function_call_output", "computer_call", "computer_call_output"}
 
 
-def trim_text(s, max_chars):
-    if not isinstance(s, str) or len(s) <= max_chars:
+def user_item(x):
+    return isinstance(x, dict) and role(x) == "user"
+
+
+def trim_text(s, chars):
+    if not isinstance(s, str) or len(s) <= chars:
         return s
-    if max_chars <= 32:
-        return s[:max_chars]
-    head = max_chars // 2
-    tail = max_chars - head
-    return s[:head] + "\n...[context compacted]...\n" + s[-tail:]
+    if chars <= 64:
+        return s[:chars]
+    h = chars // 2
+    return s[:h] + "\n...[context compacted]...\n" + s[-(chars-h):]
 
 
-def shrink_value(v, budget_bytes):
-    """Deterministically shrink a value. Returns (value, changed)."""
-    if budget_bytes <= 0:
-        return "[context omitted]", True
-    raw_len = len(json.dumps(v, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    if raw_len <= budget_bytes:
-        return v, False
+def shrink(v, budget):
+    if budget <= 0:
+        return "[context omitted]"
+    raw = json.dumps(v, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(raw) <= budget:
+        return v
     if isinstance(v, str):
-        return trim_text(v, max(32, budget_bytes - 32)), True
+        return trim_text(v, max(64, budget - 32))
     if isinstance(v, list):
+        if not v:
+            return []
         out = []
         used = 2
         for x in reversed(v):
-            xraw = len(json.dumps(x, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-            if used + xraw + 1 > budget_bytes:
+            xb = len(json.dumps(x, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+            if used + xb + 1 > budget:
                 continue
             out.insert(0, x)
-            used += xraw + 1
-        if not out and v:
-            return [shrink_value(v[-1], max(64, budget_bytes - 2))[0]], True
-        return out, True
+            used += xb + 1
+        if not out:
+            return [shrink(v[-1], max(128, budget - 2))]
+        return out
     if isinstance(v, dict):
         out = {}
         used = 2
-        priority = ["role", "type", "name", "call_id", "id", "content", "input", "arguments", "output", "text"]
-        keys = priority + [k for k in v if k not in priority]
-        for k in keys:
+        keys = ["role", "type", "name", "call_id", "id", "content", "input", "arguments", "output", "text"] + list(v)
+        for k in dict.fromkeys(keys):
             if k not in v:
                 continue
-            kr = len(json.dumps(k, ensure_ascii=False).encode("utf-8")) + 3
-            if used + kr >= budget_bytes:
+            kr = len(json.dumps(k, ensure_ascii=False).encode()) + 3
+            if used + kr >= budget:
                 continue
-            remaining = budget_bytes - used - kr
-            val, _ = shrink_value(v[k], max(32, remaining))
-            vr = len(json.dumps(val, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-            if used + kr + vr > budget_bytes:
-                continue
-            out[k] = val
-            used += kr + vr
-        return out, True
-    return v, True
+            val = shrink(v[k], max(32, budget - used - kr))
+            vr = len(json.dumps(val, ensure_ascii=False, separators=(",", ":")).encode())
+            if used + kr + vr <= budget:
+                out[k] = val
+                used += kr + vr
+        return out
+    return v
 
 
-def compact_input(obj, max_input_tokens):
-    """Guarantee input is <= max_input_tokens when structurally possible."""
+def compact_input(obj, max_tokens):
     inp = obj.get("input")
-    if inp is None:
-        return obj, False
-    target_bytes = max(1024, max_input_tokens * TOKEN_BYTES_PER_ESTIMATE)
-    before = token_estimate(inp)
-    if before <= max_input_tokens:
-        return obj, False
-
+    before = token_estimate(inp if inp is not None else "")
+    if inp is None or before <= max_tokens:
+        return dict(obj), False
+    target = max(1024, max_tokens * TOKEN_BYTES_PER_ESTIMATE)
+    out = dict(obj)
     if isinstance(inp, str):
-        new_inp = trim_text(inp, max(256, target_bytes - 64))
-    elif isinstance(inp, list):
-        protected = []
-        units = []
-        i = 0
-        while i < len(inp):
-            x = inp[i]
-            if item_role(x) in ("system", "developer"):
-                protected.append(x)
-                i += 1
-                continue
-            if is_tool_item(x):
-                unit = [x]
-                j = i + 1
-                while j < len(inp) and is_tool_item(inp[j]):
-                    unit.append(inp[j])
-                    j += 1
-                units.append(unit)
-                i = j
-            else:
-                units.append([x])
-                i += 1
-        selected = []
-        # Always retain newest complete units first.
-        for unit in reversed(units):
-            trial = protected + unit + selected
-            if token_estimate(trial) <= max_input_tokens:
-                selected = unit + selected
-            else:
-                break
-        new_inp = protected + selected
-        if token_estimate(new_inp) > max_input_tokens:
-            # Protected instructions themselves can be oversized. Shrink them while preserving order.
-            p_budget = max(512, target_bytes // 3)
-            shrunk = []
-            for x in protected:
-                y, _ = shrink_value(x, max(128, p_budget // max(1, len(protected))))
-                shrunk.append(y)
-            new_inp = shrunk + selected
-        if token_estimate(new_inp) > max_input_tokens:
-            # Last-resort deterministic shrink of the whole input. This is only reached for a huge
-            # single item; tool items remain grouped, and the resulting JSON stays valid.
-            new_inp, _ = shrink_value(new_inp, target_bytes)
-    else:
-        new_inp, _ = shrink_value(inp, target_bytes)
+        out["input"] = trim_text(inp, max(256, target - 64))
+        return out, token_estimate(out["input"]) < before
+    if not isinstance(inp, list):
+        out["input"] = shrink(inp, target)
+        return out, token_estimate(out["input"]) < before
 
-    new = dict(obj)
-    new["input"] = new_inp
-    after = token_estimate(new_inp)
-    if after >= before:
-        # Absolute emergency: replace history with a compact marker plus the newest user-like item.
-        if isinstance(inp, list):
-            newest = inp[-1] if inp else {"role": "user", "content": "Continue the task."}
-            newest, _ = shrink_value(newest, max(256, target_bytes - 128))
-            new["input"] = [{"role": "developer", "content": "Previous context was compacted."}, newest]
+    protected = [x for x in inp if role(x) in ("system", "developer")]
+    users = [(i, x) for i, x in enumerate(inp) if user_item(x)]
+    latest_user = users[-1][1] if users else None
+
+    units = []
+    i = 0
+    while i < len(inp):
+        x = inp[i]
+        if role(x) in ("system", "developer"):
+            i += 1
+            continue
+        if is_tool(x):
+            j = i + 1
+            while j < len(inp) and is_tool(inp[j]):
+                j += 1
+            units.append(inp[i:j])
+            i = j
         else:
-            new["input"] = trim_text(str(inp), max(256, target_bytes - 128))
-        after = token_estimate(new["input"])
-    return new, after < before
+            units.append([x])
+            i += 1
+
+    reserved = list(protected)
+    if latest_user is not None:
+        reserved.append(latest_user)
+    if token_estimate(reserved) > max_tokens:
+        p_budget = max(256, target // 5)
+        shrunk_protected = [shrink(x, max(128, p_budget // max(1, len(protected)))) for x in protected]
+        used = len(json.dumps(shrunk_protected, ensure_ascii=False).encode())
+        user_budget = max(256, target - used - 128)
+        reserved = shrunk_protected + ([shrink(latest_user, user_budget)] if latest_user is not None else [])
+
+    selected = []
+    for unit in reversed(units):
+        if latest_user is not None and any(x is latest_user for x in unit):
+            continue
+        trial = reserved + unit + selected
+        if token_estimate(trial) <= max_tokens:
+            selected = unit + selected
+
+    candidate = reserved + selected
+    if token_estimate(candidate) > max_tokens:
+        candidate = shrink(candidate, target)
+
+    if latest_user is not None and not any(user_item(x) and str(x.get("content", "")) == str(latest_user.get("content", "")) for x in candidate):
+        candidate = [{"role": "developer", "content": "Previous context was compacted."}, shrink(latest_user, max(256, target - 256))]
+        if protected:
+            candidate.insert(0, shrink(protected[0], min(512, target // 8)))
+
+    if token_estimate(candidate) > max_tokens:
+        keep_user = next((x for x in reversed(candidate) if user_item(x)), None)
+        if keep_user is not None:
+            candidate = [{"role": "developer", "content": "Previous context was compacted."}, shrink(keep_user, max(128, target - 128))]
+        else:
+            candidate = shrink(candidate, target)
+
+    out["input"] = candidate
+    return out, token_estimate(candidate) < before
 
 
 def enforce_budget(obj):
-    """Return (object, changed, estimated_input, total_budget); never knowingly exceeds the local gate."""
     ceiling = max(1024, TPM_LIMIT - TPM_SAFETY_MARGIN)
-    out = max(256, min(int(obj.get("max_output_tokens", MAX_OUTPUT_TOKENS)), MAX_OUTPUT_TOKENS))
-    obj = dict(obj)
-    obj["max_output_tokens"] = out
-    cap = max(512, min(MAX_INPUT_TOKENS, ceiling - out - REQUEST_OVERHEAD_TOKENS))
-    changed_any = False
-    for _ in range(6):
-        obj, changed = compact_input(obj, cap)
-        changed_any = changed_any or changed
-        est = token_estimate(obj.get("input", ""))
-        total = est + out + REQUEST_OVERHEAD_TOKENS
+    out_tokens = max(256, min(int(obj.get("max_output_tokens", MAX_OUTPUT_TOKENS)), MAX_OUTPUT_TOKENS))
+    out = dict(obj)
+    out["max_output_tokens"] = out_tokens
+    changed = False
+    for _ in range(10):
+        cap = max(512, min(MAX_INPUT_TOKENS, ceiling - out_tokens - REQUEST_OVERHEAD_TOKENS))
+        out, did = compact_input(out, cap)
+        changed = changed or did
+        est = token_estimate(out.get("input", ""))
+        total = est + out_tokens + REQUEST_OVERHEAD_TOKENS
         if total <= ceiling:
-            return obj, changed_any, est, total
-        if out > 256:
-            out = max(256, out // 2)
-            obj["max_output_tokens"] = out
-            cap = max(512, min(MAX_INPUT_TOKENS, ceiling - out - REQUEST_OVERHEAD_TOKENS))
-            changed_any = True
+            return out, changed, est, total
+        if out_tokens > 256:
+            out_tokens = max(256, out_tokens // 2)
+            out["max_output_tokens"] = out_tokens
+            changed = True
             continue
-        cap = max(512, min(cap - 256, ceiling - out - REQUEST_OVERHEAD_TOKENS))
-        if cap < 512:
-            break
-    # Hard final gate. Do not send an oversized request.
-    obj, changed = compact_input(obj, max(512, ceiling - out - REQUEST_OVERHEAD_TOKENS))
-    changed_any = changed_any or changed
-    est = token_estimate(obj.get("input", ""))
-    total = est + out + REQUEST_OVERHEAD_TOKENS
-    return obj, changed_any, est, total
+        break
+    est = token_estimate(out.get("input", ""))
+    return out, changed, est, est + out_tokens + REQUEST_OVERHEAD_TOKENS
 
 
 def header(headers, name):
-    n = name.lower()
     for k, v in headers.items():
-        if k.lower() == n:
+        if k.lower() == name.lower():
             return v
     return None
 
 
-def duration(v):
-    if not v:
-        return None
-    m = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(ms|s|m)?", str(v).strip().lower())
-    if not m:
-        return None
-    n = float(m.group(1)); u = m.group(2) or "s"
-    return n / 1000 if u == "ms" else n * 60 if u == "m" else n
-
-
 def retry_seconds(headers, body):
-    for n in ("retry-after", "x-ratelimit-reset-tokens"):
-        d = duration(header(headers, n))
-        if d is not None:
-            return max(1, min(300, int(d + 1)))
+    for name in ("retry-after", "x-ratelimit-reset-tokens"):
+        value = header(headers, name)
+        if value:
+            m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(value))
+            if m:
+                return max(1, min(300, int(float(m.group(1)) + 1)))
     m = re.search(r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*seconds", body.decode("utf-8", "replace"), re.I)
     return max(1, min(300, int(float(m.group(1)) + 1))) if m else DEFAULT_RETRY_SECONDS
 
 
 def send(body, headers):
-    c = http.client.HTTPSConnection(UPSTREAM_HOST, 443, timeout=180)
+    conn = http.client.HTTPSConnection(UPSTREAM_HOST, 443, timeout=180)
     try:
-        c.request("POST", "/openai/v1/responses", body=body, headers=headers)
-        r = c.getresponse()
+        conn.request("POST", "/openai/v1/responses", body=body, headers=headers)
+        r = conn.getresponse()
         return r.status, r.reason, dict(r.getheaders()), r.read()
     finally:
-        c.close()
+        conn.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -282,9 +271,10 @@ class Handler(BaseHTTPRequestHandler):
             parsed = json.loads(raw)
             CAPTURE.write_text(json.dumps(sanitize(parsed), indent=2, ensure_ascii=False)[:MAX_CAPTURE], encoding="utf-8")
             adapted, removed = adapt_request(parsed)
-        except Exception as e:
+            print(f"ADAPTER_REMOVED_FIELDS={','.join(removed) if removed else 'none'}", flush=True)
+        except Exception as exc:
             self.send_error(400, "invalid Codex request JSON")
-            print(f"ADAPTER_REQUEST_ERROR={type(e).__name__}: {e}", flush=True)
+            print(f"ADAPTER_REQUEST_ERROR={type(exc).__name__}: {exc}", flush=True)
             return
 
         headers = {k: self.headers[k] for k in ("Authorization", "Content-Type", "Accept", "OpenAI-Beta", "X-Client-Request-Id") if self.headers.get(k)}
@@ -293,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
         models = [adapted.get("model") or PREFERRED_MODEL]
         if FALLBACK_MODEL and FALLBACK_MODEL not in models:
             models.append(FALLBACK_MODEL)
-        last = (502, "Bad Gateway", {}, b"")
+        last = (502, "Bad Gateway", {}, b'{"error":{"message":"proxy failure"}}')
 
         for mi, model in enumerate(models):
             if not model:
@@ -301,32 +291,34 @@ class Handler(BaseHTTPRequestHandler):
             obj = dict(adapted)
             attempts = 0
             while True:
+                obj["model"] = model
                 obj, compacted, estimated, total = enforce_budget(obj)
                 ceiling = max(1024, TPM_LIMIT - TPM_SAFETY_MARGIN)
+                print(f"GROQ_BUDGET model={model} input={estimated} output={obj['max_output_tokens']} total={total} ceiling={ceiling} compacted={int(compacted)}", flush=True)
                 if total > ceiling:
-                    print(f"GROQ_BUDGET_BLOCKED model={model} estimated={estimated} output={obj.get('max_output_tokens')} total={total} ceiling={ceiling}", flush=True)
+                    print(f"GROQ_BUDGET_BLOCKED model={model} total={total} ceiling={ceiling}", flush=True)
                     if mi + 1 < len(models):
                         print(f"GROQ_FALLBACK from={model} to={models[mi+1]} reason=local_budget", flush=True)
                         break
-                    last = (413, "Request Entity Too Large", {}, b'{"error":{"message":"Local Groq budget gate could not compact request"}}')
+                    last = (413, "Request Entity Too Large", {}, b'{"error":{"message":"Local Groq budget gate rejected request"}}')
                     break
                 body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 ADAPTED_CAPTURE.write_text(json.dumps(sanitize(obj), indent=2, ensure_ascii=False)[:MAX_CAPTURE], encoding="utf-8")
                 headers["Content-Length"] = str(len(body))
-                print(f"GROQ_REQUEST model={model} attempt={attempts+1} input_estimate={estimated} output_budget={obj['max_output_tokens']} total_budget={total} ceiling={ceiling}", flush=True)
+                print(f"GROQ_REQUEST model={model} attempt={attempts + 1} input_estimate={estimated} output_budget={obj['max_output_tokens']} total_budget={total} ceiling={ceiling}", flush=True)
                 try:
                     status, reason, rh, rb = send(body, headers)
-                except Exception as e:
+                except Exception as exc:
                     self.send_error(502, "capture proxy upstream error")
-                    print(f"UPSTREAM_FORWARD_ERROR={type(e).__name__}: {e}", flush=True)
+                    print(f"UPSTREAM_FORWARD_ERROR={type(exc).__name__}: {exc}", flush=True)
                     return
                 last = (status, reason, rh, rb)
-                remaining = header(rh, "x-ratelimit-remaining-tokens"); reset = header(rh, "x-ratelimit-reset-tokens")
-                print(f"GROQ_LIMIT remaining_tokens={remaining or 'unknown'} reset_tokens={reset or 'unknown'}", flush=True)
+                RESPONSE_CAPTURE.write_text(rb[:MAX_CAPTURE].decode("utf-8", "replace"), encoding="utf-8")
+                print(f"UPSTREAM_RESPONSE status={status} reason={reason}", flush=True)
                 if status == 429:
-                    wait = retry_seconds(rh, rb)
                     if attempts < MAX_RETRIES:
                         attempts += 1
+                        wait = retry_seconds(rh, rb)
                         print(f"GROQ_WAIT_RATE_LIMIT seconds={wait}", flush=True)
                         time.sleep(wait)
                         continue
@@ -337,40 +329,30 @@ class Handler(BaseHTTPRequestHandler):
                     attempts += 1
                     time.sleep(min(60, DEFAULT_RETRY_SECONDS * attempts))
                     continue
-                if status == 413:
-                    if attempts < MAX_RETRIES:
-                        attempts += 1
-                        # Server-side tokenization can exceed the conservative estimate. Force another
-                        # compaction and lower output before trying again.
-                        obj["max_output_tokens"] = max(256, obj["max_output_tokens"] // 2)
-                        obj, changed, estimated2, total2 = enforce_budget(obj)
-                        print(f"GROQ_413_RECOVERY attempt={attempts} output={obj['max_output_tokens']} input_estimate={estimated2} total={total2} changed={int(changed)}", flush=True)
-                        continue
-                    if mi + 1 < len(models):
-                        print(f"GROQ_413_FALLBACK from={model} to={models[mi+1]} reason=413", flush=True)
-                    break
+                if status == 413 and attempts < MAX_RETRIES:
+                    attempts += 1
+                    obj["max_output_tokens"] = max(256, obj["max_output_tokens"] // 2)
+                    obj, changed, _, _ = enforce_budget(obj)
+                    if not changed:
+                        print("GROQ_413_NO_FURTHER_COMPACTION", flush=True)
+                        break
+                    print(f"GROQ_413_RECOMPACT changed={int(changed)}", flush=True)
+                    continue
                 break
-            if last[0] < 400 or mi + 1 >= len(models):
+            if last[0] == 200:
                 break
 
         status, reason, rh, rb = last
-        RESPONSE_CAPTURE.write_text(rb[:MAX_CAPTURE].decode("utf-8", "replace"), encoding="utf-8")
-        self.send_response(status, reason)
+        self.send_response(status)
         for k, v in rh.items():
-            if k.lower() not in {"connection", "keep-alive", "transfer-encoding"}:
+            if k.lower() not in {"content-length", "connection", "transfer-encoding"}:
                 self.send_header(k, v)
+        self.send_header("Content-Length", str(len(rb)))
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(rb)
-        self.wfile.flush()
-        print(f"UPSTREAM_RESPONSE status={status} bytes={len(rb)}", flush=True)
-
-
-class Server(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
 
 
 if __name__ == "__main__":
     print(f"CAPTURE_PROXY_LISTENING={HOST}:{PORT}", flush=True)
-    Server((HOST, PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
