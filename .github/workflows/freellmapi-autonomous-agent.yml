@@ -69,8 +69,9 @@ jobs:
           npm ci
           export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" PORT="$FREELLMAPI_PORT"
           npm run dev >/tmp/freellmapi.log 2>&1 & echo $! >/tmp/freellmapi.pid
+          rm -f /tmp/models.json
           for i in $(seq 1 45); do
-            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null; then break; fi
+            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json; then break; fi
             sleep 2
           done
           test -s /tmp/models.json || { tail -n 100 /tmp/freellmapi.log; exit 20; }
@@ -106,7 +107,6 @@ jobs:
           out=[]
           for key in priority:
               out += [x for x in ids if key in x.lower() and x not in out]
-          # Keep the loop bounded. FreeLLMAPI itself performs provider fallback.
           open('/tmp/model-candidates','w').write('\n'.join(out[:8]))
           print('FREE_MODEL_CANDIDATES=',len(out[:8]))
           print('\n'.join(out[:8]))
@@ -128,7 +128,8 @@ jobs:
           set -euo pipefail
           chmod +x scripts/autonomous-agent.sh
           export GATEWAY_KEY="$GATEWAY_KEY"
-          export CODEX_HOME=/tmp/cardiag-codex-home
+          # Keep Codex state in the runner home, not /tmp; Codex may need helper binaries.
+          export CODEX_HOME="$HOME/.codex-cardiag"
           export CODEX_BASE_URL="http://127.0.0.1:${CODEX_SHIM_PORT}/v1"
           rm -rf "$CODEX_HOME"
           mkdir -p "$CODEX_HOME"
@@ -137,7 +138,7 @@ jobs:
             [ -n "$model" ] || continue
             echo "=== TRYING FREE MODEL: $model ==="
             export FREELLMAPI_MODEL="$model"
-            rm -rf "$CODEX_HOME/.codex-shim" /tmp/cardiag-shim
+            rm -rf /tmp/cardiag-shim
             mkdir -p /tmp/cardiag-shim
             cat >/tmp/cardiag-shim/config.yaml <<YAML
           server:
@@ -196,6 +197,7 @@ jobs:
             redact_message_content: true
             log_sse_events: false
           YAML
+            rm -f /tmp/codex-shim.pid /tmp/cardiag-shim.log
             GATEWAY_KEY="$GATEWAY_KEY" /tmp/codex-shim --config /tmp/cardiag-shim/config.yaml >/tmp/cardiag-shim.log 2>&1 & echo $! >/tmp/codex-shim.pid
             shim_ready=0
             for i in $(seq 1 30); do
@@ -237,37 +239,3 @@ jobs:
       - name: Final validation
         working-directory: android
         run: timeout 240s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
-
-      - name: Scope and commit
-        run: |
-          set -euo pipefail
-          rm -rf .codex/.tmp/plugins 2>/dev/null || true
-          allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
-          android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
-          while IFS= read -r f; do
-            [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }
-          done < <(git diff --name-only)
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
-          git diff --cached --quiet && { echo 'No validated code change'; exit 41; }
-          git commit -m 'feat(road): autonomous agent improvement'
-          git push origin HEAD:main
-
-      - name: Artifacts
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: cardiag-freellmapi-results
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-            agent-state.md
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Stop
-        if: always()
-        run: |
-          [ -f /tmp/codex-shim.pid ] && kill "$(cat /tmp/codex-shim.pid)" 2>/dev/null || true
-          [ -f /tmp/freellmapi.pid ] && kill "$(cat /tmp/freellmapi.pid)" 2>/dev/null || true
