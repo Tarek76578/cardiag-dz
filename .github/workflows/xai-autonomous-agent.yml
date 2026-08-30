@@ -87,10 +87,10 @@ jobs:
             -H "Authorization: Bearer $XAI_API_KEY" \
             -H 'Content-Type: application/json' \
             "$XAI_BASE_URL/models")"
-          python3 - "$XAI_MODEL" <<'PY' <<<"$models_json"
-          import json, sys
+          XAI_MODELS_JSON="$models_json" python3 - "$XAI_MODEL" <<'PY'
+          import json, os, sys
           wanted = sys.argv[1]
-          data = json.load(sys.stdin)
+          data = json.loads(os.environ['XAI_MODELS_JSON'])
           ids = {item.get('id') for item in data.get('data', [])}
           if wanted not in ids:
               print(f'XAI_MODEL_UNAVAILABLE={wanted}', file=sys.stderr)
@@ -131,12 +131,15 @@ jobs:
             return "$status"
           }
 
-          if run_agent /tmp/codex-agent.log; then
+          set +e
+          run_agent /tmp/codex-agent.log
+          agent_status=$?
+          set -e
+          if [ "$agent_status" -eq 0 ]; then
             echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
             exit 0
           fi
-          agent_status=$?
-          if grep -qE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
+          if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
             echo "AI_PROVIDER_RATE_LIMITED=$CODEX_PROVIDER"
             exit 75
           fi
