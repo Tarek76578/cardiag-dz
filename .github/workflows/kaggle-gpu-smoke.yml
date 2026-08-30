@@ -76,7 +76,7 @@ jobs:
           owner=data["id"].split("/",1)[0]
           data.update({
               "id": f"{owner}/{slug}",
-              "title": f"CarDiag GPU Smoke {slug}",
+              "title": slug,
               "code_file": "cardiag_gpu_smoke.py",
               "language": "python",
               "kernel_type": "script",
