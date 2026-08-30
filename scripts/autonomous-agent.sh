@@ -14,6 +14,7 @@ PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-openrouter}}"
 MODEL="${AI_MODEL:-${OPENROUTER_MODEL:-qwen/qwen3-coder:free}}"
 BASE_URL="${CODEX_BASE_URL:-${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}}"
 ENV_KEY="${CODEX_ENV_KEY:-OPENROUTER_API_KEY}"
+WIRE_API="${CODEX_WIRE_API:-responses}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
@@ -38,6 +39,7 @@ echo "AI_PROVIDER=$PROVIDER"
 echo "AI_MODEL=$MODEL"
 echo "CODEX_BASE_URL=$BASE_URL"
 echo "CODEX_ENV_KEY=$ENV_KEY"
+echo "CODEX_WIRE_API=$WIRE_API"
 echo "CODEX_HOME=$CODEX_HOME"
 
 test -z "$(git status --porcelain)" || {
@@ -76,12 +78,15 @@ codex --version
 
 # Exactly one provider is selected by the workflow. Codex retries are disabled so
 # a rate-limit response cannot fan out into repeated quota-consuming requests.
+# Groq is configured with Chat Completions because Codex's Responses request body
+# can contain OpenAI-specific fields that Groq rejects with HTTP 400. Groq documents
+# Chat Completions as OpenAI-compatible and supports tool use for GPT-OSS models.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
   -c "model_providers.$PROVIDER.name=\"$PROVIDER\"" \
   -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
-  -c "model_providers.$PROVIDER.wire_api=\"responses\"" \
+  -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
   -c "model_providers.$PROVIDER.request_max_retries=0" \
   -c "model_providers.$PROVIDER.stream_max_retries=0" \
