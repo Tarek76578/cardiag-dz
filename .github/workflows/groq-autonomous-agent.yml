@@ -13,6 +13,10 @@ concurrency:
 env:
   GROQ_BASE_URL: https://api.groq.com/openai/v1
   GROQ_WIRE_API: responses
+  GROQ_PRIMARY_MODEL: openai/gpt-oss-120b
+  GROQ_FALLBACK_MODEL: openai/gpt-oss-20b
+  GROQ_RATE_LIMIT_RETRIES: '1'
+  GROQ_DEFAULT_RETRY_SECONDS: '45'
 
 jobs:
   agent:
@@ -94,13 +98,16 @@ jobs:
           data=json.loads(os.environ["MODEL_LIST"])
           models=data.get("data",[])
           blocked=("whisper","tts","guard","safeguard","compound")
-          preferred=("openai/gpt-oss", "qwen/", "moonshotai/", "meta-llama/", "llama-")
+          ids={m.get("id",""):m for m in models}
+          preferred=["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+          for mid in preferred:
+              if mid in ids: print(mid)
           rows=[]
           for m in models:
               mid=m.get("id","")
-              if not mid or any(x in mid.lower() for x in blocked): continue
+              if not mid or mid in preferred or any(x in mid.lower() for x in blocked): continue
               ctx=m.get("context_window",0) or 0
-              rows.append((0 if mid.startswith(preferred) else 1,-ctx,mid))
+              rows.append((0 if mid.startswith(("openai/gpt-oss", "qwen/", "moonshotai/", "meta-llama/", "llama-")) else 1,-ctx,mid))
           for _,__,mid in sorted(rows): print(mid)
           PY
 
@@ -143,18 +150,24 @@ jobs:
           {
             echo 'provider=groq'
             echo "model=$selected"
+            echo "fallback_model=$GROQ_FALLBACK_MODEL"
             echo "base_url=$GROQ_BASE_URL"
             echo 'env_key=GROQ_API_KEY'
             echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
 
       - name: Start Groq compatibility adapter outside repository
+        env:
+          GROQ_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
+          GROQ_FALLBACK_MODEL: ${{ env.GROQ_FALLBACK_MODEL }}
+          GROQ_RATE_LIMIT_RETRIES: ${{ env.GROQ_RATE_LIMIT_RETRIES }}
+          GROQ_DEFAULT_RETRY_SECONDS: ${{ env.GROQ_DEFAULT_RETRY_SECONDS }}
         run: |
           set -euo pipefail
           rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
-          nohup python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
+          nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
           echo $! > /tmp/codex-groq-proxy.pid
           for i in $(seq 1 30); do
             if grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log; then break; fi
