@@ -15,13 +15,22 @@ UNSUPPORTED_TOP_LEVEL = {
     "safety_identifier", "prompt_cache_key", "prompt", "client_metadata",
 }
 
+# Groq free-tier GPT-OSS models have an 8K TPM ceiling. Codex 0.151 sends a
+# large built-in tool catalog, so forwarding every tool can exceed the limit
+# before the user's task is processed. This agent only needs the shell tool;
+# patches can be applied through exec_command as well.
+ALLOWED_FUNCTION_TOOLS = {"exec_command", "apply_patch"}
+
 
 def sanitize_tool(tool):
     if not isinstance(tool, dict):
         return None
     kind = tool.get("type")
     if kind == "function":
-        return tool
+        name = tool.get("name")
+        if name in ALLOWED_FUNCTION_TOOLS:
+            return tool
+        return None
     if kind == "namespace":
         nested = tool.get("tools") or []
         return [x for x in (sanitize_tool(t) for t in nested) if isinstance(x, dict)]
@@ -35,8 +44,9 @@ def sanitize_body(raw):
     for key in UNSUPPORTED_TOP_LEVEL:
         body.pop(key, None)
 
-    # Codex 0.151 can emit reasoning.summary. Groq accepts reasoning.effort,
-    # but rejects the request-side reasoning.summary field.
+    # Respect the model selected by the provider preflight. Never invent or
+    # rewrite a model ID here; availability is checked before Codex starts.
+
     reasoning = body.get("reasoning")
     if isinstance(reasoning, dict):
         reasoning.pop("summary", None)
@@ -52,6 +62,12 @@ def sanitize_body(raw):
             elif isinstance(item, dict):
                 flattened.append(item)
         body["tools"] = flattened
+        print(
+            "GROQ_PROXY_TOOLS=" + ",".join(
+                str(t.get("name", "?")) for t in flattened if isinstance(t, dict)
+            ),
+            flush=True,
+        )
 
     return json.dumps(body, separators=(",", ":")).encode("utf-8")
 
