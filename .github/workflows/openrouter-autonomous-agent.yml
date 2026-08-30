@@ -78,7 +78,7 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Verify OpenRouter API and discover free coding models
+      - name: Verify OpenRouter API and discover Responses-compatible free models
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -88,21 +88,63 @@ jobs:
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
           python3 - <<'PY'
-          import json
-          data=json.load(open('/tmp/openrouter-models.json'))
-          ids=[str(m.get('id')) for m in data.get('data',[]) if m.get('id')]
-          free=[x for x in ids if x.endswith(':free')]
-          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','glm','llama','mistral')
-          ranked=[]
+          import json, os, subprocess, urllib.request, urllib.error
+
+          data = json.load(open('/tmp/openrouter-models.json'))
+          ids = [str(m.get('id')) for m in data.get('data', []) if m.get('id')]
+          free = [x for x in ids if x.endswith(':free')]
+
+          # Prefer models commonly useful for code, but never trust the model
+          # catalogue alone: OpenRouter can expose :free models that are
+          # restricted to agentic harnesses and return 403 from /responses.
+          priority = ('coder', 'coding', 'devstral', 'codestral', 'qwen', 'deepseek', 'kimi', 'glm', 'nemotron', 'llama', 'mistral')
+          ranked = []
           for key in priority:
               ranked.extend(x for x in free if key in x.lower() and x not in ranked)
           ranked.extend(x for x in free if x not in ranked)
-          ranked=ranked[:6]
-          if not ranked:
-              raise SystemExit('No OpenRouter :free models are currently available')
-          open('/tmp/openrouter-model-candidates','w').write('\n'.join(ranked)+'\n')
-          print('OPENROUTER_FREE_MODELS=',len(ranked))
-          print('\n'.join(ranked))
+
+          def probe(model):
+              body = json.dumps({
+                  'model': model,
+                  'input': 'Reply with OK only.',
+                  'max_output_tokens': 16,
+              }).encode()
+              req = urllib.request.Request(
+                  os.environ['OPENROUTER_BASE_URL'] + '/responses',
+                  data=body,
+                  headers={
+                      'Authorization': 'Bearer ' + os.environ['OPENROUTER_API_KEY'],
+                      'Content-Type': 'application/json',
+                      'HTTP-Referer': 'https://github.com/Tarek76578/cardiag-dz',
+                      'X-Title': 'CarDiag autonomous agent compatibility probe',
+                  },
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=25) as r:
+                      raw = r.read().decode('utf-8', 'replace')
+                      return r.status, raw[:300]
+              except urllib.error.HTTPError as e:
+                  raw = e.read().decode('utf-8', 'replace')
+                  return e.code, raw[:300]
+              except Exception as e:
+                  return 0, str(e)[:300]
+
+          compatible = []
+          for model in ranked:
+              status, detail = probe(model)
+              if status == 200:
+                  compatible.append(model)
+                  print('RESPONSES_COMPATIBLE=', model)
+              else:
+                  print(f'SKIP_MODEL={model} RESPONSES_STATUS={status} DETAIL={detail}')
+              if len(compatible) >= 6:
+                  break
+
+          if not compatible:
+              raise SystemExit('No OpenRouter :free model passed the /responses compatibility probe')
+          open('/tmp/openrouter-model-candidates', 'w').write('\n'.join(compatible) + '\n')
+          print('OPENROUTER_RESPONSES_COMPATIBLE_FREE_MODELS=', len(compatible))
           PY
 
       - name: Autonomous Codex agent with OpenRouter fallback
@@ -113,6 +155,7 @@ jobs:
           chmod +x scripts/autonomous-agent.sh
           export OPENROUTER_API_KEY
           export CODEX_HOME="$HOME/.codex-cardiag"
+          mkdir -p "$CODEX_HOME"
           success=0
           ROAD_DIR="android/app/src/main/java/dz/cardiag/app/core/road"
           clean_attempt_artifacts() {
@@ -144,7 +187,7 @@ jobs:
             echo "OPENROUTER_MODEL_FAILED=$model stage=android-build status=$build_status"
             clean_attempt_artifacts
           done < /tmp/openrouter-model-candidates
-          [ "$success" -eq 1 ] || { echo 'All OpenRouter free models failed'; exit 1; }
+          [ "$success" -eq 1 ] || { echo 'All OpenRouter Responses-compatible free models failed'; exit 1; }
 
       - name: Final validation
         working-directory: android
