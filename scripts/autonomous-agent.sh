@@ -14,23 +14,43 @@ PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-openrouter}}"
 MODEL="${AI_MODEL:-${OPENROUTER_MODEL:-qwen/qwen3-coder:free}}"
 BASE_URL="${CODEX_BASE_URL:-${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}}"
 ENV_KEY="${CODEX_ENV_KEY:-OPENROUTER_API_KEY}"
-WIRE_API="${CODEX_WIRE_API:-responses}"
+WIRE_API="responses"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 mkdir -p "$CODEX_HOME"
 chmod 700 "$CODEX_HOME"
+
+PROXY_PID=""
+PROXY_LOG="/tmp/groq-codex-proxy.log"
+cleanup_proxy() {
+  if [ -n "$PROXY_PID" ] && kill -0 "$PROXY_PID" 2>/dev/null; then
+    kill "$PROXY_PID" 2>/dev/null || true
+    wait "$PROXY_PID" 2>/dev/null || true
+  fi
+}
+trap 'cleanup_proxy; rm -f "$PROMPT_FILE"' EXIT
 
 case "$PROVIDER" in
   openrouter)
     export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
     test -n "$OPENROUTER_API_KEY" || { echo "OPENROUTER_API_KEY is missing" >&2; exit 13; }
-    WIRE_API="responses"
     ;;
   groq)
     export GROQ_API_KEY="${GROQ_API_KEY:-}"
     test -n "$GROQ_API_KEY" || { echo "GROQ_API_KEY is missing" >&2; exit 13; }
-    # Codex CLI 0.151+ only accepts Responses for custom model providers.
-    # Groq currently exposes an OpenAI-compatible Responses endpoint.
-    WIRE_API="responses"
+    test -f "$ROOT/scripts/groq-codex-proxy.py"
+    # Codex 0.151+ requires Responses for custom providers. Groq also exposes
+    # Responses, but rejects several OpenAI-only optional fields that Codex can
+    # serialize. Use the local compatibility bridge to sanitize those fields
+    # and normalize tool definitions before forwarding to Groq.
+    python3 "$ROOT/scripts/groq-codex-proxy.py" >"$PROXY_LOG" 2>&1 &
+    PROXY_PID=$!
+    for _ in $(seq 1 50); do
+      if curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1; then break; fi
+      sleep 0.1
+    done
+    curl -fsS http://127.0.0.1:8787/health >/dev/null
+    BASE_URL="http://127.0.0.1:8787/v1"
+    ENV_KEY="GROQ_API_KEY"
     ;;
   *)
     echo "Unsupported CODEX_PROVIDER=$PROVIDER" >&2
@@ -53,7 +73,6 @@ test -z "$(git status --porcelain)" || {
 }
 
 PROMPT_FILE="$(mktemp)"
-trap 'rm -f "$PROMPT_FILE"' EXIT
 cat > "$PROMPT_FILE" <<EOF
 $(cat "$TASK_FILE")
 
@@ -80,8 +99,6 @@ EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
 
-# Codex CLI 0.151+ rejects the legacy chat wire_api for custom providers.
-# Use Responses for both providers; Groq exposes an OpenAI-compatible Responses API.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
@@ -93,6 +110,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.stream_max_retries=0" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
+  -c "web_search=\"disabled\"" \
   --sandbox danger-full-access \
   --skip-git-repo-check \
   "$(cat "$PROMPT_FILE")" < /dev/null
