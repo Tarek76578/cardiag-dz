@@ -28,12 +28,14 @@ if [ "$AI_PROVIDER" = "freellmapi" ]; then
   echo "AI_MODEL=$MODEL"
   curl -fsS "$OPENAI_BASE/models" >/tmp/cardiag-freellmapi-models.json
   python3 - <<'PY'
-  import json
-  d=json.load(open('/tmp/cardiag-freellmapi-models.json'))
-  ids=[x.get('id') for x in d.get('data',[]) if x.get('id')]
-  if not ids: raise SystemExit('FreeLLMAPI compatibility endpoint returned no models')
-  print('FREELLMAPI_VISIBLE_MODELS=', len(ids))
-  PY
+import json
+with open('/tmp/cardiag-freellmapi-models.json', encoding='utf-8') as f:
+    d = json.load(f)
+ids = [x.get('id') for x in d.get('data', []) if x.get('id')]
+if not ids:
+    raise SystemExit('FreeLLMAPI compatibility endpoint returned no models')
+print('FREELLMAPI_VISIBLE_MODELS=', len(ids))
+PY
 elif [ "$AI_PROVIDER" = "ollama" ]; then
   MODEL="${OLLAMA_MODEL:-qwen2.5-coder:3b}"
   OLLAMA_BASE="${OLLAMA_API_BASE:-http://127.0.0.1:11434}"
