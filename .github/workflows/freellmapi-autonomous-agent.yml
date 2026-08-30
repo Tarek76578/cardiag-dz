@@ -210,6 +210,7 @@ jobs:
               continue
             fi
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
+            find android/app/src/main/java/dz/cardiag/app/core/road -maxdepth 1 -type f -name "*.bak" -delete 2>/dev/null || true
             set +e
             timeout 120s ./scripts/autonomous-agent.sh
             agent_status=$?
