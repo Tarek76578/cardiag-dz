@@ -41,6 +41,7 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f scripts/autonomous-agent.sh
+          test -f scripts/codex-groq-capture-proxy.py
           test -n "${{ secrets.GROQ_API_KEY }}"
           test -z "$(git status --porcelain)"
 
@@ -113,12 +114,7 @@ jobs:
             echo "=== REAL GROQ RESPONSES PROBE: $model ==="
             payload="$(MODEL="$model" python3 - <<'PY'
           import json,os
-          print(json.dumps({
-              "model": os.environ["MODEL"],
-              "input": "Reply with exactly OK",
-              "max_output_tokens": 16,
-              "store": False
-          }))
+          print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16,"store":False}))
           PY
             )"
             probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
@@ -131,28 +127,19 @@ jobs:
             echo "GROQ_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then
               RESPONSE_BODY="$resp" python3 - <<'PY'
-          import json, os, sys
+          import json, os
           data=json.loads(os.environ["RESPONSE_BODY"])
           if not data.get("id") or data.get("object") not in ("response", "response.completed"):
-              print("GROQ_RESPONSES_PROBE_INVALID_JSON=1")
-              raise SystemExit(1)
+              raise SystemExit("GROQ_RESPONSES_PROBE_INVALID_JSON=1")
           print("GROQ_RESPONSES_PROBE_VALID_JSON=1")
           PY
               selected="$model"
               break
             fi
-            if [ "$code" = 429 ]; then
-              echo "GROQ_RESPONSES_PROBE_429_MODEL=$model"
-            else
-              printf '%s\n' "$resp" | head -c 700 || true
-              echo
-            fi
+            if [ "$code" = 429 ]; then echo "GROQ_RESPONSES_PROBE_429_MODEL=$model"; fi
           done < /tmp/groq-candidates.txt
 
-          if [ -z "$selected" ]; then
-            echo 'GROQ_NO_RESPONSES_MODEL_PASSED_REAL_INFERENCE=1' >&2
-            exit 43
-          fi
+          test -n "$selected" || { echo 'GROQ_NO_RESPONSES_MODEL_PASSED_REAL_INFERENCE=1' >&2; exit 43; }
           echo "GROQ_RESPONSES_MODEL_SELECTED=$selected"
           {
             echo 'provider=groq'
@@ -162,13 +149,26 @@ jobs:
             echo 'wire_api=responses'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Autonomous Codex agent
+      - name: Start Codex payload capture proxy
+        run: |
+          set -euo pipefail
+          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-proxy.log
+          chmod +x scripts/codex-groq-capture-proxy.py
+          nohup python3 scripts/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
+          echo $! > /tmp/codex-groq-proxy.pid
+          for i in $(seq 1 30); do
+            if grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log; then break; fi
+            sleep 1
+          done
+          grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
+
+      - name: Autonomous Codex agent through capture proxy
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_PROVIDER: ${{ steps.provider.outputs.provider }}
           AI_MODEL: ${{ steps.provider.outputs.model }}
-          CODEX_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          CODEX_BASE_URL: http://127.0.0.1:8787/openai/v1
           CODEX_ENV_KEY: ${{ steps.provider.outputs.env_key }}
           CODEX_WIRE_API: ${{ steps.provider.outputs.wire_api }}
         run: |
@@ -180,6 +180,7 @@ jobs:
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
           agent_status=${PIPESTATUS[0]}
           set -e
+          echo "CAPTURE_PROXY_LOG:"; cat /tmp/codex-groq-proxy.log || true
           if [ "$agent_status" -eq 0 ]; then exit 0; fi
           if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then
             echo "AI_PROVIDER_RATE_LIMITED=groq"
@@ -188,11 +189,25 @@ jobs:
           echo "AI_PROVIDER_FAILED=groq status=$agent_status"
           exit "$agent_status"
 
+      - name: Upload captured Codex request for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-groq-payload-debug
+          path: |
+            /tmp/codex-groq-request.json
+            /tmp/codex-groq-proxy.log
+            /tmp/codex-agent.log
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Final validation
+        if: success()
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
       - name: Commit verified autonomous changes
+        if: success()
         run: |
           set -euo pipefail
           git diff --check
