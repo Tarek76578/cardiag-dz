@@ -60,6 +60,21 @@ def adapt_request(parsed):
             removed.append(key)
             adapted.pop(key, None)
 
+    # Codex 0.151 can emit reasoning.summary. Groq's Responses endpoint rejects
+    # that field even though the request-level reasoning object itself is valid.
+    # Preserve supported reasoning controls (for example effort) and remove only
+    # the incompatible summary member.
+    reasoning = adapted.get("reasoning")
+    if isinstance(reasoning, dict) and "summary" in reasoning:
+        reasoning = dict(reasoning)
+        reasoning.pop("summary", None)
+        if reasoning:
+            adapted["reasoning"] = reasoning
+        else:
+            adapted.pop("reasoning", None)
+        removed.append("reasoning.summary")
+        print("ADAPTER_REMOVED_REASONING_SUMMARY=1", flush=True)
+
     # Codex may expose its internal multi-agent namespace tool. Groq's Responses
     # API accepts function/built-in/MCP tools, not Codex's namespace wrapper.
     tools = adapted.get("tools")
