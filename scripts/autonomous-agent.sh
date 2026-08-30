@@ -17,10 +17,19 @@ export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 test -n "$OPENROUTER_API_KEY" || { echo "OPENROUTER_API_KEY is missing" >&2; exit 13; }
 
+# Codex requires CODEX_HOME to exist before startup. GitHub Actions may export a
+# custom path (for example $HOME/.codex-cardiag) without creating it first.
+mkdir -p "$CODEX_HOME"
+
+# Keep the agent state isolated from any pre-existing Codex configuration while
+# allowing the CLI to create its own config/session files normally.
+chmod 700 "$CODEX_HOME"
+
 echo "AI_AGENT=codex"
 echo "AI_PROVIDER=openrouter"
 echo "AI_MODEL=$MODEL"
 echo "OPENROUTER_BASE_URL=$OPENROUTER_BASE_URL"
+echo "CODEX_HOME=$CODEX_HOME"
 
 test -z "$(git status --porcelain)" || {
   echo "Working tree must be clean before the autonomous edit." >&2
