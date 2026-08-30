@@ -44,11 +44,11 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
           test -f AGENTS.md
-          test -f android/gradlew
+          test -x android/gradlew
           test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md
           test -f agent-state.md
-          test -f scripts/autonomous-agent.sh
+          test -x scripts/autonomous-agent.sh
           test -f scripts/codex-groq-capture-proxy.py
           test -f scripts/test_codex_groq_proxy.py
           test -n "${{ secrets.GROQ_API_KEY }}"
@@ -147,14 +147,20 @@ jobs:
           GROQ_TPM_SAFETY_MARGIN: ${{ env.GROQ_TPM_SAFETY_MARGIN }}
         run: |
           set -euo pipefail
+          cleanup() { if [ -n "${PROXY_PID:-}" ]; then kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true; fi; }
+          trap cleanup EXIT INT TERM
           rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
           python3 -m py_compile /tmp/codex-groq-capture-proxy.py
           nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" GROQ_MAX_INPUT_TOKENS="$GROQ_MAX_INPUT_TOKENS" GROQ_TPM_LIMIT="$GROQ_TPM_LIMIT" GROQ_TPM_SAFETY_MARGIN="$GROQ_TPM_SAFETY_MARGIN" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
-          echo $! > /tmp/codex-groq-proxy.pid
+          PROXY_PID=$!
+          echo "$PROXY_PID" > /tmp/codex-groq-proxy.pid
           for i in $(seq 1 30); do grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break; sleep 1; done
           grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
+          kill -0 "$PROXY_PID"
+          curl -fsS --max-time 5 http://127.0.0.1:8787/health >/tmp/codex-groq-health.json
+          grep -q '"status":"ok"' /tmp/codex-groq-health.json
           test -z "$(git status --porcelain)"
       - name: Autonomous Codex agent through Groq compatibility adapter
         env:
@@ -189,6 +195,7 @@ jobs:
             /tmp/codex-groq-response.json
             /tmp/codex-groq-proxy.log
             /tmp/codex-agent.log
+            /tmp/codex-groq-health.json
           if-no-files-found: ignore
           retention-days: 3
       - name: Final validation
