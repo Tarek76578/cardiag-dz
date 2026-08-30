@@ -30,11 +30,11 @@ codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
   -c "model_providers.$PROVIDER.name=\"$PROVIDER\"" \
-  -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
+  -c "model_providers.$PROVIDER.base_url=\"http://127.0.0.1:${CAPTURE_PROXY_PORT:-8787}\"" \
   -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
-  -c "model_providers.$PROVIDER.request_max_retries=5" \
-  -c "model_providers.$PROVIDER.stream_max_retries=5" \
+  -c "model_providers.$PROVIDER.request_max_retries=2" \
+  -c "model_providers.$PROVIDER.stream_max_retries=2" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
   -c "project_doc_max_bytes=0" \
