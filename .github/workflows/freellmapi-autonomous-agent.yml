@@ -12,21 +12,25 @@ concurrency:
   group: cardiag-freellmapi-agent
   cancel-in-progress: false
 
+env:
+  FREELLMAPI_PORT: 3001
+  AI_PROVIDER: freellmapi
+  OPENAI_API_BASE: http://127.0.0.1:3002/v1
+  AIDER_API_BASE: http://127.0.0.1:3002/v1
+  AIDER_ANALYTICS: "false"
+  AIDER_CHECK_UPDATE: "false"
+
 jobs:
   agent:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      FREELLMAPI_PORT: 3001
-      AI_PROVIDER: freellmapi
-      OPENAI_API_BASE: http://127.0.0.1:3002/v1
-      AIDER_API_BASE: http://127.0.0.1:3002/v1
-      AIDER_ANALYTICS: "false"
-      AIDER_CHECK_UPDATE: "false"
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Clean runtime files
+        run: rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
 
       - name: Baseline
         run: |
@@ -56,7 +60,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: FreeLLMAPI
+      - name: Start FreeLLMAPI
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/SeyhmusKaya/freellmapi-extended.git /tmp/freellmapi
@@ -64,63 +68,49 @@ jobs:
           npm ci
           export ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
           export PORT="$FREELLMAPI_PORT"
-          npm run dev >/tmp/freellmapi.log 2>&1 &
-          echo $! >/tmp/freellmapi.pid
+          npm run dev >/tmp/freellmapi.log 2>&1 & echo $! >/tmp/freellmapi.pid
           for i in $(seq 1 90); do
-            if curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null; then break; fi
+            curl -fsS "http://127.0.0.1:$FREELLMAPI_PORT/v1/models" >/tmp/models.json 2>/dev/null && break
             sleep 2
           done
           test -s /tmp/models.json || { cat /tmp/freellmapi.log >&2; exit 20; }
           python3 - <<'PY'
           import json
-          d=json.load(open('/tmp/models.json'))
-          assert d.get('data'), 'No models returned by FreeLLMAPI'
+          d=json.load(open('/tmp/models.json')); assert d.get('data'), 'No models returned by FreeLLMAPI'
           print('FREELLMAPI_MODELS=',len(d['data']))
           PY
           DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"
-          test -n "$DB_PATH" || { echo 'FreeLLMAPI database not found'; exit 21; }
+          test -n "$DB_PATH" || exit 21
           GATEWAY_KEY="$(DB_PATH="$DB_PATH" node - <<'NODE'
-          const Database = require('/tmp/freellmapi/node_modules/better-sqlite3');
-          const db = new Database(process.env.DB_PATH, { readonly: true });
-          const rows = db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all();
-          const candidates = rows.map(r => String(r.value || '').trim()).filter(v => v.length >= 20 && !/^your-/i.test(v));
-          if (!candidates.length) process.exit(2);
-          process.stdout.write(candidates.sort((a,b)=>b.length-a.length)[0]);
+          const Database=require('/tmp/freellmapi/node_modules/better-sqlite3');
+          const db=new Database(process.env.DB_PATH,{readonly:true});
+          const rows=db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all();
+          const c=rows.map(r=>String(r.value||'').trim()).filter(v=>v.length>=20&&!/^your-/i.test(v));
+          if(!c.length)process.exit(2); process.stdout.write(c.sort((a,b)=>b.length-a.length)[0]);
           NODE
-          )" || { echo 'FreeLLMAPI unified API key was not found'; exit 22; }
-          test "${#GATEWAY_KEY}" -ge 20 || exit 23
+          )" || { echo 'FreeLLMAPI unified API key not found'; exit 22; }
+          test "${#GATEWAY_KEY}" -ge 20
           echo "GATEWAY_KEY=$GATEWAY_KEY" >> "$GITHUB_ENV"
           echo 'FREELLMAPI_AUTH_KEY_RESOLVED=true'
 
-      - name: Select working free coding model
+      - name: Build ordered free model list
         run: |
-          set -euo pipefail
           python3 - <<'PY'
-          import json,os,time,urllib.request,urllib.error
+          import json
           ids=[m['id'] for m in json.load(open('/tmp/models.json')).get('data',[]) if m.get('id')]
-          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','gemma')
-          candidates=[]
-          for p in priority: candidates += [x for x in ids if p in x.lower() and x not in candidates]
-          candidates += [x for x in ids if x not in candidates]
-          key=os.environ['GATEWAY_KEY']; last=None
-          for model in candidates[:20]:
-            body=json.dumps({'model':model,'messages':[{'role':'user','content':'Reply with exactly OK.'}],'max_tokens':8}).encode()
-            for attempt in range(2):
-              try:
-                req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=body,headers={'Content-Type':'application/json','Authorization':'Bearer '+key})
-                with urllib.request.urlopen(req,timeout=90) as r: d=json.load(r)
-                if d.get('choices'):
-                  open('/tmp/model','w').write(model); print('WORKING_FREE_MODEL=',model); raise SystemExit(0)
-              except Exception as e:
-                last=e
-                if '429' in str(e): time.sleep(8)
-                else: break
-          raise SystemExit(f'No free model passed chat probe. Last error: {last}')
+          priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi','gemma','llama')
+          out=[]
+          for p in priority:
+            for x in ids:
+              if p in x.lower() and x not in out: out.append(x)
+          for x in ids:
+            if x not in out: out.append(x)
+          open('/tmp/model-candidates','w').write('\n'.join(out[:30]))
+          print('FREE_MODEL_CANDIDATES=',len(out[:30]))
           PY
 
       - name: Local OpenAI proxy
         run: |
-          set -euo pipefail
           cat >/tmp/proxy.py <<'PY'
           import os
           from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
@@ -146,49 +136,52 @@ jobs:
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
           sleep 1
 
-      - name: Aider autonomous cycle with rate-limit fallback
+      - name: Autonomous agent with automatic free-model fallback
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          chmod +x scripts/autonomous-agent.sh
           export OPENAI_API_KEY="$GATEWAY_KEY"
-          export FREELLMAPI_MODEL="$(cat /tmp/model)"
-          export AIDER_MODEL="openai/$FREELLMAPI_MODEL"
           export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md
           export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
           export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
-          chmod +x scripts/autonomous-agent.sh
-          rm -rf .aider* "$AIDER_CACHE_DIR"
-          for attempt in 1 2 3; do
+          while IFS= read -r model; do
+            [ -n "$model" ] || continue
+            echo "Trying free coding model: $model"
+            export FREELLMAPI_MODEL="$model"
+            export AIDER_MODEL="openai/$model"
+            rm -rf .aider* "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history
             set +e
             ./scripts/autonomous-agent.sh
             status=$?
             set -e
             rm -rf .aider* "$AIDER_CACHE_DIR"
-            if [ "$status" -eq 0 ]; then exit 0; fi
-            echo "Aider attempt $attempt failed with status $status"
-            sleep $((attempt * 15))
-          done
+            if [ "$status" -eq 0 ]; then
+              echo "FREE_MODEL_SUCCESS=$model"
+              exit 0
+            fi
+            echo "FREE_MODEL_FAILED=$model status=$status; falling back to next free model"
+            sleep 8
+          done < /tmp/model-candidates
+          echo 'All free coding models failed'
           exit 1
-
-      - name: Remove runtime files
-        if: always()
-        run: rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
 
       - name: Android validation
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
 
-      - name: Scope
+      - name: Scope and cleanup
         run: |
           set -euo pipefail
+          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
           android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           while IFS= read -r f; do
             [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }
           done < <(git diff --name-only)
 
-      - name: Commit
+      - name: Commit validated code
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
@@ -210,7 +203,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Diagnostics on failure
+      - name: Diagnostics
         if: failure()
         run: |
           tail -n 200 /tmp/freellmapi.log 2>/dev/null || true
