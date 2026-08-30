@@ -54,8 +54,6 @@ def strip_unsupported_hosted_tools(obj):
         if len(kept) != len(tools):
             obj["tools"] = kept
 
-    # A tool-specific choice referring to a hosted web-search tool is also
-    # unusable after the tool has been removed. Let the model choose normally.
     choice = obj.get("tool_choice")
     if isinstance(choice, dict) and choice.get("type") in UNSUPPORTED_HOSTED_TOOL_TYPES:
         removed.append("tool_choice:" + str(choice.get("type")))
@@ -146,14 +144,6 @@ if ! curl -fsS --max-time 5 "${CODEX_BASE_URL%/v1}/v1/models" >/dev/null 2>&1; t
 fi
 echo "CODEX_FILTER_READY=1"
 
-ALLOWED_FILES=(
-  "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
-  "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt"
-)
-for file in "${ALLOWED_FILES[@]}"; do
-  test -f "$ROOT/$file" || { echo "Allowed task file is missing: $file" >&2; exit 11; }
-done
-
 test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
 
 PROMPT_FILE="$(mktemp)"
@@ -170,15 +160,15 @@ $(cat "$AGENTS_FILE")
 --- AUTONOMOUS EXECUTION CONTRACT ---
 You are the CarDiag coding agent running in GitHub Actions through Codex.
 The task manifest above is the ONLY task. Do not choose another backlog item.
-ONLY these two project files may be edited:
-- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
-- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt
-Do not create, delete, rename, or modify any other project file. Do not commit or push.
-Implement the acceptance criteria exactly and minimally. Reuse existing dependencies; do not add dependencies.
+You may modify any project files required to complete the task.
+Do not make unrelated changes.
+Keep the implementation minimal, coherent, production-quality, and scoped to the task manifest.
+Add or update regression tests when appropriate.
+Do not commit or push; the workflow handles repository commits.
 Preserve public interfaces and existing behavior unless explicitly required.
 Never fabricate OSM/business data. Only map fields actually returned by the API.
-Use bounded network timeouts and safe failure handling. Do not store location data. Do not implement hazards in this cycle.
-Before finishing, review git diff and leave only intended changes in the two allowed files.
+Use bounded network timeouts and safe failure handling. Do not store location data. Do not implement hazards unless explicitly required by the task manifest.
+Before finishing, review git diff and leave only intended changes required by the task.
 EOF
 
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
@@ -199,20 +189,16 @@ codex exec --ephemeral --color never \
   "$(cat "$PROMPT_FILE")" < /dev/null
 
 CHANGED_FILES="$(git diff --name-only && git ls-files --others --exclude-standard)"
-while IFS= read -r changed; do
-  [ -z "$changed" ] && continue
-  case "$changed" in
-    "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"|"android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt") ;;
-    *) echo "UNAUTHORIZED_FILE_CHANGE=$changed" >&2; git diff --name-status >&2 || true; exit 30 ;;
-  esac
-done <<< "$CHANGED_FILES"
+if [ -z "$CHANGED_FILES" ]; then
+  echo "AGENT_NO_CODE_CHANGE=1"
+  exit 32
+fi
 
 git diff --check
-if git diff --quiet -- "${ALLOWED_FILES[@]}"; then echo "AGENT_NO_CODE_CHANGE=1"; exit 32; fi
 
 echo "AGENT_CHANGED_FILES:"
-git diff --name-status -- "${ALLOWED_FILES[@]}"
+git diff --name-status
 echo "AGENT_DIFF_STATS:"
-git diff --stat -- "${ALLOWED_FILES[@]}"
+git diff --stat
 echo "AI_AGENT_SUCCESS=codex"
 echo "AI_PROVIDER_SUCCESS=freellmapi/$MODEL"
