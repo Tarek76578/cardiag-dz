@@ -36,9 +36,18 @@ def run():
     assert est < before
     assert_budget(compacted)
     assert isinstance(compacted["input"], list)
-    # The invariant is preserving the latest user request, not requiring user to be the
-    # final Responses item. Codex can legitimately append assistant/tool items afterward.
     assert_has_user(compacted, "finish this task")
+
+    # Codex may append tool/assistant items after the latest user request. The user request
+    # must survive compaction even when the newest item is not a user message.
+    trailing = [{"role": "system", "content": "system " * 4000}]
+    trailing += [{"role": "user", "content": "old " * 2000}, {"role": "assistant", "content": "old answer " * 2500}]
+    trailing += [{"role": "user", "content": "latest critical request"}, {"type": "function_call", "call_id": "c1", "arguments": "z" * 5000}, {"type": "function_call_output", "call_id": "c1", "output": "result " * 5000}]
+    obj = {"model": "openai/gpt-oss-120b", "input": trailing, "max_output_tokens": 800}
+    compacted, changed, est, total = mod.enforce_budget(obj)
+    assert changed
+    assert_budget(compacted)
+    assert_has_user(compacted, "latest critical request")
 
     text = {"model": "openai/gpt-oss-120b", "input": "x" * 100000, "max_output_tokens": 800}
     compacted, changed, est, total = mod.enforce_budget(text)
