@@ -78,76 +78,75 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Verify OpenRouter API and discover Responses-compatible free models
+      - name: OpenRouter quota preflight
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           test -n "$OPENROUTER_API_KEY"
-          curl -fsS --retry 3 --connect-timeout 10 --max-time 30 \
-            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
-            "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
           python3 - <<'PY'
-          import json, os, subprocess, urllib.request, urllib.error
+          import json, os, sys, urllib.request, urllib.error
 
-          data = json.load(open('/tmp/openrouter-models.json'))
-          ids = [str(m.get('id')) for m in data.get('data', []) if m.get('id')]
-          free = [x for x in ids if x.endswith(':free')]
+          base = os.environ['OPENROUTER_BASE_URL'].rstrip('/')
+          key = os.environ['OPENROUTER_API_KEY']
+          req = urllib.request.Request(
+              base + '/key',
+              headers={'Authorization': 'Bearer ' + key},
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  data = json.load(r)
+          except urllib.error.HTTPError as e:
+              detail = e.read().decode('utf-8', 'replace')[:500]
+              print('OPENROUTER_KEY_CHECK_FAILED status=%s detail=%s' % (e.code, detail), file=sys.stderr)
+              raise SystemExit(2)
 
-          # Prefer models commonly useful for code, but never trust the model
-          # catalogue alone: OpenRouter can expose :free models that are
-          # restricted to agentic harnesses and return 403 from /responses.
-          priority = ('coder', 'coding', 'devstral', 'codestral', 'qwen', 'deepseek', 'kimi', 'glm', 'nemotron', 'llama', 'mistral')
-          ranked = []
-          for key in priority:
-              ranked.extend(x for x in free if key in x.lower() and x not in ranked)
-          ranked.extend(x for x in free if x not in ranked)
-
-          def probe(model):
-              body = json.dumps({
-                  'model': model,
-                  'input': 'Reply with OK only.',
-                  'max_output_tokens': 16,
-              }).encode()
-              req = urllib.request.Request(
-                  os.environ['OPENROUTER_BASE_URL'] + '/responses',
-                  data=body,
-                  headers={
-                      'Authorization': 'Bearer ' + os.environ['OPENROUTER_API_KEY'],
-                      'Content-Type': 'application/json',
-                      'HTTP-Referer': 'https://github.com/Tarek76578/cardiag-dz',
-                      'X-Title': 'CarDiag autonomous agent compatibility probe',
-                  },
-                  method='POST',
-              )
-              try:
-                  with urllib.request.urlopen(req, timeout=25) as r:
-                      raw = r.read().decode('utf-8', 'replace')
-                      return r.status, raw[:300]
-              except urllib.error.HTTPError as e:
-                  raw = e.read().decode('utf-8', 'replace')
-                  return e.code, raw[:300]
-              except Exception as e:
-                  return 0, str(e)[:300]
-
-          compatible = []
-          for model in ranked:
-              status, detail = probe(model)
-              if status == 200:
-                  compatible.append(model)
-                  print('RESPONSES_COMPATIBLE=', model)
-              else:
-                  print(f'SKIP_MODEL={model} RESPONSES_STATUS={status} DETAIL={detail}')
-              if len(compatible) >= 6:
-                  break
-
-          if not compatible:
-              raise SystemExit('No OpenRouter :free model passed the /responses compatibility probe')
-          open('/tmp/openrouter-model-candidates', 'w').write('\n'.join(compatible) + '\n')
-          print('OPENROUTER_RESPONSES_COMPATIBLE_FREE_MODELS=', len(compatible))
+          info = data.get('data') or data
+          limit = info.get('limit')
+          usage = info.get('usage')
+          is_free_tier = limit is None or limit == 0
+          print('OPENROUTER_KEY_VALID=1')
+          print('OPENROUTER_KEY_LIMIT=', limit)
+          print('OPENROUTER_KEY_USAGE=', usage)
+          if is_free_tier:
+              print('OPENROUTER_TIER=free-or-no-purchased-limit')
+          if isinstance(limit, (int, float)) and limit > 0 and isinstance(usage, (int, float)):
+              print('OPENROUTER_REMAINING_CREDITS=', max(0, limit - usage))
           PY
 
-      - name: Autonomous Codex agent with OpenRouter fallback
+          curl -fsS --retry 2 --connect-timeout 10 --max-time 20 \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
+
+      - name: Select agent-capable free model fallbacks
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+
+          data = json.load(open('/tmp/openrouter-models.json'))
+          ids = {str(m.get('id')) for m in data.get('data', []) if m.get('id')}
+
+          # Prefer OpenRouter's router because it filters free models by request
+          # capabilities such as tool calling. Then use explicitly documented
+          # coding-agent free models as deterministic fallbacks. Do not probe a
+          # large catalogue: every probe consumes the same daily free quota.
+          preferred = [
+              'openrouter/free',
+              'cohere/north-mini-code:free',
+              'poolside/laguna-s-2.1:free',
+              'nvidia/nemotron-3-ultra-550b-a55b:free',
+              'minimax/minimax-m3:free',
+          ]
+          candidates = [m for m in preferred if m in ids]
+          if not candidates:
+              raise SystemExit('No known agent-capable free model is currently listed by OpenRouter')
+          candidates = candidates[:3]
+          open('/tmp/openrouter-model-candidates', 'w').write('\n'.join(candidates) + '\n')
+          print('OPENROUTER_AGENT_CANDIDATES=', ','.join(candidates))
+          PY
+
+      - name: Autonomous Codex agent with bounded fallback
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -163,7 +162,7 @@ jobs:
           }
           while IFS= read -r model; do
             [ -n "$model" ] || continue
-            echo "=== TRYING OPENROUTER FREE MODEL: $model ==="
+            echo "=== TRYING OPENROUTER AGENT MODEL: $model ==="
             clean_attempt_artifacts
             set +e
             OPENROUTER_MODEL="$model" ./scripts/autonomous-agent.sh
@@ -187,7 +186,7 @@ jobs:
             echo "OPENROUTER_MODEL_FAILED=$model stage=android-build status=$build_status"
             clean_attempt_artifacts
           done < /tmp/openrouter-model-candidates
-          [ "$success" -eq 1 ] || { echo 'All OpenRouter Responses-compatible free models failed'; exit 1; }
+          [ "$success" -eq 1 ] || { echo 'All bounded OpenRouter agent candidates failed'; exit 1; }
 
       - name: Final validation
         working-directory: android
