@@ -1,12 +1,14 @@
-model = "openai/gpt-oss-120b"
-model_provider = "openrouter"
+model = "qwen/qwen3-coder:free"
+model_provider = "freellmapi"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
-[model_providers.openrouter]
-name = "openrouter"
-base_url = "https://openrouter.ai/api/v1"
-env_key = "OPENROUTER_API_KEY"
+[model_providers.freellmapi]
+name = "CarDiag FreeLLMAPI"
+base_url = "http://127.0.0.1:3001/v1"
+env_key = "GATEWAY_KEY"
+wire_api = "chat"
+request_max_retries = 0
 
 [projects."/home/runner/work/cardiag-dz/cardiag-dz"]
 trust_level = "trusted"
