@@ -17,8 +17,6 @@ env:
   GROQ_MODEL: openai/gpt-oss-120b
   GROQ_WIRE_API: chat
 
-auto_cancel: false
-
 jobs:
   agent:
     runs-on: ubuntu-latest
