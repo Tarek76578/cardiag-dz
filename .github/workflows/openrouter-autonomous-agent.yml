@@ -173,21 +173,68 @@ jobs:
           chmod +x scripts/autonomous-agent.sh
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: responses ==="
-          set +e
-          ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
-          agent_status=${PIPESTATUS[0]}
-          set -e
+
+          run_agent() {
+            local log_file="$1"
+            echo "=== RUNNING CODEX PROVIDER: $CODEX_PROVIDER MODEL: $AI_MODEL WIRE_API: responses ==="
+            set +e
+            ./scripts/autonomous-agent.sh 2>&1 | tee "$log_file"
+            local status=${PIPESTATUS[0]}
+            set -e
+            return "$status"
+          }
+
+          if run_agent /tmp/codex-agent.log; then
+            echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
+            exit 0
+          fi
+          agent_status=$?
+
           if grep -qE '429 Too Many Requests|free-models-per-day|Rate limit exceeded' /tmp/codex-agent.log; then
             echo "AI_PROVIDER_RATE_LIMITED=$CODEX_PROVIDER"
-            echo 'Provider was rate-limited; no second provider is attempted inside the same run.'
+            if [ "$CODEX_PROVIDER" = "groq" ] && [ -n "$OPENROUTER_API_KEY" ]; then
+              echo 'Falling back to OpenRouter in the same run.'
+              python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.error
+          base = os.environ['OPENROUTER_BASE_URL'].rstrip('/')
+          key = os.environ['OPENROUTER_API_KEY']
+          req = urllib.request.Request(base + '/key', headers={'Authorization': 'Bearer ' + key})
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  data = json.load(r)
+          except urllib.error.HTTPError as e:
+              detail = e.read().decode('utf-8', 'replace')[:500]
+              print(f'OPENROUTER_FALLBACK_KEY_CHECK_FAILED status={e.code} detail={detail}', file=sys.stderr)
+              raise SystemExit(2)
+          info = data.get('data') or data
+          print('OPENROUTER_FALLBACK_KEY_VALID=1')
+          print('OPENROUTER_FALLBACK_KEY_LIMIT=', info.get('limit'))
+          print('OPENROUTER_FALLBACK_KEY_USAGE=', info.get('usage'))
+          PY
+              git reset --hard HEAD
+              git clean -fdx
+              export CODEX_PROVIDER=openrouter
+              export AI_PROVIDER=openrouter
+              export AI_MODEL="$OPENROUTER_MODEL"
+              export CODEX_BASE_URL="$OPENROUTER_BASE_URL"
+              export CODEX_ENV_KEY=OPENROUTER_API_KEY
+              if run_agent /tmp/codex-agent-openrouter.log; then
+                echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
+                exit 0
+              fi
+              fallback_status=$?
+              if grep -qE '429 Too Many Requests|free-models-per-day|Rate limit exceeded' /tmp/codex-agent-openrouter.log; then
+                echo 'AI_PROVIDER_RATE_LIMITED=openrouter'
+                exit 75
+              fi
+              echo "AI_PROVIDER_FAILED=openrouter status=$fallback_status"
+              exit "$fallback_status"
+            fi
+            echo 'Provider was rate-limited and no independent fallback key is available.'
             exit 75
           fi
-          if [ "$agent_status" -ne 0 ]; then
-            echo "AI_PROVIDER_FAILED=$CODEX_PROVIDER status=$agent_status"
-            exit "$agent_status"
-          fi
-          echo "AI_PROVIDER_SUCCESS=$CODEX_PROVIDER/$AI_MODEL"
+          echo "AI_PROVIDER_FAILED=$CODEX_PROVIDER status=$agent_status"
+          exit "$agent_status"
 
       - name: Final validation
         working-directory: android
