@@ -40,13 +40,21 @@ jobs:
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git commit -m 'chore: remove invalid codex plugins gitlink'
             git push origin HEAD:main
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fdx
             echo 'INVALID_CODEX_GITLINK_REPAIRED=1'
           else
             echo 'INVALID_CODEX_GITLINK=0'
           fi
 
       - name: Clean runtime files
-        run: rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
+        run: |
+          set -euo pipefail
+          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fdx
 
       - name: Baseline
         run: |
