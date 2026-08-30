@@ -12,7 +12,12 @@ done
 
 MODEL="${FREELLMAPI_MODEL:-qwen/qwen3-coder:free}"
 CODEX_PROVIDER="${CODEX_PROVIDER:-codex_shim}"
-CODEX_BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"
+SHIM_UPSTREAM_BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"
+# Codex 0.151 emits reasoning.encrypted_content on Responses requests. The
+# FreeLLMAPI-backed shim rejects that OpenAI-internal include, so place a tiny
+# local compatibility filter in front of the shim and strip only unsupported
+# request metadata before forwarding. The actual model/tool traffic is kept.
+CODEX_BASE_URL="${CODEX_FILTER_BASE_URL:-http://127.0.0.1:8788/v1}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"
 export GATEWAY_KEY="${GATEWAY_KEY:-${OPENAI_API_KEY:-}}"
 test -n "$GATEWAY_KEY" || { echo "GATEWAY_KEY is missing" >&2; exit 13; }
@@ -21,19 +26,94 @@ echo "AI_AGENT=codex"
 echo "AI_PROVIDER=freellmapi-via-codex-shim"
 echo "AI_MODEL=$MODEL"
 
-# Do not require a model catalog from the shim. Some shim versions intentionally
-# expose an empty /models catalog while their Responses endpoint is ready.
-SHIM_BASE="${CODEX_BASE_URL%/v1}"
-if curl -fsS --max-time 10 "$SHIM_BASE/health" >/tmp/cardiag-codex-shim-health.json 2>/dev/null; then
-  echo "CODEX_SHIM_HEALTH=ok"
-elif curl -fsS --max-time 10 "$SHIM_BASE/v1/models" >/tmp/cardiag-codex-shim-models.json 2>/dev/null; then
-  echo "CODEX_SHIM_HTTP=ok"
-else
-  echo "Codex shim is not reachable at $SHIM_BASE" >&2
+echo "Starting Codex compatibility filter: $CODEX_BASE_URL -> $SHIM_UPSTREAM_BASE_URL"
+cat >/tmp/cardiag-codex-filter.py <<'PY'
+import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+from http.client import HTTPConnection
+
+TARGET = "http://127.0.0.1:8787"
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _forward(self):
+        path = self.path
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length) if length else b""
+        if self.command == "POST" and body:
+            try:
+                obj = json.loads(body)
+                if isinstance(obj, dict):
+                    removed = []
+                    if "include" in obj:
+                        removed.append("include")
+                        obj.pop("include", None)
+                    if "client_metadata" in obj:
+                        removed.append("client_metadata")
+                        obj.pop("client_metadata", None)
+                    if removed:
+                        print("CODEX_FILTER_STRIPPED=" + ",".join(removed), flush=True)
+                    body = json.dumps(obj, separators=(",", ":")).encode()
+            except Exception as exc:
+                print("CODEX_FILTER_JSON_PASSTHROUGH=" + type(exc).__name__, flush=True)
+
+        parsed = urlsplit(TARGET)
+        conn = HTTPConnection(parsed.hostname, parsed.port, timeout=95)
+        headers = {}
+        for k, v in self.headers.items():
+            if k.lower() not in {"host", "content-length", "connection"}:
+                headers[k] = v
+        headers["Content-Length"] = str(len(body))
+        headers["Host"] = f"{parsed.hostname}:{parsed.port}"
+        try:
+            conn.request(self.command, path, body=body if body else None, headers=headers)
+            resp = conn.getresponse()
+            self.send_response(resp.status, resp.reason)
+            for k, v in resp.getheaders():
+                if k.lower() not in {"connection", "transfer-encoding", "content-length"}:
+                    self.send_header(k, v)
+            data = resp.read()
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            self.wfile.flush()
+        except Exception as exc:
+            self.send_response(502)
+            payload = str(exc).encode()
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        finally:
+            conn.close()
+
+    def do_GET(self):
+        self._forward()
+    def do_POST(self):
+        self._forward()
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *_):
+        pass
+
+ThreadingHTTPServer(("127.0.0.1", 8788), Handler).serve_forever()
+PY
+nohup python3 /tmp/cardiag-codex-filter.py >/tmp/cardiag-codex-filter.log 2>&1 & echo $! >/tmp/cardiag-codex-filter.pid
+
+for i in $(seq 1 20); do
+  if curl -fsS --max-time 5 "${CODEX_BASE_URL%/v1}/v1/models" >/tmp/cardiag-codex-filter-models.json 2>/dev/null; then break; fi
+  sleep 1
+done
+if ! curl -fsS --max-time 5 "${CODEX_BASE_URL%/v1}/v1/models" >/dev/null 2>&1; then
+  echo "Codex compatibility filter is not reachable at ${CODEX_BASE_URL%/v1}" >&2
+  cat /tmp/cardiag-codex-filter.log >&2 || true
   exit 14
 fi
-
-echo "CODEX_SHIM_READY=1"
+echo "CODEX_FILTER_READY=1"
 
 ALLOWED_FILES=(
   "android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt"
@@ -46,7 +126,7 @@ done
 test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
 
 PROMPT_FILE="$(mktemp)"
-trap 'rm -f "$PROMPT_FILE"' EXIT
+trap 'rm -f "$PROMPT_FILE"; [ -f /tmp/cardiag-codex-filter.pid ] && kill "$(cat /tmp/cardiag-codex-filter.pid)" 2>/dev/null || true' EXIT
 cat > "$PROMPT_FILE" <<EOF
 $(cat "$TASK_FILE")
 
