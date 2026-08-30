@@ -1,3 +1,4 @@
+import os
 import platform
 import shutil
 import subprocess
@@ -5,6 +6,8 @@ import subprocess
 print("CARDIAG_KAGGLE_WORKER=START")
 print(f"PYTHON={platform.python_version()}")
 print(f"HOST={platform.platform()}")
+print(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}")
+print(f"NVIDIA_VISIBLE_DEVICES={os.environ.get('NVIDIA_VISIBLE_DEVICES', '<unset>')}")
 
 nvidia_smi = shutil.which("nvidia-smi")
 print(f"NVIDIA_SMI_PRESENT={int(nvidia_smi is not None)}")
@@ -18,6 +21,8 @@ if nvidia_smi:
     print(f"NVIDIA_SMI_RC={result.returncode}")
     if result.stdout.strip():
         print("NVIDIA_SMI=" + result.stdout.strip().replace("\n", " | "))
+    if result.stderr.strip():
+        print("NVIDIA_SMI_STDERR=" + result.stderr.strip().replace("\n", " | "))
 
 try:
     import torch
@@ -31,7 +36,15 @@ print(f"TORCH_CUDA_AVAILABLE={int(torch.cuda.is_available())}")
 print(f"TORCH_CUDA_DEVICE_COUNT={torch.cuda.device_count()}")
 
 if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-    raise RuntimeError("Kaggle requested a GPU, but CUDA is not available in the worker")
+    raise RuntimeError(
+        "Kaggle GPU allocation failed: CUDA is unavailable. "
+        "This is an infrastructure/allocation failure, not a PyTorch model failure."
+    )
+
+try:
+    torch.cuda.init()
+except Exception as exc:
+    raise RuntimeError(f"CUDA initialization failed: {type(exc).__name__}: {exc}") from exc
 
 for index in range(torch.cuda.device_count()):
     print(
@@ -44,6 +57,7 @@ device = torch.device("cuda:0")
 a = torch.randn((1024, 1024), device=device)
 b = torch.randn((1024, 1024), device=device)
 c = a @ b
+torch.cuda.synchronize()
 print(f"CUDA_TEST_SUM={float(c.sum().item()):.6f}")
 print(f"CUDA_MEMORY_ALLOCATED={torch.cuda.memory_allocated(0)}")
 print("CARDIAG_KAGGLE_WORKER=OK")
