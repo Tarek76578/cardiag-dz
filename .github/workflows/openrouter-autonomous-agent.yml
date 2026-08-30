@@ -18,9 +18,10 @@ env:
 
 jobs:
   agent:
-    # Run automatically for human/connector pushes, but never recursively for
-    # the bot commit produced by the final step.
-    if: github.event_name == 'workflow_dispatch' || github.actor != 'github-actions[bot]'
+    # Contents-API commits are authored by github-actions[bot]. Allow our
+    # repair commits to trigger a cycle, but never recurse on the final agent
+    # commit produced below.
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'feat: advance autonomous CarDiag milestone'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -133,12 +134,11 @@ jobs:
                   candidates.append(model_id)
           if not candidates:
               raise SystemExit('No known free coding model with tool calling is currently listed by OpenRouter')
-          # Exactly one model per autonomous run. Do not probe or fall back with
-          # another completion request: failed free requests can count against quota.
           model = candidates[0]
           open('/tmp/openrouter-model', 'w').write(model + '\n')
           print('OPENROUTER_AGENT_MODEL=', model)
           print('OPENROUTER_AGENT_MODEL_SUPPORTS_TOOLS=1')
+          print('OPENROUTER_AGENT_SINGLE_ATTEMPT=1')
           PY
 
       - name: Autonomous Codex agent
