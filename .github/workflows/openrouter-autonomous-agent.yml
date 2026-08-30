@@ -14,7 +14,7 @@ env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_MODEL: qwen/qwen3-coder:free
   GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_MODEL: openai/gpt-oss-120b
+  GROQ_MODEL: llama-3.3-70b-versatile
   GROQ_WIRE_API: responses
 
 jobs:
@@ -94,6 +94,7 @@ jobs:
             echo "env_key=GROQ_API_KEY" >> "$GITHUB_OUTPUT"
             echo "wire_api=responses" >> "$GITHUB_OUTPUT"
             echo "AI_PROVIDER_SELECTED=groq"
+            echo "AI_MODEL_SELECTED=$GROQ_MODEL"
             echo "AI_WIRE_API_SELECTED=responses"
             exit 0
           fi
