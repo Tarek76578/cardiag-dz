@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 30
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_GPU_MACHINE: NvidiaTeslaT4
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -41,50 +42,48 @@ jobs:
       - name: Check Kaggle accelerator quota before scheduling
         run: |
           set +e
-          echo '--- Kaggle accelerator quota ---'
           kaggle quota 2>&1 | tee /tmp/kaggle-quota.log
           rc=${PIPESTATUS[0]}
           echo "KAGGLE_QUOTA_EXIT=$rc"
           exit 0
 
-      - name: Initialize a private Kaggle kernel and discover account slug
-        id: kernel
+      - name: Run verified Kaggle GPU worker with allocation retries
+        id: gpu
         working-directory: /tmp
         run: |
           set -euo pipefail
           rm -rf cardiag-kaggle-smoke
           mkdir -p cardiag-kaggle-smoke
           cd cardiag-kaggle-smoke
-          kaggle kernels init -p .
-          test -s kernel-metadata.json
-          python3 - <<'PY'
-          import json
+          cp "$GITHUB_WORKSPACE/kaggle/cardiag_gpu_smoke.py" .
+          final_ref=""
+          success=0
+
+          for attempt in 1 2 3; do
+            slug="cardiag-gpu-smoke-${GITHUB_RUN_ID}-${attempt}"
+            work="attempt-${attempt}"
+            rm -rf "$work"
+            mkdir -p "$work"
+            cp cardiag_gpu_smoke.py "$work/"
+            cd "$work"
+            kaggle kernels init -p . >/dev/null
+            python3 - "$slug" "$KAGGLE_GPU_MACHINE" <<'PY'
+          import json, sys
           from pathlib import Path
-          p=Path("kernel-metadata.json")
-          data=json.loads(p.read_text())
-          owner=data.get("id", "").split("/",1)[0]
-          if not owner or owner in {"your-username", "username", "INSERT_KERNEL_SLUG_HERE"}:
-              raise SystemExit("Kaggle CLI did not return a usable account slug")
-          print("KAGGLE_OWNER=" + owner)
-          Path("owner.txt").write_text(owner)
-          PY
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
+          slug, machine = sys.argv[1:]
           p=Path("kernel-metadata.json")
           data=json.loads(p.read_text())
           owner=data["id"].split("/",1)[0]
-          slug="cardiag-gpu-smoke"
           data.update({
               "id": f"{owner}/{slug}",
-              "title": "CarDiag GPU Smoke",
+              "title": f"CarDiag GPU Smoke {slug}",
               "code_file": "cardiag_gpu_smoke.py",
               "language": "python",
               "kernel_type": "script",
               "is_private": True,
               "enable_gpu": True,
               "enable_internet": False,
-              "machine_shape": "NvidiaTeslaT4",
+              "machine_shape": machine,
               "dataset_sources": [],
               "competition_sources": [],
               "kernel_sources": [],
@@ -92,68 +91,44 @@ jobs:
           })
           p.write_text(json.dumps(data, indent=2) + "\n")
           print("KERNEL_REF=" + data["id"])
-          Path("kernel-ref.txt").write_text(data["id"])
           PY
-          cp "$GITHUB_WORKSPACE/kaggle/cardiag_gpu_smoke.py" .
-          test -f cardiag_gpu_smoke.py
-          echo "kernel_ref=$(cat kernel-ref.txt)" >> "$GITHUB_OUTPUT"
-
-      - name: Push Kaggle GPU worker
-        working-directory: /tmp/cardiag-kaggle-smoke
-        run: |
-          set -euo pipefail
-          kaggle kernels push -p .
-
-      - name: Wait for Kaggle worker
-        id: wait
-        working-directory: /tmp/cardiag-kaggle-smoke
-        run: |
-          set -euo pipefail
-          ref="$(cat kernel-ref.txt)"
-          final=""
-          for i in $(seq 1 36); do
-            status="$(kaggle kernels status "$ref" 2>&1 || true)"
-            printf '%s\n' "$status"
-            case "$status" in
-              *KernelWorkerStatus.COMPLETE*) final=success; break ;;
-              *KernelWorkerStatus.ERROR*) final=failure; break ;;
-              *KernelWorkerStatus.CANCELLED*|*KernelWorkerStatus.CANCELED*) final=failure; break ;;
-            esac
-            sleep 10
+            ref="$(python3 -c 'import json; print(json.load(open("kernel-metadata.json"))["id"])')"
+            echo "--- attempt $attempt: $ref / $KAGGLE_GPU_MACHINE ---"
+            kaggle kernels push -p .
+            final=""
+            for i in $(seq 1 48); do
+              status="$(kaggle kernels status "$ref" 2>&1 || true)"
+              printf '%s\n' "$status"
+              case "$status" in
+                *KernelWorkerStatus.COMPLETE*) final=success; break ;;
+                *KernelWorkerStatus.ERROR*) final=failure; break ;;
+                *KernelWorkerStatus.CANCELLED*|*KernelWorkerStatus.CANCELED*) final=failure; break ;;
+              esac
+              sleep 10
+            done
+            echo "KAGGLE_ATTEMPT_${attempt}_STATUS=${final:-timeout}"
+            if [ "$final" = success ]; then
+              rm -rf output
+              mkdir -p output
+              kaggle kernels output "$ref" -p output --force
+              if grep -R -q 'CARDIAG_KAGGLE_WORKER=OK' output; then
+                success=1
+                final_ref="$ref"
+                break
+              fi
+            fi
+            echo '--- attempt diagnostics ---'
+            kaggle kernels status "$ref" 2>&1 || true
+            kaggle kernels logs "$ref" 2>&1 | tail -200 || true
+            kaggle kernels delete "$ref" --yes || true
+            cd ..
           done
-          echo "KAGGLE_FINAL_STATUS=${final:-timeout}"
-          if [ "$final" != success ]; then
+
+          echo "final_ref=$final_ref" >> "$GITHUB_OUTPUT"
+          if [ "$success" -ne 1 ]; then
+            echo 'No verified CUDA-capable Kaggle worker was obtained after 3 attempts.'
             exit 1
           fi
-
-      - name: Collect Kaggle diagnostics on failure
-        if: failure()
-        working-directory: /tmp/cardiag-kaggle-smoke
-        run: |
-          set +e
-          ref="$(cat kernel-ref.txt)"
-          echo '--- FINAL KAGGLE STATUS ---'
-          kaggle kernels status "$ref" 2>&1 || true
-          echo '--- KAGGLE KERNEL LOGS ---'
-          kaggle kernels logs "$ref" 2>&1 | tee /tmp/kaggle-kernel.log || true
-          echo '--- KAGGLE OUTPUT ---'
-          rm -rf output-on-failure
-          mkdir -p output-on-failure
-          kaggle kernels output "$ref" -p output-on-failure --force 2>&1 || true
-          find output-on-failure -maxdepth 2 -type f -print -exec sh -c 'echo "--- $1"; tail -200 "$1"' _ {} \; || true
-          echo '--- KAGGLE QUOTA AFTER RUN ---'
-          kaggle quota 2>&1 || true
-
-      - name: Download and verify worker output
-        if: success()
-        working-directory: /tmp/cardiag-kaggle-smoke
-        run: |
-          set -euo pipefail
-          ref="$(cat kernel-ref.txt)"
-          rm -rf output
-          mkdir -p output
-          kaggle kernels output "$ref" -p output --force
-          grep -R -q 'CARDIAG_KAGGLE_WORKER=OK' output
           echo 'KAGGLE_GPU_WORKER=OK'
 
       - name: Cleanup remote test kernel
@@ -161,6 +136,7 @@ jobs:
         working-directory: /tmp/cardiag-kaggle-smoke
         run: |
           set +e
-          if [ -s kernel-ref.txt ]; then
-            kaggle kernels delete "$(cat kernel-ref.txt)" --yes || true
+          ref="${{ steps.gpu.outputs.final_ref }}"
+          if [ -n "$ref" ]; then
+            kaggle kernels delete "$ref" --yes || true
           fi
