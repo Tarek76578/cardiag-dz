@@ -70,7 +70,7 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Discover and probe Groq models
+      - name: Discover and probe Groq Responses models
         id: provider
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -110,37 +110,50 @@ jobs:
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
-            echo "=== REAL GROQ INFERENCE PROBE: $model ==="
+            echo "=== REAL GROQ RESPONSES PROBE: $model ==="
             payload="$(MODEL="$model" python3 - <<'PY'
           import json,os
-          print(json.dumps({"model":os.environ["MODEL"],"messages":[{"role":"user","content":"Reply with exactly OK"}],"max_tokens":8,"temperature":0}))
+          print(json.dumps({
+              "model": os.environ["MODEL"],
+              "input": "Reply with exactly OK",
+              "max_output_tokens": 16,
+              "store": False
+          }))
           PY
             )"
             probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
               -H "Authorization: Bearer $GROQ_API_KEY" \
               -H 'Content-Type: application/json' \
               -d "$payload" \
-              "$GROQ_BASE_URL/chat/completions")" || true
+              "$GROQ_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
             resp="$(printf '%s\n' "$probe" | sed '$d')"
-            echo "GROQ_PROBE_HTTP=$code MODEL=$model"
+            echo "GROQ_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then
+              RESPONSE_BODY="$resp" python3 - <<'PY'
+          import json, os, sys
+          data=json.loads(os.environ["RESPONSE_BODY"])
+          if not data.get("id") or data.get("object") not in ("response", "response.completed"):
+              print("GROQ_RESPONSES_PROBE_INVALID_JSON=1")
+              raise SystemExit(1)
+          print("GROQ_RESPONSES_PROBE_VALID_JSON=1")
+          PY
               selected="$model"
               break
             fi
             if [ "$code" = 429 ]; then
-              echo "GROQ_PROBE_429_MODEL=$model"
+              echo "GROQ_RESPONSES_PROBE_429_MODEL=$model"
             else
-              printf '%s\n' "$resp" | head -c 400 || true
+              printf '%s\n' "$resp" | head -c 700 || true
               echo
             fi
           done < /tmp/groq-candidates.txt
 
           if [ -z "$selected" ]; then
-            echo 'GROQ_NO_MODEL_PASSED_REAL_INFERENCE=1' >&2
+            echo 'GROQ_NO_RESPONSES_MODEL_PASSED_REAL_INFERENCE=1' >&2
             exit 43
           fi
-          echo "GROQ_MODEL_SELECTED=$selected"
+          echo "GROQ_RESPONSES_MODEL_SELECTED=$selected"
           {
             echo 'provider=groq'
             echo "model=$selected"
