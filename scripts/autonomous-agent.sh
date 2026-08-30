@@ -7,7 +7,7 @@ STATE_FILE="$ROOT/agent-state.md"
 AGENTS_FILE="$ROOT/AGENTS.md"
 for file in "$TASK_FILE" "$STATE_FILE" "$AGENTS_FILE"; do test -f "$file" || { echo "Missing agent input: $file" >&2; exit 10; }; done
 PROVIDER="${CODEX_PROVIDER:-${AI_PROVIDER:-groq}}"
-MODEL="${AI_MODEL:-llama-3.3-70b-versatile}"
+MODEL="${AI_MODEL:-llama-3.1-8b-instant}"
 BASE_URL="${CODEX_BASE_URL:-https://api.groq.com/openai/v1}"
 ENV_KEY="${CODEX_ENV_KEY:-GROQ_API_KEY}"
 WIRE_API="${CODEX_WIRE_API:-responses}"
