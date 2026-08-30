@@ -51,10 +51,14 @@ jobs:
       - name: Clean runtime files
         run: |
           set -euo pipefail
-          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
+          rm -rf .codex/.tmp/plugins 2>/dev/null || true
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
+          # Aider runtime files were accidentally committed by an earlier cycle.
+          # Keep their repository copies intact for the agent baseline and hide only
+          # their runtime mutations from Git until the cycle is complete.
+          git update-index --assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
 
       - name: Baseline
         run: |
@@ -115,6 +119,7 @@ jobs:
           NODE
           )" || { echo 'FreeLLMAPI unified API key not found'; exit 22; }
           test "${#GATEWAY_KEY}" -ge 20
+          echo "::add-mask::$GATEWAY_KEY"
           echo "GATEWAY_KEY=$GATEWAY_KEY" >> "$GITHUB_ENV"
           echo 'FREELLMAPI_AUTH_KEY_RESOLVED=true'
 
@@ -170,19 +175,19 @@ jobs:
           export OPENAI_API_KEY="$GATEWAY_KEY"
           export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md
           export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
+          export AIDER_LLM_HISTORY_FILE=/tmp/cardiag-aider-llm-history
           export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
           while IFS= read -r model; do
             [ -n "$model" ] || continue
             echo "Trying free coding model: $model"
             export FREELLMAPI_MODEL="$model"
             export AIDER_MODEL="openai/$model"
-            rm -rf .aider* "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history
+            rm -rf "$AIDER_CACHE_DIR" /tmp/cardiag-aider-chat-history.md /tmp/cardiag-aider-input-history /tmp/cardiag-aider-llm-history
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
             set +e
             ./scripts/autonomous-agent.sh
             status=$?
             set -e
-            rm -rf .aider* "$AIDER_CACHE_DIR"
             if [ "$status" -eq 0 ]; then
               echo "FREE_MODEL_SUCCESS=$model"
               exit 0
@@ -201,7 +206,10 @@ jobs:
       - name: Scope and cleanup
         run: |
           set -euo pipefail
-          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
+          # Restore Aider runtime files and remove assume-unchanged flags before scope checks.
+          git update-index --no-assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
+          git restore -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
+          rm -rf .codex/.tmp/plugins 2>/dev/null || true
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
           android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           while IFS= read -r f; do
