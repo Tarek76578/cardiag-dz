@@ -16,9 +16,6 @@ env:
   FREELLMAPI_PORT: 3001
   AI_PROVIDER: freellmapi
   OPENAI_API_BASE: http://127.0.0.1:3002/v1
-  AIDER_API_BASE: http://127.0.0.1:3002/v1
-  AIDER_ANALYTICS: "false"
-  AIDER_CHECK_UPDATE: "false"
 
 jobs:
   agent:
@@ -41,7 +38,6 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           git clean -fdx
-          git update-index --assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
       - name: Baseline
         run: |
           set -euo pipefail
@@ -103,43 +99,41 @@ jobs:
             def do_GET(self): self.p()
             def do_POST(self): self.p()
             def p(self):
-              n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None; h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}; h['Authorization']='Bearer '+KEY
+              n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None
+              h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}; h['Authorization']='Bearer '+KEY
               try:
-                with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=90) as r:
-                  b=r.read(); self.send_response(r.status); [self.send_header(k,v) for k,v in r.headers.items() if k.lower() not in ('transfer-encoding','content-length','connection')]; self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
-              except Exception as e: self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
+                with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=60) as r:
+                  b=r.read(); self.send_response(r.status)
+                  for k,v in r.headers.items():
+                    if k.lower() not in ('transfer-encoding','content-length','connection'): self.send_header(k,v)
+                  self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
+              except Exception as e:
+                self.send_response(502); self.end_headers(); self.wfile.write(str(e).encode())
             def log_message(self,*a): pass
           ThreadingHTTPServer(('127.0.0.1',3002),H).serve_forever()
           PY
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 & echo $! >/tmp/proxy.pid
-      - name: Agent with fast build-gated fallback
+      - name: GitHub Agent with fast build-gated fallback
         run: |
           set -euo pipefail
-          python3 -m pip install --user --upgrade aider-chat
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           chmod +x scripts/autonomous-agent.sh
           export OPENAI_API_KEY="$GATEWAY_KEY"
-          export AIDER_CHAT_HISTORY_FILE=/tmp/cardiag-aider-chat-history.md
-          export AIDER_INPUT_HISTORY_FILE=/tmp/cardiag-aider-input-history
-          export AIDER_LLM_HISTORY_FILE=/tmp/cardiag-aider-llm-history
-          export AIDER_CACHE_DIR=/tmp/cardiag-aider-cache
           success=0
           while IFS= read -r model; do
             [ -n "$model" ] || continue
             echo "=== TRYING FREE MODEL: $model ==="
-            export FREELLMAPI_MODEL="$model" AIDER_MODEL="openai/$model"
-            rm -rf .aider* "$AIDER_CACHE_DIR" /tmp/cardiag-aider-*
+            export FREELLMAPI_MODEL="$model"
             git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
             set +e
-            timeout 180s ./scripts/autonomous-agent.sh
+            timeout 120s ./scripts/autonomous-agent.sh
             agent_status=$?
             set -e
             if [ "$agent_status" -ne 0 ]; then
-              echo "FREE_MODEL_FAILED=$model stage=aider status=$agent_status"
+              echo "FREE_MODEL_FAILED=$model stage=github-agent status=$agent_status"
               git restore -- android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt 2>/dev/null || true
               continue
             fi
-            echo "FREE_MODEL_AIDER_SUCCESS=$model"
+            echo "FREE_MODEL_AGENT_SUCCESS=$model"
             set +e
             timeout 180s bash -lc 'cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace'
             build_status=$?
@@ -159,9 +153,7 @@ jobs:
       - name: Scope and commit
         run: |
           set -euo pipefail
-          git update-index --no-assume-unchanged -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
-          git restore -- .aider.chat.history.md .aider.tags.cache.v4/cache.db 2>/dev/null || true
-          rm -rf .aider* .codex/.tmp/plugins 2>/dev/null || true
+          rm -rf .codex/.tmp/plugins 2>/dev/null || true
           allowed='android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantService.kt
           android/app/src/main/java/dz/cardiag/app/core/road/RoadAssistantProviders.kt'
           while IFS= read -r f; do [ -z "$f" ] || printf '%s\n' "$allowed" | grep -Fxq "$f" || { echo "UNEXPECTED_CHANGE=$f"; exit 40; }; done < <(git diff --name-only)
