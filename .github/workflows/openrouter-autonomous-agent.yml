@@ -1,8 +1,6 @@
 name: CarDiag OpenRouter Autonomous Agent
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -86,51 +84,34 @@ jobs:
           test -n "$OPENROUTER_API_KEY"
           python3 - <<'PY'
           import json, os, sys, urllib.request, urllib.error
-
           base = os.environ['OPENROUTER_BASE_URL'].rstrip('/')
           key = os.environ['OPENROUTER_API_KEY']
-          req = urllib.request.Request(
-              base + '/key',
-              headers={'Authorization': 'Bearer ' + key},
-          )
+          req = urllib.request.Request(base + '/key', headers={'Authorization': 'Bearer ' + key})
           try:
               with urllib.request.urlopen(req, timeout=20) as r:
                   data = json.load(r)
           except urllib.error.HTTPError as e:
               detail = e.read().decode('utf-8', 'replace')[:500]
-              print('OPENROUTER_KEY_CHECK_FAILED status=%s detail=%s' % (e.code, detail), file=sys.stderr)
+              print(f'OPENROUTER_KEY_CHECK_FAILED status={e.code} detail={detail}', file=sys.stderr)
               raise SystemExit(2)
-
           info = data.get('data') or data
-          limit = info.get('limit')
-          usage = info.get('usage')
-          is_free_tier = limit is None or limit == 0
           print('OPENROUTER_KEY_VALID=1')
-          print('OPENROUTER_KEY_LIMIT=', limit)
-          print('OPENROUTER_KEY_USAGE=', usage)
-          if is_free_tier:
-              print('OPENROUTER_TIER=free-or-no-purchased-limit')
-          if isinstance(limit, (int, float)) and limit > 0 and isinstance(usage, (int, float)):
-              print('OPENROUTER_REMAINING_CREDITS=', max(0, limit - usage))
+          print('OPENROUTER_KEY_LIMIT=', info.get('limit'))
+          print('OPENROUTER_KEY_USAGE=', info.get('usage'))
+          print('OPENROUTER_FREE_QUOTA_NOTE=free-model daily quota is enforced by the model endpoint and is not exposed as a remaining counter by /key')
           PY
 
-          curl -fsS --retry 2 --connect-timeout 10 --max-time 20 \
+          curl -fsS --connect-timeout 10 --max-time 20 \
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             "$OPENROUTER_BASE_URL/models" > /tmp/openrouter-models.json
 
-      - name: Select agent-capable free model fallbacks
+      - name: Select one agent model without quota-burning probes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json
-
           data = json.load(open('/tmp/openrouter-models.json'))
           ids = {str(m.get('id')) for m in data.get('data', []) if m.get('id')}
-
-          # Prefer OpenRouter's router because it filters free models by request
-          # capabilities such as tool calling. Then use explicitly documented
-          # coding-agent free models as deterministic fallbacks. Do not probe a
-          # large catalogue: every probe consumes the same daily free quota.
           preferred = [
               'openrouter/free',
               'cohere/north-mini-code:free',
@@ -140,13 +121,15 @@ jobs:
           ]
           candidates = [m for m in preferred if m in ids]
           if not candidates:
-              raise SystemExit('No known agent-capable free model is currently listed by OpenRouter')
-          candidates = candidates[:3]
-          open('/tmp/openrouter-model-candidates', 'w').write('\n'.join(candidates) + '\n')
-          print('OPENROUTER_AGENT_CANDIDATES=', ','.join(candidates))
+              raise SystemExit('No known free agent model is currently listed by OpenRouter')
+          # Exactly one model per autonomous run. A second free-model attempt can
+          # consume another request after a provider-side failure and is unsafe on
+          # the 50-request daily free quota.
+          open('/tmp/openrouter-model', 'w').write(candidates[0] + '\n')
+          print('OPENROUTER_AGENT_MODEL=', candidates[0])
           PY
 
-      - name: Autonomous Codex agent with bounded fallback
+      - name: Autonomous Codex agent
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
@@ -155,38 +138,22 @@ jobs:
           export OPENROUTER_API_KEY
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          success=0
-          ROAD_DIR="android/app/src/main/java/dz/cardiag/app/core/road"
-          clean_attempt_artifacts() {
-            git clean -fd -- "$ROAD_DIR" 2>/dev/null || true
-          }
-          while IFS= read -r model; do
-            [ -n "$model" ] || continue
-            echo "=== TRYING OPENROUTER AGENT MODEL: $model ==="
-            clean_attempt_artifacts
-            set +e
-            OPENROUTER_MODEL="$model" ./scripts/autonomous-agent.sh
-            agent_status=$?
-            set -e
-            if [ "$agent_status" -ne 0 ]; then
-              echo "OPENROUTER_MODEL_FAILED=$model stage=codex status=$agent_status"
-              clean_attempt_artifacts
-              continue
-            fi
-            echo "OPENROUTER_CODEX_SUCCESS=$model"
-            set +e
-            timeout 180s bash -lc 'cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace'
-            build_status=$?
-            set -e
-            if [ "$build_status" -eq 0 ]; then
-              echo "OPENROUTER_MODEL_BUILD_SUCCESS=$model"
-              success=1
-              break
-            fi
-            echo "OPENROUTER_MODEL_FAILED=$model stage=android-build status=$build_status"
-            clean_attempt_artifacts
-          done < /tmp/openrouter-model-candidates
-          [ "$success" -eq 1 ] || { echo 'All bounded OpenRouter agent candidates failed'; exit 1; }
+          model="$(cat /tmp/openrouter-model)"
+          echo "=== TRYING OPENROUTER AGENT MODEL: $model ==="
+          set +e
+          OPENROUTER_MODEL="$model" ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
+          agent_status=${PIPESTATUS[0]}
+          set -e
+          if grep -qE '429 Too Many Requests|free-models-per-day|Rate limit exceeded' /tmp/codex-agent.log; then
+            echo 'OPENROUTER_QUOTA_EXHAUSTED=1'
+            echo 'No fallback model will be attempted; doing so would spend additional free requests.'
+            exit 75
+          fi
+          if [ "$agent_status" -ne 0 ]; then
+            echo "OPENROUTER_MODEL_FAILED=$model stage=codex status=$agent_status"
+            exit "$agent_status"
+          fi
+          echo "OPENROUTER_CODEX_SUCCESS=$model"
 
       - name: Final validation
         working-directory: android
