@@ -21,7 +21,6 @@ jobs:
       AI_PROVIDER: freellmapi
       OPENAI_API_BASE: http://127.0.0.1:3002/v1
       AIDER_API_BASE: http://127.0.0.1:3002/v1
-      OPENAI_API_KEY: keyless-local-gateway
     steps:
       - uses: actions/checkout@v5
         with:
@@ -78,11 +77,29 @@ jobs:
           assert items, 'No models returned by FreeLLMAPI'
           PY
 
-      - name: Keyless chat probe
+          # FreeLLMAPI authenticates /v1/chat/completions with its generated
+          # unified API key. Resolve it from the runner-local SQLite database;
+          # never print the secret to the Actions log.
+          DB_PATH="$(find /tmp/freellmapi -name freeapi.db -type f -print -quit)"
+          test -n "$DB_PATH" || { echo 'FreeLLMAPI database not found'; exit 21; }
+          GATEWAY_KEY="$(DB_PATH="$DB_PATH" node - <<'NODE'
+          const Database = require('/tmp/freellmapi/node_modules/better-sqlite3');
+          const db = new Database(process.env.DB_PATH, { readonly: true });
+          const rows = db.prepare("SELECT key,value FROM settings WHERE key LIKE '%unified%' OR key LIKE '%api%key%'").all();
+          const candidates = rows.map(r => String(r.value || '').trim()).filter(v => v.length >= 20 && !/^your-/i.test(v));
+          if (!candidates.length) process.exit(2);
+          process.stdout.write(candidates.sort((a,b)=>b.length-a.length)[0]);
+          NODE
+          )" || { echo 'FreeLLMAPI unified API key was not found in local DB'; exit 22; }
+          test "${#GATEWAY_KEY}" -ge 20 || exit 23
+          printf 'GATEWAY_KEY=%s\n' "$GATEWAY_KEY" >> "$GITHUB_ENV"
+          echo 'FREELLMAPI_AUTH_KEY_RESOLVED=true'
+
+      - name: Chat probe
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json,urllib.request,urllib.error
+          import json,urllib.request
           models=json.load(open('/tmp/models.json')).get('data',[])
           ids=[m.get('id') for m in models if m.get('id')]
           priority=('coder','coding','devstral','codestral','qwen','deepseek','kimi')
@@ -94,7 +111,7 @@ jobs:
           for model in candidates[:15]:
             body={'model':model,'messages':[{'role':'user','content':'Reply with exactly OK.'}],'max_tokens':8}
             try:
-              req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(body).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer keyless-local-gateway'})
+              req=urllib.request.Request('http://127.0.0.1:3001/v1/chat/completions',data=json.dumps(body).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+__import__('os').environ['GATEWAY_KEY']})
               with urllib.request.urlopen(req,timeout=120) as x: d=json.load(x)
               if d.get('choices'):
                 open('/tmp/model','w').write(model)
@@ -105,19 +122,21 @@ jobs:
             raise SystemExit(f'No model passed chat probe. Last error: {last}')
           PY
 
-      - name: Keyless proxy
+      - name: Local OpenAI proxy
         run: |
           set -euo pipefail
           cat >/tmp/proxy.py <<'PY'
+          import os
           from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
           from urllib.request import Request,urlopen
+          KEY=os.environ['GATEWAY_KEY']
           class H(BaseHTTPRequestHandler):
             def do_GET(self): self.p()
             def do_POST(self): self.p()
             def p(self):
               n=int(self.headers.get('Content-Length','0')); body=self.rfile.read(n) if n else None
               h={k:v for k,v in self.headers.items() if k.lower() not in ('host','authorization','content-length')}
-              h['Authorization']='Bearer keyless-local-gateway'
+              h['Authorization']='Bearer '+KEY
               try:
                 with urlopen(Request('http://127.0.0.1:3001'+self.path,data=body,headers=h,method=self.command),timeout=180) as r:
                   b=r.read(); self.send_response(r.status)
@@ -132,13 +151,14 @@ jobs:
           nohup python3 /tmp/proxy.py >/tmp/proxy.log 2>&1 &
           echo $! >/tmp/proxy.pid
           sleep 1
-          curl -fsS -H 'Authorization: Bearer keyless-local-gateway' http://127.0.0.1:3002/v1/models >/dev/null
+          curl -fsS -H "Authorization: Bearer $GATEWAY_KEY" http://127.0.0.1:3002/v1/models >/dev/null
 
       - name: Aider autonomous cycle
         run: |
           set -euo pipefail
           python3 -m pip install --user --upgrade aider-chat
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export OPENAI_API_KEY="$GATEWAY_KEY"
           export FREELLMAPI_MODEL="$(cat /tmp/model)"
           export AIDER_MODEL="openai/$FREELLMAPI_MODEL"
           chmod +x scripts/autonomous-agent.sh
