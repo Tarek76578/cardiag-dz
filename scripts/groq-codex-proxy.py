@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility bridge: Codex Responses API -> Groq Responses API.
-
-Groq's Responses API is OpenAI-compatible, but its documented unsupported
-fields are stricter than the payload Codex can emit for custom providers.
-This localhost-only bridge removes unsupported optional fields and keeps only
-standard function tools before forwarding the request to Groq.
-"""
+"""Compatibility bridge: Codex Responses API -> Groq Responses API."""
 import http.client
 import json
 import os
@@ -17,14 +11,8 @@ API_KEY = os.environ["GROQ_API_KEY"]
 PORT = int(os.environ.get("GROQ_PROXY_PORT", "8787"))
 
 UNSUPPORTED_TOP_LEVEL = {
-    "previous_response_id",
-    "store",
-    "truncation",
-    "include",
-    "safety_identifier",
-    "prompt_cache_key",
-    "prompt",
-    "client_metadata",
+    "previous_response_id", "store", "truncation", "include",
+    "safety_identifier", "prompt_cache_key", "prompt", "client_metadata",
 }
 
 
@@ -35,9 +23,6 @@ def sanitize_tool(tool):
     if kind == "function":
         return tool
     if kind == "namespace":
-        # Flatten namespace containers into ordinary function tools. Groq's
-        # public Responses API documents function tools; Codex can execute
-        # these client-side after receiving the function call.
         nested = tool.get("tools") or []
         return [x for x in (sanitize_tool(t) for t in nested) if isinstance(x, dict)]
     return None
@@ -50,9 +35,14 @@ def sanitize_body(raw):
     for key in UNSUPPORTED_TOP_LEVEL:
         body.pop(key, None)
 
-    # Groq supports reasoning, input, tools, tool_choice and parallel_tool_calls.
-    # Keep the documented Responses fields and remove Codex-only metadata that
-    # can cause a generic 400 from OpenAI-compatible gateways.
+    # Codex 0.151 can emit reasoning.summary. Groq accepts reasoning.effort,
+    # but currently rejects the request-side reasoning.summary field.
+    reasoning = body.get("reasoning")
+    if isinstance(reasoning, dict):
+        reasoning.pop("summary", None)
+        if not reasoning:
+            body.pop("reasoning", None)
+
     if isinstance(body.get("tools"), list):
         flattened = []
         for tool in body["tools"]:
@@ -88,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path != "/v1/responses":
             self.send_error(404)
             return
+        conn = None
         try:
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length)
@@ -99,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
                 "Authorization": "Bearer " + API_KEY,
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
-                "User-Agent": "cardiag-codex-groq-proxy/1.0",
+                "User-Agent": "cardiag-codex-groq-proxy/1.1",
                 "Content-Length": str(len(payload)),
             }
             conn.request("POST", path, body=payload, headers=headers)
@@ -118,7 +109,6 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 self.wfile.flush()
-            conn.close()
         except Exception as exc:
             print(f"GROQ_PROXY_ERROR {type(exc).__name__}: {exc}", flush=True)
             try:
@@ -130,6 +120,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(payload)
             except Exception:
                 pass
+        finally:
+            if conn:
+                conn.close()
 
 
 if __name__ == "__main__":
