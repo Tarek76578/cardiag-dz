@@ -12,7 +12,6 @@ concurrency:
 
 env:
   GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_MODEL: llama-3.1-8b-instant
   GROQ_WIRE_API: responses
 
 jobs:
@@ -77,7 +76,7 @@ jobs:
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
 
-      - name: Verify Groq provider
+      - name: Discover available Groq model
         id: provider
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -95,21 +94,49 @@ jobs:
             429) echo 'GROQ_API_RATE_LIMITED=1'; exit 75 ;;
             *) echo "GROQ_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
           esac
-          MODEL_LIST="$response" python3 - "$GROQ_MODEL" <<'PY'
-          import json, os, sys
-          wanted = sys.argv[1]
-          data = json.loads(os.environ["MODEL_LIST"])
-          ids = {item.get("id") for item in data.get("data", [])}
-          if wanted not in ids:
-              print(f"GROQ_MODEL_UNAVAILABLE={wanted}", file=sys.stderr)
+
+          MODEL_LIST="$response" python3 <<'PY'
+          import json, os
+          models = json.loads(os.environ["MODEL_LIST"]).get("data", [])
+          available = {m.get("id") for m in models if m.get("id")}
+
+          # Prefer fast coding-capable Llama models. If the account does not expose
+          # them, choose another active non-Compound text model returned by Groq.
+          preferred = [
+              "llama-3.3-70b-versatile",
+              "llama-3.1-8b-instant",
+          ]
+          excluded_prefixes = ("groq/compound",)
+          selected = next((m for m in preferred if m in available), None)
+          if selected is None:
+              candidates = sorted(
+                  m for m in available
+                  if not m.startswith(excluded_prefixes)
+                  and "whisper" not in m.lower()
+                  and "tts" not in m.lower()
+                  and "guard" not in m.lower()
+                  and "safeguard" not in m.lower()
+              )
+              if candidates:
+                  selected = candidates[0]
+
+          if not selected:
+              print("GROQ_NO_CODE_MODEL_AVAILABLE=1")
+              print("GROQ_AVAILABLE_MODELS=" + ",".join(sorted(available)))
               raise SystemExit(2)
-          print(f"GROQ_MODEL_AVAILABLE={wanted}")
+
+          print(f"GROQ_MODEL_SELECTED={selected}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write("provider=groq\n")
+              f.write(f"model={selected}\n")
+              f.write("base_url=https://api.groq.com/openai/v1\n")
+              f.write("env_key=GROQ_API_KEY\n")
+              f.write("wire_api=responses\n")
           PY
-          echo 'provider=groq' >> "$GITHUB_OUTPUT"
-          echo "model=$GROQ_MODEL" >> "$GITHUB_OUTPUT"
-          echo "base_url=$GROQ_BASE_URL" >> "$GITHUB_OUTPUT"
-          echo 'env_key=GROQ_API_KEY' >> "$GITHUB_OUTPUT"
-          echo 'wire_api=responses' >> "$GITHUB_OUTPUT"
+
+          echo 'AI_PROVIDER_SELECTED=groq'
+          echo "AI_MODEL_SELECTED=${{ steps.provider.outputs.model }}"
+          echo 'AI_WIRE_API_SELECTED=responses'
 
       - name: Autonomous Codex agent
         env:
