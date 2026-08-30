@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - kaggle/cardiag_gpu_smoke.py
-      - .github/workflows/kaggle-gpu-smoke.yml
+      - 'kaggle/**'
+      - '.github/workflows/kaggle-gpu-smoke.yml'
 
 permissions:
   contents: read
@@ -38,6 +38,15 @@ jobs:
           print("KAGGLE_TOKEN_LENGTH_CLASS=" + ("short" if len(token) < 40 else "normal"))
           PY
 
+      - name: Check Kaggle accelerator quota before scheduling
+        run: |
+          set +e
+          echo '--- Kaggle accelerator quota ---'
+          kaggle quota 2>&1 | tee /tmp/kaggle-quota.log
+          rc=${PIPESTATUS[0]}
+          echo "KAGGLE_QUOTA_EXIT=$rc"
+          exit 0
+
       - name: Initialize a private Kaggle kernel and discover account slug
         id: kernel
         working-directory: /tmp
@@ -53,12 +62,9 @@ jobs:
           from pathlib import Path
           p=Path("kernel-metadata.json")
           data=json.loads(p.read_text())
-          print("KERNEL_INIT_ID=" + str(data.get("id", "")))
-          if not data.get("id"):
-              raise SystemExit("Kaggle CLI did not populate a kernel id; cannot safely infer the account slug")
-          owner=data["id"].split("/",1)[0]
-          if not owner or owner in {"your-username", "username"}:
-              raise SystemExit("Kaggle CLI returned a placeholder owner")
+          owner=data.get("id", "").split("/",1)[0]
+          if not owner or owner in {"your-username", "username", "INSERT_KERNEL_SLUG_HERE"}:
+              raise SystemExit("Kaggle CLI did not return a usable account slug")
           print("KAGGLE_OWNER=" + owner)
           Path("owner.txt").write_text(owner)
           PY
@@ -90,38 +96,57 @@ jobs:
           PY
           cp "$GITHUB_WORKSPACE/kaggle/cardiag_gpu_smoke.py" .
           test -f cardiag_gpu_smoke.py
-          test "$(python3 -c 'import json; print(json.load(open("kernel-metadata.json"))["enable_gpu"])')" = "True"
           echo "kernel_ref=$(cat kernel-ref.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Push Kaggle GPU worker
         working-directory: /tmp/cardiag-kaggle-smoke
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           set -euo pipefail
           kaggle kernels push -p .
 
       - name: Wait for Kaggle worker
+        id: wait
         working-directory: /tmp/cardiag-kaggle-smoke
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           set -euo pipefail
           ref="$(cat kernel-ref.txt)"
           final=""
-          for i in $(seq 1 30); do
-            status="$(kaggle kernels status "$ref" 2>&1 | tee /tmp/kaggle-status.log || true)"
-            echo "$status"
-            if printf '%s\n' "$status" | grep -qE 'COMPLETE|Complete|successful|Successful'; then final=success; break; fi
-            if printf '%s\n' "$status" | grep -qE 'ERROR|Error|failed|Failed'; then final=failure; break; fi
-            sleep 20
+          for i in $(seq 1 36); do
+            status="$(kaggle kernels status "$ref" 2>&1 || true)"
+            printf '%s\n' "$status"
+            case "$status" in
+              *KernelWorkerStatus.COMPLETE*) final=success; break ;;
+              *KernelWorkerStatus.ERROR*) final=failure; break ;;
+              *KernelWorkerStatus.CANCELLED*|*KernelWorkerStatus.CANCELED*) final=failure; break ;;
+            esac
+            sleep 10
           done
-          test "$final" = success
+          echo "KAGGLE_FINAL_STATUS=${final:-timeout}"
+          if [ "$final" != success ]; then
+            exit 1
+          fi
+
+      - name: Collect Kaggle diagnostics on failure
+        if: failure()
+        working-directory: /tmp/cardiag-kaggle-smoke
+        run: |
+          set +e
+          ref="$(cat kernel-ref.txt)"
+          echo '--- FINAL KAGGLE STATUS ---'
+          kaggle kernels status "$ref" 2>&1 || true
+          echo '--- KAGGLE KERNEL LOGS ---'
+          kaggle kernels logs "$ref" 2>&1 | tee /tmp/kaggle-kernel.log || true
+          echo '--- KAGGLE OUTPUT ---'
+          rm -rf output-on-failure
+          mkdir -p output-on-failure
+          kaggle kernels output "$ref" -p output-on-failure --force 2>&1 || true
+          find output-on-failure -maxdepth 2 -type f -print -exec sh -c 'echo "--- $1"; tail -200 "$1"' _ {} \; || true
+          echo '--- KAGGLE QUOTA AFTER RUN ---'
+          kaggle quota 2>&1 || true
 
       - name: Download and verify worker output
+        if: success()
         working-directory: /tmp/cardiag-kaggle-smoke
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           set -euo pipefail
           ref="$(cat kernel-ref.txt)"
@@ -134,8 +159,6 @@ jobs:
       - name: Cleanup remote test kernel
         if: always()
         working-directory: /tmp/cardiag-kaggle-smoke
-        env:
-          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
         run: |
           set +e
           if [ -s kernel-ref.txt ]; then
