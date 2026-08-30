@@ -70,20 +70,13 @@ test -z "$(git status --porcelain)" || {
 
 PROMPT_FILE="$(mktemp)"
 cat > "$PROMPT_FILE" <<'EOF'
-You are the CarDiag autonomous coding agent. Execute ONLY the current Road Assistant milestone.
+Execute ONLY the current Road Assistant milestone.
 
-Before editing, read these repository files yourself:
-- docs/agent-next-task.md — exact milestone and acceptance criteria
-- agent-state.md — current state and validation evidence
-- AGENTS.md — repository rules and autonomous execution contract
+First read docs/agent-next-task.md, agent-state.md, and the repository rules in AGENTS.md. Then inspect the existing Road Assistant implementation, tests, networking, localization, and conventions.
 
-Then inspect the existing implementation, tests, networking, localization, and project conventions. Implement the milestone in the smallest coherent production-quality increment. Do not invent OSM/business data. Preserve Arabic RTL/French localization, least privilege, public interfaces, offline fallback semantics, and bounded network behavior. Do not implement live road hazards.
+Implement the milestone as a minimal production-quality increment. Use the existing Ktor/kotlinx.serialization stack for a real Overpass nearby-service provider. Never invent OSM/business data. Preserve public interfaces, offline fallback semantics, Arabic RTL/French localization, least privilege, bounded timeouts, and no location persistence/background tracking. Do not implement live road hazards.
 
-Add/update regression tests where appropriate. Run the strongest relevant unit tests, lint, debug build, and release validation when feasible. If validation fails, diagnose and fix the actual cause; never weaken or skip tests.
-
-Update agent-state.md with the completed work, real validation evidence, remaining blockers, and next priorities. Review git diff for secrets, generated files, unrelated changes, regressions, and RTL/localization issues. Do not commit or push; the workflow owns the commit/push.
-
-When starting, first inspect the three files above and the current Road Assistant code. Do not spend time restating this prompt; perform the engineering work.
+Add regression tests where appropriate. Run relevant unit tests, lint, debug build, and release validation when feasible; diagnose real failures without weakening tests. Update agent-state.md with actual evidence and remaining blockers. Review the diff for secrets, generated files, regressions, and unrelated changes. Do not commit or push.
 EOF
 
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
@@ -100,6 +93,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.stream_max_retries=0" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
+  -c "project_doc_max_bytes=3000" \
   -c "web_search=\"disabled\"" \
   --sandbox danger-full-access \
   --skip-git-repo-check \
