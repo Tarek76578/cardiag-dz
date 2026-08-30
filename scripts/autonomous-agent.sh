@@ -71,12 +71,8 @@ test -z "$(git status --porcelain)" || {
 PROMPT_FILE="$(mktemp)"
 cat > "$PROMPT_FILE" <<'EOF'
 Execute ONLY the current Road Assistant milestone.
-
-Read docs/agent-next-task.md, agent-state.md, and AGENTS.md first. Inspect the existing Road Assistant implementation, tests, networking, localization, and conventions.
-
-Implement only the milestone: a real Overpass nearby-service provider using the existing Ktor/kotlinx.serialization stack. Never invent OSM/business data. Preserve public interfaces, offline fallback semantics, Arabic RTL/French localization, least privilege, bounded timeouts, and no location persistence/background tracking. Do not implement live road hazards.
-
-Add appropriate regression tests. Run relevant tests, lint, debug build, and release validation when feasible; diagnose real failures without weakening tests. Update agent-state.md with actual evidence and blockers. Review the diff for secrets, generated files, regressions, and unrelated changes. Do not commit or push.
+Read docs/agent-next-task.md, agent-state.md, and AGENTS.md. Implement the real Overpass nearby-service provider with existing Ktor/kotlinx.serialization; no invented data, preserve interfaces/fallback, Arabic RTL/French, least privilege, bounded timeouts, no location persistence/background tracking, and no live hazards.
+Add regression tests, run relevant validation/builds, update agent-state.md with evidence, and review the diff. Do not commit or push.
 EOF
 
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
@@ -93,7 +89,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.stream_max_retries=0" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=false" \
-  -c "project_doc_max_bytes=1500" \
+  -c "project_doc_max_bytes=512" \
   -c "web_search=\"disabled\"" \
   --sandbox danger-full-access \
   --skip-git-repo-check \
