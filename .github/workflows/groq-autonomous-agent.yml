@@ -17,10 +17,13 @@ env:
   GROQ_FALLBACK_MODEL: openai/gpt-oss-20b
   GROQ_RATE_LIMIT_RETRIES: '2'
   GROQ_DEFAULT_RETRY_SECONDS: '45'
-  GROQ_MAX_OUTPUT_TOKENS: '1500'
-  GROQ_MAX_INPUT_TOKENS: '5500'
+  # Groq's observed 8k TPM ceiling is provider-side; keep a deliberately
+  # conservative request budget because Codex/tool serialization can tokenize
+  # substantially higher than a byte-based local estimate.
+  GROQ_MAX_OUTPUT_TOKENS: '800'
+  GROQ_MAX_INPUT_TOKENS: '4000'
   GROQ_TPM_LIMIT: '8000'
-  GROQ_TPM_SAFETY_MARGIN: '500'
+  GROQ_TPM_SAFETY_MARGIN: '1000'
 
 jobs:
   agent:
@@ -136,6 +139,7 @@ jobs:
           rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log
           cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
           chmod +x /tmp/codex-groq-capture-proxy.py
+          python3 -m py_compile /tmp/codex-groq-capture-proxy.py
           nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" GROQ_MAX_INPUT_TOKENS="$GROQ_MAX_INPUT_TOKENS" GROQ_TPM_LIMIT="$GROQ_TPM_LIMIT" GROQ_TPM_SAFETY_MARGIN="$GROQ_TPM_SAFETY_MARGIN" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
           echo $! > /tmp/codex-groq-proxy.pid
           for i in $(seq 1 30); do grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break; sleep 1; done
