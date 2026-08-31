@@ -40,16 +40,20 @@ def set_budget(body, budget):
 
 
 def affordability_error(data):
-    raw = json.dumps(data, ensure_ascii=False)
-    patterns = [
+    if isinstance(data, bytes):
+        raw = data.decode("utf-8", errors="replace")
+    elif isinstance(data, str):
+        raw = data
+    else:
+        raw = json.dumps(data, ensure_ascii=False, default=str)
+    for pattern in (
         r"can only afford\s+([0-9]+)",
         r"afford\s+([0-9]+)\s+tokens",
         r"only afford\s+([0-9]+)",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, raw, re.I)
-        if m:
-            return int(m.group(1))
+    ):
+        match = re.search(pattern, raw, re.I)
+        if match:
+            return int(match.group(1))
     return None
 
 
@@ -60,8 +64,10 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[proxy] " + (fmt % args) + "\n")
 
     def send_bytes(self, code, data, content_type="application/json"):
+        if not isinstance(data, bytes):
+            data = str(data).encode("utf-8")
         self.send_response(code)
-        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Type", content_type or "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Connection", "close")
         self.end_headers()
@@ -72,20 +78,21 @@ class Handler(BaseHTTPRequestHandler):
         if urlsplit(self.path).path == "/v1/models":
             self.send_bytes(200, b'{"data":[],"proxy":"ready"}')
         else:
-            self.send_error(404)
+            self.send_bytes(404, b'{"error":{"message":"not found"}}')
 
     def do_POST(self):
         path = urlsplit(self.path).path
         if not path.startswith("/v1/"):
-            self.send_error(404)
+            self.send_bytes(404, b'{"error":{"message":"not found"}}')
             return
         try:
             n = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(n))
+            raw_body = self.rfile.read(n)
+            body = json.loads(raw_body)
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
-        except Exception as e:
-            self.send_bytes(400, json.dumps({"error": {"message": f"invalid JSON: {e}"}}).encode())
+        except Exception as exc:
+            self.send_bytes(400, json.dumps({"error": {"message": f"invalid JSON: {exc}"}}).encode())
             return
 
         changes = clamp_tokens(body)
@@ -103,7 +110,8 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"TOKEN_CLAMP field={field} original={original} effective={MAX_TOKENS}", flush=True)
 
         def upstream_request(payload):
-            req = Request(UPSTREAM + self.path, data=json.dumps(payload, separators=(",", ":")).encode(), method="POST", headers={
+            upstream_path = self.path[3:] if self.path.startswith("/v1/") else self.path
+            req = Request(UPSTREAM + upstream_path, data=json.dumps(payload, separators=(",", ":")).encode(), method="POST", headers={
                 "Authorization": f"Bearer {KEY}",
                 "Content-Type": "application/json",
                 "Accept": self.headers.get("Accept", "application/json"),
@@ -112,17 +120,13 @@ class Handler(BaseHTTPRequestHandler):
             })
             return urlopen(req, timeout=TIMEOUT)
 
-        # Budget-aware retry: OpenRouter can reject a request when the remaining
-        # affordable output is below our configured ceiling. If it tells us the
-        # exact affordable token count, retry once with a safety margin instead of
-        # returning 402 to Codex. This makes the gateway adapt as the balance changes.
         try:
             response = upstream_request(body)
-        except HTTPError as e:
-            data = e.read()
+        except HTTPError as exc:
+            data = exc.read()
             affordable = affordability_error(data)
             current = body.get("max_output_tokens", body.get("max_tokens"))
-            if e.code == 402 and affordable is not None and affordable >= MIN_TOKENS and isinstance(current, (int, float)) and affordable < current:
+            if exc.code == 402 and affordable is not None and affordable >= MIN_TOKENS and isinstance(current, (int, float)) and affordable < current:
                 retry_budget = max(MIN_TOKENS, affordable - 256)
                 if retry_budget < current:
                     set_budget(body, retry_budget)
@@ -133,26 +137,29 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_bytes(retry_error.code, retry_error.read(), retry_error.headers.get("Content-Type", "application/json"))
                         return
                 else:
-                    self.send_bytes(e.code, data, e.headers.get("Content-Type", "application/json"))
+                    self.send_bytes(exc.code, data, exc.headers.get("Content-Type", "application/json"))
                     return
             else:
-                self.send_bytes(e.code, data, e.headers.get("Content-Type", "application/json"))
+                self.send_bytes(exc.code, data, exc.headers.get("Content-Type", "application/json"))
                 return
-        except (URLError, TimeoutError) as e:
-            self.send_bytes(502, json.dumps({"error": {"message": str(e)}}).encode())
+        except (URLError, TimeoutError) as exc:
+            self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
+            return
+        except Exception as exc:
+            self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
             return
 
         try:
-            with response as r:
-                ctype = r.headers.get("Content-Type", "application/json")
-                self.send_response(r.status)
-                self.send_header("Content-Type", ctype)
+            with response as upstream:
+                content_type = upstream.headers.get("Content-Type", "application/json")
+                self.send_response(upstream.status)
+                self.send_header("Content-Type", content_type)
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "close")
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
                 while True:
-                    chunk = r.read(16384)
+                    chunk = upstream.read(16384)
                     if not chunk:
                         break
                     self.wfile.write(f"{len(chunk):X}\r\n".encode())
@@ -163,11 +170,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception as e:
-            try:
-                self.send_bytes(502, json.dumps({"error": {"message": str(e)}}).encode())
-            except Exception:
-                pass
+        except Exception as exc:
+            print(f"PROXY_STREAM_ERROR {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
