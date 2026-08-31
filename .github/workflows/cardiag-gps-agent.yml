@@ -5,12 +5,15 @@ on:
   push:
     branches:
       - feat/multi-provider-ai-gateway
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 concurrency:
-  group: cardiag-gps-agent
+  group: cardiag-gps-agent-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -94,15 +97,12 @@ jobs:
           done
           kill -0 "$(cat /tmp/gateway.pid)"
           python3 - <<'PY'
-          import json, urllib.request
+          import json, urllib.error, urllib.request
           health=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=5))
           assert health['status'] == 'ok'
-          configured=[name for name, info in health['providers'].items() if info['configured'] and info['codex_compatible']]
+          configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
           print('CONFIGURED_CODEX_PROVIDERS=' + ','.join(configured))
-          PY
-          python3 - <<'PY'
-          import json, urllib.error, urllib.request
           payload={'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
@@ -111,8 +111,7 @@ jobs:
                   data=json.load(response)
                   assert data.get('object') == 'response', data
           except urllib.error.HTTPError as exc:
-              body=exc.read().decode('utf-8','replace')
-              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {body}')
+              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {exc.read().decode("utf-8","replace")}')
           print('AI_GATEWAY_LIVE_PROBE=PASS')
           PY
           grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
@@ -148,7 +147,7 @@ jobs:
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
 
       - name: Commit verified GPS changes
-        if: success()
+        if: success() && github.event_name == 'push'
         run: |
           set -euo pipefail
           git diff --check
