@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 import importlib.util
 import pathlib
-import tempfile
+import sys
 from email.message import Message
-from urllib.error import HTTPError
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("ai_gateway", ROOT / "scripts" / "ai-gateway.py")
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
@@ -42,21 +42,21 @@ def test_chat_payload():
 
 
 def test_candidates_skip_unconfigured_and_cooling():
-    original = module.provider_state["groq"].cooldown_until
+    original_key = module.PROVIDERS["groq"]["key"]
+    original_model = module.PROVIDERS["groq"]["model"]
+    original_cooldown = module.provider_state["groq"].cooldown_until
     try:
         module.PROVIDERS["groq"]["key"] = "test"
         module.PROVIDERS["groq"]["model"] = "test-model"
         module.provider_state["groq"].cooldown_until = 10**20
         assert all(provider != "groq" for provider, _ in module.provider_candidates("openrouter", "x"))
     finally:
-        module.provider_state["groq"].cooldown_until = original
-        module.PROVIDERS["groq"]["key"] = ""
-        module.PROVIDERS["groq"]["model"] = "llama-3.3-70b-versatile"
+        module.provider_state["groq"].cooldown_until = original_cooldown
+        module.PROVIDERS["groq"]["key"] = original_key
+        module.PROVIDERS["groq"]["model"] = original_model
 
 
 def test_failure_policy_exports():
-    # The gateway must expose the same failure distinctions that drive fallback:
-    # rate limit/transient are retryable; auth/permission/invalid request are not.
     assert module.classify(429, b"") == "rate_limit"
     assert module.classify(503, b"") == "transient"
     assert module.classify(403, b"") == "permission"
