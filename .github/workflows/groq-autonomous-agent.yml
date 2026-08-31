@@ -15,10 +15,10 @@ env:
   OPENROUTER_WIRE_API: responses
   OPENROUTER_PRIMARY_MODEL: openai/gpt-oss-120b:free
   OPENROUTER_FALLBACK_MODEL: openai/gpt-oss-20b:free
-  OPENROUTER_RATE_LIMIT_RETRIES: '3'
-  OPENROUTER_DEFAULT_RETRY_SECONDS: '30'
-  OPENROUTER_MAX_OUTPUT_TOKENS: '1200'
-  OPENROUTER_MAX_INPUT_TOKENS: '6000'
+  OPENROUTER_RATE_LIMIT_RETRIES: '2'
+  OPENROUTER_DEFAULT_RETRY_SECONDS: '45'
+  OPENROUTER_MAX_OUTPUT_TOKENS: '900'
+  OPENROUTER_MAX_INPUT_TOKENS: '5000'
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
@@ -103,17 +103,15 @@ jobs:
               "deepseek/deepseek-chat-v3.1:free",
           ]
           ids={m.get("id",""):m for m in models}
+          # Only candidates explicitly known to be useful for coding-agent workloads.
           for mid in preferred:
               if mid in ids:
-                  print(mid)
-          for m in models:
-              mid=m.get("id","")
-              if not mid or mid in preferred or not mid.endswith(":free"):
-                  continue
-              ctx=m.get("context_length",0) or 0
-              if ctx >= 8000:
-                  print(mid)
+                  m=ids[mid]
+                  supported=m.get("supported_parameters") or []
+                  if "tools" in supported or mid.startswith("openai/gpt-oss"):
+                      print(mid)
           PY
+          test -s /tmp/openrouter-candidates.txt || { echo 'No approved coding-agent model is currently available.'; exit 43; }
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
@@ -131,8 +129,9 @@ jobs:
             code="$(printf '%s\n' "$probe" | tail -n1)"
             echo "OPENROUTER_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
+            if [ "$code" = 429 ]; then sleep "$OPENROUTER_DEFAULT_RETRY_SECONDS"; fi
           done < /tmp/openrouter-candidates.txt
-          test -n "$selected" || exit 43
+          test -n "$selected" || exit 44
           echo "model=$selected" >> "$GITHUB_OUTPUT"
       - name: Run Codex with OpenRouter
         env:
