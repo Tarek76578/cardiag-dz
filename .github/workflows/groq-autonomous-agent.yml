@@ -13,8 +13,6 @@ concurrency:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_WIRE_API: responses
-  OPENROUTER_PRIMARY_MODEL: openai/gpt-oss-120b:free
-  OPENROUTER_FALLBACK_MODEL: openai/gpt-oss-20b:free
   OPENROUTER_RATE_LIMIT_RETRIES: '2'
   OPENROUTER_DEFAULT_RETRY_SECONDS: '45'
   OPENROUTER_MAX_OUTPUT_TOKENS: '900'
@@ -102,16 +100,29 @@ jobs:
               "qwen/qwen3-coder:free",
               "deepseek/deepseek-chat-v3.1:free",
           ]
-          ids={m.get("id",""):m for m in models}
-          # Only candidates explicitly known to be useful for coding-agent workloads.
-          for mid in preferred:
-              if mid in ids:
-                  m=ids[mid]
-                  supported=m.get("supported_parameters") or []
-                  if "tools" in supported or mid.startswith("openai/gpt-oss"):
-                      print(mid)
+          excluded=("vision", "audio", "image", "tts", "whisper", "embed", "moderation")
+          def score(m):
+              mid=(m.get("id") or "").lower()
+              params=set(m.get("supported_parameters") or [])
+              if "tools" not in params and "tool_choice" not in params:
+                  return -10000
+              if any(x in mid for x in excluded):
+                  return -10000
+              s=0
+              if mid in preferred: s+=100000-len(preferred)*preferred.index(mid)
+              if "coder" in mid or "code" in mid: s+=5000
+              if "gpt-oss" in mid: s+=4000
+              if mid.endswith(":free"): s+=1000
+              s+=min(int(m.get("context_length") or 0), 128000)//1000
+              return s
+          ranked=sorted((m for m in models if m.get("id")), key=score, reverse=True)
+          for m in ranked[:12]:
+              if score(m)>0:
+                  print(m["id"])
           PY
-          test -s /tmp/openrouter-candidates.txt || { echo 'No approved coding-agent model is currently available.'; exit 43; }
+          test -s /tmp/openrouter-candidates.txt || { echo 'No currently available model advertises tool support.'; exit 43; }
+          echo 'OPENROUTER_CANDIDATES:'
+          sed 's/^/  /' /tmp/openrouter-candidates.txt
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
@@ -137,7 +148,6 @@ jobs:
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           OPENROUTER_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
-          OPENROUTER_FALLBACK_MODEL: ${{ env.OPENROUTER_FALLBACK_MODEL }}
           OPENROUTER_RATE_LIMIT_RETRIES: ${{ env.OPENROUTER_RATE_LIMIT_RETRIES }}
           OPENROUTER_DEFAULT_RETRY_SECONDS: ${{ env.OPENROUTER_DEFAULT_RETRY_SECONDS }}
           OPENROUTER_MAX_OUTPUT_TOKENS: ${{ env.OPENROUTER_MAX_OUTPUT_TOKENS }}
