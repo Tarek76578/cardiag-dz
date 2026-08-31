@@ -9,9 +9,6 @@ UPSTREAM = os.environ.get("OPENROUTER_UPSTREAM", "https://openrouter.ai/api/v1")
 KEY = os.environ.get("OPEN_ROUTER_API_KEY", "")
 MAX_TOKENS = int(os.environ.get("OPENROUTER_PROXY_MAX_TOKENS", "12000"))
 TIMEOUT = int(os.environ.get("OPENROUTER_PROXY_TIMEOUT", "300"))
-
-# Codex/Responses has used both names across clients. Walk the complete JSON tree
-# so the guard cannot miss a nested token-budget field.
 TOKEN_FIELDS = {"max_output_tokens", "max_tokens"}
 
 def clamp_tokens(value, path="root"):
@@ -23,11 +20,11 @@ def clamp_tokens(value, path="root"):
                 if original > MAX_TOKENS:
                     value[key] = MAX_TOKENS
                     changed.append((path + "." + key, original, MAX_TOKENS))
-            else:
+            elif key not in TOKEN_FIELDS:
                 changed.extend(clamp_tokens(value[key], path + "." + key))
     elif isinstance(value, list):
         for i, item in enumerate(value):
-            changed.extend(clamp_tokens(item, f"{path}[{i}]"))
+            changed.extend(clamp_tokens(item, f"{path}[{i}]") )
     return changed
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,7 +42,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if urlsplit(self.path).path == "/v1/models":
             self.send_bytes(200, b'{"data":[],"proxy":"ready"}')
-        else: self.send_error(404)
+        else:
+            self.send_error(404)
 
     def do_POST(self):
         path = urlsplit(self.path).path
@@ -53,22 +51,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404); return
         try:
             n = int(self.headers.get("Content-Length", "0"))
-            raw = self.rfile.read(n)
-            body = json.loads(raw)
+            body = json.loads(self.rfile.read(n))
             if not isinstance(body, dict): raise ValueError("JSON object required")
         except Exception as e:
             self.send_bytes(400, json.dumps({"error":{"message":f"invalid JSON: {e}"}}).encode()); return
 
         changes = clamp_tokens(body)
+        # Critical: Codex 0.151.0 can omit max_output_tokens entirely. In that case
+        # OpenRouter applies the selected model's default/maximum, which is what caused
+        # the observed 65536-token affordability error. Force an explicit affordable
+        # Responses budget at the HTTP boundary so Codex cannot bypass the limit.
+        if path == "/v1/responses" and "max_output_tokens" not in body and "max_tokens" not in body:
+            body["max_output_tokens"] = MAX_TOKENS
+            print(f"TOKEN_INJECT field=max_output_tokens original=absent effective={MAX_TOKENS}", flush=True)
         for field, original, effective in changes:
             print(f"TOKEN_CLAMP field={field} original={original} effective={effective}", flush=True)
         if path == "/v1/responses":
-            # Hard invariant: a Responses request leaving this process may never
-            # advertise an output budget above MAX_TOKENS.
-            for field in TOKEN_FIELDS:
-                if isinstance(body.get(field), (int, float)) and body[field] > MAX_TOKENS:
-                    body[field] = MAX_TOKENS
-            assert all(not (isinstance(body.get(f), (int,float)) and body[f] > MAX_TOKENS) for f in TOKEN_FIELDS)
+            if isinstance(body.get("max_output_tokens"), (int, float)) and body["max_output_tokens"] > MAX_TOKENS:
+                body["max_output_tokens"] = MAX_TOKENS
+                print(f"TOKEN_CLAMP field=max_output_tokens original=post-clamp effective={MAX_TOKENS}", flush=True)
+            if isinstance(body.get("max_tokens"), (int, float)) and body["max_tokens"] > MAX_TOKENS:
+                body["max_tokens"] = MAX_TOKENS
+                print(f"TOKEN_CLAMP field=max_tokens original=post-clamp effective={MAX_TOKENS}", flush=True)
+            assert not (isinstance(body.get("max_output_tokens"), (int,float)) and body["max_output_tokens"] > MAX_TOKENS)
+            assert not (isinstance(body.get("max_tokens"), (int,float)) and body["max_tokens"] > MAX_TOKENS)
 
         upstream_path = self.path[3:]
         payload = json.dumps(body, separators=(",", ":")).encode()
