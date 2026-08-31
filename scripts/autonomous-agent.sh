@@ -16,27 +16,27 @@ mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
 case "$PROVIDER" in
   openrouter)
     export OPEN_ROUTER_API_KEY="${OPEN_ROUTER_API_KEY:-}"
-    test -n "$OPEN_ROUTER_API_KEY" || { echo "OPEN_ROUTER_API_KEY is missing" >&2; exit 13; }
-    ;;
-  *) echo "Unsupported CODEX_PROVIDER=$PROVIDER; this project uses OpenRouter." >&2; exit 14;;
+    test -n "$OPEN_ROUTER_API_KEY" || { echo "OPEN_ROUTER_API_KEY is missing" >&2; exit 13; } ;;
+  *) echo "Unsupported CODEX_PROVIDER=$PROVIDER" >&2; exit 14;;
 esac
-case "$WIRE_API" in responses) ;; *) echo "Unsupported CODEX_WIRE_API=$WIRE_API; Codex requires Responses API for this agent." >&2; exit 15;; esac
-test -n "$MODEL" || { echo "AI_MODEL was not selected by the OpenRouter model discovery step." >&2; exit 16; }
+case "$WIRE_API" in responses) ;; *) echo "Unsupported CODEX_WIRE_API=$WIRE_API" >&2; exit 15;; esac
+test -n "$MODEL" || { echo "AI_MODEL was not selected by OpenRouter model discovery." >&2; exit 16; }
 echo "AI_AGENT=codex"; echo "AI_PROVIDER=$PROVIDER"; echo "AI_MODEL=$MODEL"; echo "CODEX_BASE_URL=$BASE_URL"; echo "CODEX_ENV_KEY=$ENV_KEY"; echo "CODEX_WIRE_API=$WIRE_API"; echo "CODEX_HOME=$CODEX_HOME"
 test -z "$(git status --porcelain)" || { echo "Working tree must be clean before the autonomous edit." >&2; git status --short >&2; exit 12; }
 PROMPT_FILE="$(mktemp)"; trap 'rm -f "$PROMPT_FILE"' EXIT
 cat > "$PROMPT_FILE" <<'EOF'
-Execute only the current CarDiag milestone.
-Read docs/agent-next-task.md, agent-state.md, and AGENTS.md. Inspect the repository before editing. Implement the highest-priority real CarDiag task defined there. Preserve Arabic RTL/French, least privilege, bounded timeouts, no location persistence/background tracking, and do not invent automotive facts, diagnostic procedures, prices, service availability or test results.
-Add or update regression tests for every behavioral change. Validate the affected code and Android build. Update agent-state.md with actual evidence. Review the complete diff. Do not commit or push; the workflow handles the verified commit.
-Work autonomously and make the smallest complete implementation. Prefer repository-native tools and shell commands over speculative planning. If a provider/API cannot be verified, implement a safe interface/fallback rather than fabricating data.
-Keep the implementation focused: do not perform broad repository rewrites or unrelated refactors. Once the requested change and its tests are complete, stop.
+Execute ONLY the current CarDiag milestone in docs/agent-next-task.md.
+For this cycle the scope is GPS + interactive map ONLY. Do not implement or modify unrelated features.
+Inspect only the relevant existing code first. Implement the smallest complete production-quality change.
+Add focused regression tests where practical, run the relevant tests/lint/build, and fix real failures.
+Update agent-state.md with factual evidence. Review the diff. Do not commit or push; the workflow handles that.
+When this single milestone is complete and validated, STOP immediately.
 EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
-# Do not impose an artificial output-token cap. The selected OpenRouter model/provider
-# decides the affordable maximum. Give Codex a large context window and let the provider
-# reject only requests that exceed the actual account/model budget.
+# This is intentionally a small single-milestone request. Codex must not negotiate a
+# 65536-token response that the current OpenRouter balance cannot afford.
+# The local proxy provides the final provider-side guard as well.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
@@ -46,9 +46,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
   -c "model_providers.$PROVIDER.request_max_retries=1" \
   -c "model_providers.$PROVIDER.stream_max_retries=1" \
-  -c "model_providers.$PROVIDER.supports_websockets=false" \
-  -c "model_providers.$PROVIDER.requires_openai_auth=true" \
-  -c "model_context_window=131072" \
+  -c "model_context_window=32768" \
   -c "project_doc_max_bytes=0" \
   -c "web_search=\"disabled\"" \
   --sandbox danger-full-access --skip-git-repo-check "$(cat "$PROMPT_FILE")" < /dev/null
