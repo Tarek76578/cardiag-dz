@@ -3,10 +3,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 for file in docs/agent-next-task.md agent-state.md AGENTS.md; do test -f "$file" || { echo "Missing $file" >&2; exit 10; }; done
 PROVIDER="${CODEX_PROVIDER:-cardiag_gateway}"; MODEL="${AI_MODEL:-}"
-BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"; ENV_KEY="${CODEX_ENV_KEY:-OPEN_ROUTER_API_KEY}"; WIRE_API="${CODEX_WIRE_API:-responses}"
+BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"; ENV_KEY="${CODEX_ENV_KEY:-CARDIAG_GATEWAY_KEY}"; WIRE_API="${CODEX_WIRE_API:-responses}"
+export CARDIAG_GATEWAY_KEY="${CARDIAG_GATEWAY_KEY:-local-gateway-key}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"; mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
 test "$PROVIDER" = cardiag_gateway || { echo "Only CarDiag AI Gateway is supported" >&2; exit 14; }
-test -n "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${NVIDIA_API_KEY:-}${DEEPSEEK_API_KEY:-}${GEMINI_API_KEY:-}${GEMINI_KEY:-}" || { echo "No AI provider API key is configured" >&2; exit 13; }
+test -n "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${DEEPSEEK_API_KEY:-}" || { echo "No AI provider API key is configured" >&2; exit 13; }
 test "$WIRE_API" = responses || { echo "Responses API is required" >&2; exit 15; }; test -n "$MODEL" || { echo "AI_MODEL is missing" >&2; exit 16; }
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed" >&2; exit 21; }
 cat >/tmp/cardiag-agent-prompt <<'EOF'
@@ -18,7 +19,6 @@ If the milestone cannot be completely finished in this cycle, implement the high
 Do not spend the cycle on broad repository exploration once the relevant GPS/map files are identified. Do not repeatedly inspect unrelated files.
 Do not commit or push; the workflow handles verified commits. Stop after this single task.
 EOF
-# The CarDiag AI Gateway is the authoritative output-token and provider-recovery boundary.
 echo "CODEX_OUTPUT_GUARD=AI_GATEWAY"
 echo "CODEX_PROXY_BUDGET=${AI_GATEWAY_MAX_OUTPUT_TOKENS:-12000}"
 codex exec --ephemeral --color never \
