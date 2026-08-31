@@ -19,9 +19,12 @@ concurrency:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_WIRE_API: responses
-  OPENROUTER_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
-  AI_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
+  OPENROUTER_MODEL: qwen/qwen3-coder:free
+  OPENROUTER_FALLBACK_MODELS: qwen/qwen3-coder:free,google/gemma-4-31b-it:free
+  AI_MODEL: qwen/qwen3-coder:free
+  AI_PROVIDER: openrouter
   AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+  AI_GATEWAY_MAX_ATTEMPTS: '2'
   AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
 
 jobs:
@@ -94,23 +97,26 @@ jobs:
           done
           kill -0 "$(cat /tmp/gateway.pid)"
           python3 - <<'PY'
-          import json, urllib.error, urllib.request
+          import json, urllib.error, urllib.request, os
           health=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=5))
           assert health['status'] == 'ok'
           configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
-          payload={'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':16}
+          model=os.environ.get('AI_MODEL') or 'qwen/qwen3-coder:free'
+          assert model not in {'openrouter/free','openrouter/auto'}, model
+          tool={"type":"function","name":"gateway_probe","description":"Return a fixed probe result","parameters":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":False}}
+          payload={'model':model,'input':[{'role':'user','content':[{'type':'input_text','text':'Reply with exactly OK.'}]}],'tools':[tool],'tool_choice':'none','parallel_tool_calls':True,'max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
-              with urllib.request.urlopen(req,timeout=60) as response:
+              with urllib.request.urlopen(req,timeout=90) as response:
                   assert response.status == 200, response.status
-                  raw=response.read()
-                  data=json.loads(raw)
+                  data=json.loads(response.read())
                   assert data.get('object') == 'response', data
           except urllib.error.HTTPError as exc:
               detail=exc.read().decode('utf-8','replace')
-              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {detail}')
-          print('AI_GATEWAY_LIVE_PROBE=PASS')
+              raise SystemExit(f'Gateway Codex-compatibility probe failed HTTP {exc.code}: {detail}')
+          print('AI_GATEWAY_CODEX_COMPAT_PROBE=PASS')
+          print(f'AI_GATEWAY_PROBE_MODEL={model}')
           PY
           grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
           selected="$(grep 'ROUTE provider=' /tmp/cardiag-ai-gateway.log | tail -n 1 | sed -E 's/^.*ROUTE provider=([^ ]+) model=([^ ]+) attempt=.*/\1 \2/')"
@@ -118,10 +124,13 @@ jobs:
           provider="${selected%% *}"
           model="${selected#* }"
           test -n "$provider"; test -n "$model"
+          test "$model" != 'openrouter/free'
+          test "$model" != 'openrouter/auto'
           echo "AI_GATEWAY_SELECTED_PROVIDER=$provider"
           echo "AI_GATEWAY_SELECTED_MODEL=$model"
+          echo "AI_GATEWAY_SELECTED_PROVIDER=$provider" >> "$GITHUB_ENV"
+          echo "AI_GATEWAY_SELECTED_MODEL=$model" >> "$GITHUB_ENV"
           echo "AI_MODEL=$model" >> "$GITHUB_ENV"
-          echo "OPENROUTER_MODEL=$model" >> "$GITHUB_ENV"
           echo "AI_PROVIDER=$provider" >> "$GITHUB_ENV"
           cat /tmp/gateway-health.json
           cat /tmp/cardiag-ai-gateway.log
@@ -133,11 +142,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "${AI_GATEWAY_SELECTED_PROVIDER:-}"
-          test -n "${AI_GATEWAY_SELECTED_MODEL:-}"
-          kill "$(cat /tmp/gateway.pid)" || true
+          : "${AI_GATEWAY_SELECTED_PROVIDER:?missing selected provider}"
+          : "${AI_GATEWAY_SELECTED_MODEL:?missing selected model}"
+          old_pid="$(cat /tmp/gateway.pid)"
+          kill "$old_pid" 2>/dev/null || true
           for i in $(seq 1 10); do
-            kill -0 "$(cat /tmp/gateway.pid)" 2>/dev/null || break
+            if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
             sleep 1
           done
           export AI_PROVIDER="$AI_GATEWAY_SELECTED_PROVIDER"
@@ -156,12 +166,17 @@ jobs:
           done
           kill -0 "$(cat /tmp/gateway.pid)"
           python3 - <<'PY'
-          import json, urllib.request
+          import json, os, urllib.request
           h=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=5))
-          p=h['providers'][__import__('os').environ['AI_GATEWAY_SELECTED_PROVIDER']]
-          assert p['configured'] and p['codex_compatible']
-          assert p['model'] == __import__('os').environ['AI_GATEWAY_SELECTED_MODEL'], p
+          provider=os.environ['AI_GATEWAY_SELECTED_PROVIDER']
+          model=os.environ['AI_GATEWAY_SELECTED_MODEL']
+          p=h['providers'][provider]
+          assert p['configured'] and p['codex_compatible'], p
+          assert p['model'] == model, p
+          assert model not in {'openrouter/free','openrouter/auto'}, model
           print('AI_GATEWAY_CODEX_ROUTE=PASS')
+          print(f'AI_GATEWAY_SELECTED_PROVIDER={provider}')
+          print(f'AI_GATEWAY_SELECTED_MODEL={model}')
           PY
           cat /tmp/gateway-codex-health.json
           cat /tmp/cardiag-ai-gateway-codex.log
@@ -177,11 +192,18 @@ jobs:
           CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+          AI_GATEWAY_MAX_ATTEMPTS: '2'
           AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
         run: |
           set -euo pipefail
           test -n "${AI_MODEL:-}" || { echo 'AI_MODEL was not selected by Gateway probe' >&2; exit 17; }
           test -n "${AI_PROVIDER:-}" || { echo 'AI_PROVIDER was not selected by Gateway probe' >&2; exit 18; }
+          test -n "${AI_GATEWAY_SELECTED_PROVIDER:-}" || { echo 'AI_GATEWAY_SELECTED_PROVIDER missing' >&2; exit 19; }
+          test -n "${AI_GATEWAY_SELECTED_MODEL:-}" || { echo 'AI_GATEWAY_SELECTED_MODEL missing' >&2; exit 20; }
+          test "$AI_MODEL" = "$AI_GATEWAY_SELECTED_MODEL"
+          test "$AI_PROVIDER" = "$AI_GATEWAY_SELECTED_PROVIDER"
+          test "$AI_MODEL" != 'openrouter/free'
+          test "$AI_MODEL" != 'openrouter/auto'
           echo "CODEX_EFFECTIVE_PROVIDER=$AI_PROVIDER"
           echo "CODEX_EFFECTIVE_MODEL=$AI_MODEL"
           export CODEX_HOME="$HOME/.codex-cardiag"
