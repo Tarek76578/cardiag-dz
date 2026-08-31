@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, re, sys
+import json, os, re, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -11,6 +11,7 @@ MAX_TOKENS = int(os.environ.get("OPENROUTER_PROXY_MAX_TOKENS", "12000"))
 MIN_TOKENS = int(os.environ.get("OPENROUTER_PROXY_MIN_TOKENS", "1024"))
 TIMEOUT = int(os.environ.get("OPENROUTER_PROXY_TIMEOUT", "300"))
 TOKEN_FIELDS = {"max_output_tokens", "max_tokens"}
+UPSTREAM_LOCK = threading.Lock()
 
 
 def clamp_tokens(value, path="root"):
@@ -55,6 +56,13 @@ def affordability_error(data):
         if match:
             return int(match.group(1))
     return None
+
+
+def is_inflight_credit_error(code, data):
+    if code != 402:
+        return False
+    raw = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+    return "in-flight requests" in raw.lower() or "inflight requests" in raw.lower()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -120,58 +128,68 @@ class Handler(BaseHTTPRequestHandler):
             })
             return urlopen(req, timeout=TIMEOUT)
 
-        try:
-            response = upstream_request(body)
-        except HTTPError as exc:
-            data = exc.read()
-            affordable = affordability_error(data)
-            current = body.get("max_output_tokens", body.get("max_tokens"))
-            if exc.code == 402 and affordable is not None and affordable >= MIN_TOKENS and isinstance(current, (int, float)) and affordable < current:
-                retry_budget = max(MIN_TOKENS, affordable - 256)
-                if retry_budget < current:
-                    set_budget(body, retry_budget)
-                    print(f"TOKEN_BUDGET_RETRY original={current} affordable={affordable} effective={retry_budget}", flush=True)
-                    try:
-                        response = upstream_request(body)
-                    except HTTPError as retry_error:
-                        self.send_bytes(retry_error.code, retry_error.read(), retry_error.headers.get("Content-Type", "application/json"))
-                        return
-                else:
+        # Codex may issue multiple Responses requests concurrently. OpenRouter's
+        # credit guard can reject the later request solely because an earlier one
+        # is still in flight. Serialize upstream calls so the proxy never creates
+        # that artificial concurrency. The lock is held through streaming, so the
+        # next Codex request starts only after OpenRouter has settled the previous one.
+        with UPSTREAM_LOCK:
+            response = None
+            for attempt in range(3):
+                try:
+                    response = upstream_request(body)
+                    break
+                except HTTPError as exc:
+                    data = exc.read()
+                    affordable = affordability_error(data)
+                    current = body.get("max_output_tokens", body.get("max_tokens"))
+                    if exc.code == 402 and affordable is not None and affordable >= MIN_TOKENS and isinstance(current, (int, float)) and affordable < current:
+                        retry_budget = max(MIN_TOKENS, affordable - 256)
+                        if retry_budget < current:
+                            set_budget(body, retry_budget)
+                            print(f"TOKEN_BUDGET_RETRY original={current} affordable={affordable} effective={retry_budget}", flush=True)
+                            continue
+                    if is_inflight_credit_error(exc.code, data) and attempt < 2:
+                        delay = 1.0 * (attempt + 1)
+                        print(f"INFLIGHT_CREDIT_RETRY attempt={attempt + 1} sleep={delay}s", flush=True)
+                        time.sleep(delay)
+                        continue
                     self.send_bytes(exc.code, data, exc.headers.get("Content-Type", "application/json"))
                     return
-            else:
-                self.send_bytes(exc.code, data, exc.headers.get("Content-Type", "application/json"))
-                return
-        except (URLError, TimeoutError) as exc:
-            self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
-            return
-        except Exception as exc:
-            self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
-            return
+                except (URLError, TimeoutError) as exc:
+                    self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
+                    return
+                except Exception as exc:
+                    self.send_bytes(502, json.dumps({"error": {"message": str(exc)}}).encode())
+                    return
 
-        try:
-            with response as upstream:
-                content_type = upstream.headers.get("Content-Type", "application/json")
-                self.send_response(upstream.status)
-                self.send_header("Content-Type", content_type)
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "close")
-                self.send_header("Transfer-Encoding", "chunked")
-                self.end_headers()
-                while True:
-                    chunk = upstream.read(16384)
-                    if not chunk:
-                        break
-                    self.wfile.write(f"{len(chunk):X}\r\n".encode())
-                    self.wfile.write(chunk)
-                    self.wfile.write(b"\r\n")
+            if response is None:
+                self.send_bytes(502, b'{"error":{"message":"upstream request did not produce a response"}}')
+                return
+
+            try:
+                with response as upstream:
+                    content_type = upstream.headers.get("Content-Type", "application/json")
+                    self.send_response(upstream.status)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    while True:
+                        chunk = upstream.read(16384)
+                        if not chunk:
+                            break
+                        self.wfile.write(f"{len(chunk):X}\r\n".encode())
+                        self.wfile.write(chunk)
+                        self.wfile.write(b"\r\n")
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
                     self.wfile.flush()
-                self.wfile.write(b"0\r\n\r\n")
-                self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        except Exception as exc:
-            print(f"PROXY_STREAM_ERROR {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception as exc:
+                print(f"PROXY_STREAM_ERROR {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
