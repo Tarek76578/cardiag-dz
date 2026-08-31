@@ -13,7 +13,8 @@ concurrency:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_WIRE_API: responses
-  OPENROUTER_PROXY_MAX_TOKENS: '12000'
+  AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+  AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,nvidia,deepseek,gemini
 
 jobs:
   gps-agent:
@@ -44,11 +45,11 @@ jobs:
           test -f docs/agent-next-task.md
           test -f agent-state.md
           test -x scripts/autonomous-agent.sh
-          test -f scripts/openrouter-codex-proxy.py
+          test -f scripts/ai-gateway.py
           test -x android/gradlew
           test -f android/app/build.gradle.kts
           test -n "${{ secrets.OPEN_ROUTER_API_KEY }}"
-          python3 -m py_compile scripts/openrouter-codex-proxy.py
+          python3 -m py_compile scripts/ai-gateway.py scripts/openrouter-codex-proxy.py
           bash -n scripts/autonomous-agent.sh
 
       - name: Java
@@ -77,83 +78,56 @@ jobs:
           command -v codex
           codex --version
           codex --help >/dev/null
-          npm root --global
 
-      - name: OpenRouter preflight and model probe
-        id: provider
+      - name: Start and self-test CarDiag AI Gateway
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Accept: application/json' "$OPENROUTER_BASE_URL/models" -o /tmp/models.json
-          python3 - /tmp/models.json <<'PY' > /tmp/model-candidates.txt
-          import json, sys
-          data=json.load(open(sys.argv[1],encoding='utf-8'))
-          models=data.get('data',[])
-          blocked=('vision','audio','image','tts','whisper','embed','moderation')
-          preferred=('openai/gpt-oss-120b:free','openai/gpt-oss-20b:free','qwen/qwen3-coder:free','deepseek/deepseek-chat-v3.1:free')
-          def score(m):
-              mid=(m.get('id') or '').lower(); params=set(m.get('supported_parameters') or [])
-              if 'tools' not in params and 'tool_choice' not in params: return -10**9
-              if any(x in mid for x in blocked): return -10**9
-              try: ctx=int(m.get('context_length') or 0)
-              except Exception: ctx=0
-              pref=(len(preferred)-preferred.index(mid))*100000 if mid in preferred else 0
-              return pref+(5000 if 'code' in mid or 'coder' in mid else 0)+(4000 if 'gpt-oss' in mid else 0)+(1000 if mid.endswith(':free') else 0)+min(ctx,128000)//1000
-          for m in sorted((m for m in models if m.get('id')),key=score,reverse=True):
-              if score(m)>0: print(m['id'])
-          PY
-          test -s /tmp/model-candidates.txt
-          selected=''
-          while IFS= read -r model; do
-            [ -n "$model" ] || continue
-            payload="$(MODEL="$model" python3 - <<'PY'
-          import json, os
-          print(json.dumps({'model':os.environ['MODEL'],'input':'Reply with exactly OK','max_output_tokens':16}))
-          PY
-            )"
-            response="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' -d "$payload" "$OPENROUTER_BASE_URL/responses" || true)"
-            code="$(printf '%s\n' "$response" | tail -n1)"
-            echo "MODEL_PROBE model=$model http=$code"
-            if [ "$code" = 200 ]; then selected="$model"; break; fi
-          done < /tmp/model-candidates.txt
-          test -n "$selected" || { echo 'No currently usable OpenRouter model passed the Responses probe.' >&2; exit 44; }
-          echo "model=$selected" >> "$GITHUB_OUTPUT"
-          echo "SELECTED_MODEL=$selected"
-
-      - name: Start and self-test token interceptor
-        env:
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-        run: |
-          set -euo pipefail
-          export OPENROUTER_PROXY_MAX_TOKENS=12000
-          python3 scripts/openrouter-codex-proxy.py >/tmp/openrouter-proxy.log 2>&1 &
-          echo $! >/tmp/proxy.pid
+          python3 scripts/ai-gateway.py >/tmp/cardiag-ai-gateway.log 2>&1 &
+          echo $! >/tmp/gateway.pid
           for i in $(seq 1 30); do
-            curl -fsS --max-time 1 http://127.0.0.1:8787/v1/models >/dev/null 2>&1 && break
+            curl -fsS --max-time 1 http://127.0.0.1:8787/health >/tmp/gateway-health.json 2>/dev/null && break
             sleep 1
           done
-          kill -0 "$(cat /tmp/proxy.pid)"
+          kill -0 "$(cat /tmp/gateway.pid)"
           python3 - <<'PY'
           import json, urllib.request
-          req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps({'model':'interceptor-test','input':'x','max_output_tokens':65536}).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
-          try: urllib.request.urlopen(req,timeout=5)
+          health=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=5))
+          assert health['status'] == 'ok'
+          PY
+          python3 - <<'PY'
+          import json, urllib.request
+          req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps({'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':65536}).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
+          try: urllib.request.urlopen(req,timeout=20)
           except Exception: pass
           PY
-          grep -Eq 'TOKEN_CLAMP.*original=65536.*effective=12000' /tmp/openrouter-proxy.log
-          echo 'TOKEN_INTERCEPTOR_TEST=PASS'
-          cat /tmp/openrouter-proxy.log
+          grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
+          echo 'AI_GATEWAY_SELF_TEST=PASS'
+          cat /tmp/gateway-health.json
+          cat /tmp/cardiag-ai-gateway.log
 
       - name: Run GPS-only Codex agent
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          CODEX_PROVIDER: openrouter
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          CODEX_PROVIDER: cardiag_gateway
           AI_PROVIDER: openrouter
-          AI_MODEL: ${{ steps.provider.outputs.model }}
+          AI_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
           CODEX_ENV_KEY: OPEN_ROUTER_API_KEY
           CODEX_WIRE_API: responses
-          OPENROUTER_PROXY_MAX_TOKENS: '12000'
+          AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+          AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,nvidia,deepseek,gemini
         run: |
           set -euo pipefail
           export CODEX_HOME="$HOME/.codex-cardiag"
