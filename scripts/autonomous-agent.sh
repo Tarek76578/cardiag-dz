@@ -29,9 +29,12 @@ cat > "$PROMPT_FILE" <<'EOF'
 Execute only the current CarDiag milestone.
 Read docs/agent-next-task.md, agent-state.md, and AGENTS.md. Inspect the repository before editing. Implement the highest-priority real CarDiag task defined there. Preserve Arabic RTL/French, least privilege, bounded timeouts, no location persistence/background tracking, and do not invent automotive facts, diagnostic procedures, prices, service availability or test results.
 Add or update regression tests for every behavioral change. Validate the affected code and Android build. Update agent-state.md with actual evidence. Review the complete diff. Do not commit or push; the workflow handles the verified commit.
+Work autonomously and make the smallest complete implementation. Prefer repository-native tools and shell commands over speculative planning. If a provider/API cannot be verified, implement a safe interface/fallback rather than fabricating data.
 EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
+# OpenRouter is used as an OpenAI-compatible Responses provider. Keep the model explicitly pinned
+# by the workflow's preflight and avoid dynamic/random model selection inside Codex.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
@@ -39,8 +42,8 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
   -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" \
   -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
-  -c "model_providers.$PROVIDER.request_max_retries=2" \
-  -c "model_providers.$PROVIDER.stream_max_retries=2" \
+  -c "model_providers.$PROVIDER.request_max_retries=1" \
+  -c "model_providers.$PROVIDER.stream_max_retries=1" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=true" \
   -c "project_doc_max_bytes=0" \
