@@ -51,9 +51,9 @@ def test_provider_model_isolation():
         module.PROVIDERS["groq"]["model"] = "openai/gpt-oss-120b"
         module.PROVIDERS["deepseek"]["model"] = "deepseek-chat"
         foreign = "openai/gpt-oss-120b:free"
-        assert module.model_for("openrouter", foreign) == foreign
-        assert module.model_for("groq", foreign) == "openai/gpt-oss-120b"
-        assert module.model_for("deepseek", foreign) == "deepseek-chat"
+        assert module.model_options("openrouter", foreign)[0] == foreign
+        assert module.model_options("groq", foreign)[0] == "openai/gpt-oss-120b"
+        assert module.model_options("deepseek", foreign)[0] == "deepseek-chat"
     finally:
         module.PROVIDERS["openrouter"]["model"] = original_or
         module.PROVIDERS["groq"]["model"] = original_groq
