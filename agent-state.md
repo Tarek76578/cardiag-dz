@@ -10,35 +10,31 @@ The repository uses `.github/workflows/groq-autonomous-agent.yml` as the histori
 
 ## Current AI-agent architecture
 - Provider: OpenRouter.
-- Secret: `OPENROUTER_API_KEY` from GitHub Actions secrets only.
+- GitHub Actions secret: `OPEN_ROUTER_API_KEY`.
 - OpenRouter endpoint: `https://openrouter.ai/api/v1`.
 - The previous Groq compatibility proxy is no longer part of the active autonomous workflow.
-- Model selection is dynamically probed against OpenRouter's available models, with preferred free coding models first and additional free candidates as fallback.
-- The workflow probes `/models` and then validates a candidate through `/responses` before starting Codex.
+- Model discovery reads the `/models` response from a temporary file, avoiding OS argument/environment-size limits.
+- Candidate selection is restricted to explicitly approved coding-agent models; arbitrary `:free` models are not accepted merely because they answer HTTP 200.
+- The selected model is probed through `/responses` before Codex starts.
 - The API key is never printed, committed, placed in Android sources, or persisted into artifacts.
 
-## Migration completed
-- Converted `.github/workflows/groq-autonomous-agent.yml` from Groq-specific authentication/proxy execution to OpenRouter-native execution.
-- Replaced `GROQ_API_KEY` requirement with `OPENROUTER_API_KEY`.
-- Added OpenRouter model discovery and Responses API preflight.
-- Preserved the autonomous Codex loop, Android validation, diff checks, and verified commit/push gate.
-- The former Groq TPM/413 compatibility work remains in repository history but is no longer on the active agent execution path.
+## Runtime findings and fixes
+- The first OpenRouter migration failed because the workflow referenced `OPENROUTER_API_KEY`; the repository secret is actually `OPEN_ROUTER_API_KEY`. Fixed.
+- The second run reached OpenRouter but failed with `Argument list too long` while passing the large `/models` JSON through an environment variable. Fixed by file-based parsing.
+- The next run successfully reached Codex, but dynamic fallback selected `inclusionai/ling-3.0-flash-fin:free`, which did not provide the expected agent tool behavior and eventually hit HTTP 429 after excessive token usage. Fixed by restricting candidate selection to approved coding-agent models and reducing retry/output budgets.
 
 ## Validation status
-- Workflow migration commit: `2f40ff38df81a5ba2fc21ecd414fa3f6dcf8e3bf`.
-- A fresh `workflow_dispatch` runtime run is required to prove OpenRouter authentication, model probing, Codex execution, Android validation, and autonomous commit behavior.
-- Do not claim the new agent is runtime-green until that workflow run provides evidence.
+- A new runtime dispatch is required to prove the hardened agent end-to-end.
+- Do not claim the new agent is runtime-green until that workflow run provides evidence through Codex, tests, Android builds, and verified commit behavior.
 
 ## Product baseline
-The last known product baseline reported:
-- Kotlin compilation: clean.
-- Unit tests: 141/141 passing across 22 suites.
-- Lint (debug): 0 errors, warnings unchanged.
-- Debug APK, unsigned release APK, and release AAB build successfully.
-- `verify.sh` passes end-to-end.
+- Last known Android baseline: 141/141 unit tests passing across 22 suites.
+- Last known lint: 0 errors, warnings unchanged.
+- Last known Debug APK, unsigned Release APK, and Release AAB builds: successful.
+- `verify.sh` last reported passing end-to-end.
 
 ## Highest-priority backlog for the next cycle
-1. Establish a green runtime result for the new OpenRouter autonomous agent.
+1. Establish a green runtime result for the hardened OpenRouter autonomous agent.
 2. Wire a real, verifiable `NearbySearchProvider` + `HazardsProvider` for the Algerian market.
 3. Replace the placeholder `vehicle_silhouette` with generation-aware artwork when a suitable on-device pipeline is available.
 4. Add a `LiveMeasurement`-based structured Freeze Frame view.
