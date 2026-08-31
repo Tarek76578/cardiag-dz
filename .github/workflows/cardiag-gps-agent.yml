@@ -120,8 +120,9 @@ jobs:
           test -n "$provider"; test -n "$model"
           echo "AI_GATEWAY_SELECTED_PROVIDER=$provider"
           echo "AI_GATEWAY_SELECTED_MODEL=$model"
+          echo "AI_GATEWAY_SELECTED_PROVIDER=$provider" >> "$GITHUB_ENV"
+          echo "AI_GATEWAY_SELECTED_MODEL=$model" >> "$GITHUB_ENV"
           echo "AI_MODEL=$model" >> "$GITHUB_ENV"
-          echo "OPENROUTER_MODEL=$model" >> "$GITHUB_ENV"
           echo "AI_PROVIDER=$provider" >> "$GITHUB_ENV"
           cat /tmp/gateway-health.json
           cat /tmp/cardiag-ai-gateway.log
@@ -133,11 +134,12 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
-          test -n "${AI_GATEWAY_SELECTED_PROVIDER:-}"
-          test -n "${AI_GATEWAY_SELECTED_MODEL:-}"
-          kill "$(cat /tmp/gateway.pid)" || true
+          : "${AI_GATEWAY_SELECTED_PROVIDER:?missing selected provider}"
+          : "${AI_GATEWAY_SELECTED_MODEL:?missing selected model}"
+          old_pid="$(cat /tmp/gateway.pid)"
+          kill "$old_pid" 2>/dev/null || true
           for i in $(seq 1 10); do
-            kill -0 "$(cat /tmp/gateway.pid)" 2>/dev/null || break
+            if ! kill -0 "$old_pid" 2>/dev/null; then break; fi
             sleep 1
           done
           export AI_PROVIDER="$AI_GATEWAY_SELECTED_PROVIDER"
@@ -156,12 +158,16 @@ jobs:
           done
           kill -0 "$(cat /tmp/gateway.pid)"
           python3 - <<'PY'
-          import json, urllib.request
+          import json, os, urllib.request
           h=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=5))
-          p=h['providers'][__import__('os').environ['AI_GATEWAY_SELECTED_PROVIDER']]
-          assert p['configured'] and p['codex_compatible']
-          assert p['model'] == __import__('os').environ['AI_GATEWAY_SELECTED_MODEL'], p
+          provider=os.environ['AI_GATEWAY_SELECTED_PROVIDER']
+          model=os.environ['AI_GATEWAY_SELECTED_MODEL']
+          p=h['providers'][provider]
+          assert p['configured'] and p['codex_compatible'], p
+          assert p['model'] == model, p
           print('AI_GATEWAY_CODEX_ROUTE=PASS')
+          print(f'AI_GATEWAY_SELECTED_PROVIDER={provider}')
+          print(f'AI_GATEWAY_SELECTED_MODEL={model}')
           PY
           cat /tmp/gateway-codex-health.json
           cat /tmp/cardiag-ai-gateway-codex.log
@@ -182,6 +188,10 @@ jobs:
           set -euo pipefail
           test -n "${AI_MODEL:-}" || { echo 'AI_MODEL was not selected by Gateway probe' >&2; exit 17; }
           test -n "${AI_PROVIDER:-}" || { echo 'AI_PROVIDER was not selected by Gateway probe' >&2; exit 18; }
+          test -n "${AI_GATEWAY_SELECTED_PROVIDER:-}" || { echo 'AI_GATEWAY_SELECTED_PROVIDER missing' >&2; exit 19; }
+          test -n "${AI_GATEWAY_SELECTED_MODEL:-}" || { echo 'AI_GATEWAY_SELECTED_MODEL missing' >&2; exit 20; }
+          test "$AI_MODEL" = "$AI_GATEWAY_SELECTED_MODEL"
+          test "$AI_PROVIDER" = "$AI_GATEWAY_SELECTED_PROVIDER"
           echo "CODEX_EFFECTIVE_PROVIDER=$AI_PROVIDER"
           echo "CODEX_EFFECTIVE_MODEL=$AI_MODEL"
           export CODEX_HOME="$HOME/.codex-cardiag"
