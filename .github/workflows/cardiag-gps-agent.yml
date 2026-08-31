@@ -19,10 +19,10 @@ concurrency:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_WIRE_API: responses
-  OPENROUTER_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
-  AI_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
+  OPENROUTER_MODEL: openai/gpt-oss-120b:free
+  AI_MODEL: openai/gpt-oss-120b:free
   AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-  AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
+  AI_GATEWAY_PROVIDER_ORDER: groq,openrouter,deepseek
 
 jobs:
   gps-agent:
@@ -99,18 +99,18 @@ jobs:
           assert health['status'] == 'ok'
           configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
-          payload={'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':16}
+          tool={"type":"function","name":"gateway_probe","description":"Return a fixed probe result","parameters":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":False}}
+          payload={'model':'openai/gpt-oss-120b:free','input':'Reply with exactly OK','tools':[tool],'tool_choice':'none','max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
-              with urllib.request.urlopen(req,timeout=60) as response:
+              with urllib.request.urlopen(req,timeout=90) as response:
                   assert response.status == 200, response.status
-                  raw=response.read()
-                  data=json.loads(raw)
+                  data=json.loads(response.read())
                   assert data.get('object') == 'response', data
           except urllib.error.HTTPError as exc:
               detail=exc.read().decode('utf-8','replace')
-              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {detail}')
-          print('AI_GATEWAY_LIVE_PROBE=PASS')
+              raise SystemExit(f'Gateway Codex-compatibility probe failed HTTP {exc.code}: {detail}')
+          print('AI_GATEWAY_CODEX_COMPAT_PROBE=PASS')
           PY
           grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
           selected="$(grep 'ROUTE provider=' /tmp/cardiag-ai-gateway.log | tail -n 1 | sed -E 's/^.*ROUTE provider=([^ ]+) model=([^ ]+) attempt=.*/\1 \2/')"
@@ -183,7 +183,7 @@ jobs:
           CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-          AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
+          AI_GATEWAY_PROVIDER_ORDER: groq,openrouter,deepseek
         run: |
           set -euo pipefail
           test -n "${AI_MODEL:-}" || { echo 'AI_MODEL was not selected by Gateway probe' >&2; exit 17; }
