@@ -19,11 +19,11 @@ concurrency:
 env:
   OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
   OPENROUTER_WIRE_API: responses
-  OPENROUTER_MODEL: openai/gpt-oss-120b:free
-  AI_MODEL: openai/gpt-oss-120b:free
-  AI_PROVIDER: groq
+  OPENROUTER_MODEL: openrouter/free
+  AI_MODEL: openrouter/free
+  AI_PROVIDER: openrouter
   AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-  AI_GATEWAY_PROVIDER_ORDER: groq,openrouter,deepseek
+  AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
 
 jobs:
   gps-agent:
@@ -101,7 +101,7 @@ jobs:
           configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
           tool={"type":"function","name":"gateway_probe","description":"Return a fixed probe result","parameters":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":False}}
-          payload={'model':'openai/gpt-oss-120b:free','input':'Reply with exactly OK','tools':[tool],'tool_choice':'none','max_output_tokens':16}
+          payload={'model':'openrouter/free','input':[{'role':'user','content':[{'type':'input_text','text':'Reply with exactly OK.'}]}],'tools':[tool],'tool_choice':'none','parallel_tool_calls':True,'max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
               with urllib.request.urlopen(req,timeout=90) as response:
@@ -184,7 +184,7 @@ jobs:
           CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-          AI_GATEWAY_PROVIDER_ORDER: groq,openrouter,deepseek
+          AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
         run: |
           set -euo pipefail
           test -n "${AI_MODEL:-}" || { echo 'AI_MODEL was not selected by Gateway probe' >&2; exit 17; }
