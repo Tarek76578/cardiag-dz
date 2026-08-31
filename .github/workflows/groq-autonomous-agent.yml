@@ -15,8 +15,6 @@ env:
   OPENROUTER_WIRE_API: responses
   OPENROUTER_RATE_LIMIT_RETRIES: '2'
   OPENROUTER_DEFAULT_RETRY_SECONDS: '45'
-  OPENROUTER_MAX_OUTPUT_TOKENS: '900'
-  OPENROUTER_MAX_INPUT_TOKENS: '5000'
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
@@ -45,6 +43,7 @@ jobs:
           test -f docs/agent-next-task.md
           test -f agent-state.md
           test -x scripts/autonomous-agent.sh
+          test -f scripts/openrouter-codex-proxy.py
           test -n "${{ secrets.OPEN_ROUTER_API_KEY }}"
           test -z "$(git status --porcelain)"
       - name: Java
@@ -91,38 +90,25 @@ jobs:
           esac
           python3 - "$response_file" <<'PY' > /tmp/openrouter-candidates.txt
           import json, sys
-          with open(sys.argv[1], encoding="utf-8") as f:
-              data=json.load(f)
+          with open(sys.argv[1], encoding="utf-8") as f: data=json.load(f)
           models=data.get("data",[])
-          preferred=[
-              "openai/gpt-oss-120b:free",
-              "openai/gpt-oss-20b:free",
-              "qwen/qwen3-coder:free",
-              "deepseek/deepseek-chat-v3.1:free",
-          ]
-          excluded=("vision", "audio", "image", "tts", "whisper", "embed", "moderation")
+          preferred=["openai/gpt-oss-120b:free","openai/gpt-oss-20b:free","qwen/qwen3-coder:free","deepseek/deepseek-chat-v3.1:free"]
+          excluded=("vision","audio","image","tts","whisper","embed","moderation")
           def score(m):
-              mid=(m.get("id") or "").lower()
-              params=set(m.get("supported_parameters") or [])
-              if "tools" not in params and "tool_choice" not in params:
-                  return -10000
-              if any(x in mid for x in excluded):
-                  return -10000
+              mid=(m.get("id") or "").lower(); params=set(m.get("supported_parameters") or [])
+              if "tools" not in params and "tool_choice" not in params: return -10000
+              if any(x in mid for x in excluded): return -10000
               s=0
               if mid in preferred: s+=100000-len(preferred)*preferred.index(mid)
               if "coder" in mid or "code" in mid: s+=5000
               if "gpt-oss" in mid: s+=4000
               if mid.endswith(":free"): s+=1000
-              s+=min(int(m.get("context_length") or 0), 128000)//1000
+              s+=min(int(m.get("context_length") or 0),128000)//1000
               return s
-          ranked=sorted((m for m in models if m.get("id")), key=score, reverse=True)
-          for m in ranked[:12]:
-              if score(m)>0:
-                  print(m["id"])
+          for m in sorted((m for m in models if m.get("id")),key=score,reverse=True)[:12]:
+              if score(m)>0: print(m["id"])
           PY
           test -s /tmp/openrouter-candidates.txt || { echo 'No currently available model advertises tool support.'; exit 43; }
-          echo 'OPENROUTER_CANDIDATES:'
-          sed 's/^/  /' /tmp/openrouter-candidates.txt
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
@@ -131,12 +117,7 @@ jobs:
           print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
           PY
             )"
-            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
-              -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
-              -H 'Content-Type: application/json' \
-              -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' \
-              -H 'X-Title: CarDiag Autonomous Agent' \
-              -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
+            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
             echo "OPENROUTER_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
@@ -144,18 +125,22 @@ jobs:
           done < /tmp/openrouter-candidates.txt
           test -n "$selected" || exit 44
           echo "model=$selected" >> "$GITHUB_OUTPUT"
+      - name: Start adaptive OpenRouter proxy
+        env:
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          python3 scripts/openrouter-codex-proxy.py >/tmp/openrouter-proxy.log 2>&1 &
+          echo $! >/tmp/openrouter-proxy.pid
+          for i in $(seq 1 30); do curl -fsS --max-time 1 http://127.0.0.1:8787/v1/models >/dev/null 2>&1 && break || true; sleep 1; done
+          kill -0 "$(cat /tmp/openrouter-proxy.pid)"
       - name: Run Codex with OpenRouter
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          OPENROUTER_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
-          OPENROUTER_RATE_LIMIT_RETRIES: ${{ env.OPENROUTER_RATE_LIMIT_RETRIES }}
-          OPENROUTER_DEFAULT_RETRY_SECONDS: ${{ env.OPENROUTER_DEFAULT_RETRY_SECONDS }}
-          OPENROUTER_MAX_OUTPUT_TOKENS: ${{ env.OPENROUTER_MAX_OUTPUT_TOKENS }}
-          OPENROUTER_MAX_INPUT_TOKENS: ${{ env.OPENROUTER_MAX_INPUT_TOKENS }}
           CODEX_PROVIDER: openrouter
           AI_PROVIDER: openrouter
           AI_MODEL: ${{ steps.provider.outputs.model }}
-          CODEX_BASE_URL: https://openrouter.ai/api/v1
+          CODEX_BASE_URL: http://127.0.0.1:8787/v1
           CODEX_ENV_KEY: OPEN_ROUTER_API_KEY
           CODEX_WIRE_API: responses
         run: |
