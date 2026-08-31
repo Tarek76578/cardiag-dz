@@ -101,7 +101,7 @@ jobs:
           configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
           tool={"type":"function","name":"gateway_probe","description":"Return a fixed probe result","parameters":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":False}}
-          payload={'model':'openai/gpt-oss-120b','input':'Reply with exactly OK','tools':[tool],'tool_choice':'none','max_output_tokens':16}
+          payload={'model':'openai/gpt-oss-120b:free','input':'Reply with exactly OK','tools':[tool],'tool_choice':'none','max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
               with urllib.request.urlopen(req,timeout=90) as response:
