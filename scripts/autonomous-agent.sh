@@ -12,8 +12,10 @@ command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed" >&2; exi
 cat >/tmp/cardiag-agent-prompt <<'EOF'
 You have exactly ONE task in this cycle: the current GPS + interactive map milestone in docs/agent-next-task.md.
 Implement only that task. Do not implement another CarDiag feature or unrelated refactoring.
-Inspect relevant existing Android code, make the smallest complete production-quality change, add focused tests where practical, run relevant tests/lint/build, fix real failures, update agent-state.md with factual evidence, and review the diff.
-If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in agent-state.md. Never claim unfinished work is complete.
+The repository Android project is under android/. The persistent agent state file is ROOT/agent-state.md (not docs/agent-state.md).
+Inspect relevant existing Android code, make the smallest complete production-quality change, add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
+If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in ROOT/agent-state.md. Never claim unfinished work is complete.
+Do not spend the cycle on broad repository exploration once the relevant GPS/map files are identified. Do not repeatedly inspect unrelated files.
 Do not commit or push; the workflow handles verified commits. Stop after this single task.
 EOF
 # The HTTP gateway is the authoritative output-token boundary for Codex 0.151.0.
