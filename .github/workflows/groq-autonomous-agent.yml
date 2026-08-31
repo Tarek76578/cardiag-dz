@@ -78,28 +78,41 @@ jobs:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          body="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' "$OPENROUTER_BASE_URL/models")" || exit 40
-          http_code="$(printf '%s\n' "$body" | tail -n1)"
-          response="$(printf '%s\n' "$body" | sed '$d')"
+          response_file=/tmp/openrouter-models.json
+          code_file=/tmp/openrouter-models.http
+          curl -sS --max-time 20 -o "$response_file" -w '%{http_code}' \
+            -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
+            -H 'Content-Type: application/json' \
+            "$OPENROUTER_BASE_URL/models" > "$code_file" || exit 40
+          http_code="$(cat "$code_file")"
           case "$http_code" in
             200) ;;
             401|403) echo "OPENROUTER_API_AUTH_FAILED_HTTP=$http_code"; exit 41 ;;
             429) echo 'OPENROUTER_RATE_LIMITED=1'; exit 75 ;;
-            *) echo "OPENROUTER_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
+            *) echo "OPENROUTER_PREFLIGHT_HTTP=$http_code"; head -c 1000 "$response_file"; exit 42 ;;
           esac
-          MODEL_LIST="$response" python3 <<'PY' > /tmp/openrouter-candidates.txt
-          import json, os
-          data=json.loads(os.environ["MODEL_LIST"])
+          python3 - "$response_file" <<'PY' > /tmp/openrouter-candidates.txt
+          import json, sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              data=json.load(f)
           models=data.get("data",[])
-          preferred=["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free", "qwen/qwen3-coder:free", "deepseek/deepseek-chat-v3.1:free"]
+          preferred=[
+              "openai/gpt-oss-120b:free",
+              "openai/gpt-oss-20b:free",
+              "qwen/qwen3-coder:free",
+              "deepseek/deepseek-chat-v3.1:free",
+          ]
           ids={m.get("id",""):m for m in models}
           for mid in preferred:
-              if mid in ids: print(mid)
+              if mid in ids:
+                  print(mid)
           for m in models:
               mid=m.get("id","")
-              if not mid or mid in preferred or not mid.endswith(":free"): continue
+              if not mid or mid in preferred or not mid.endswith(":free"):
+                  continue
               ctx=m.get("context_length",0) or 0
-              if ctx >= 8000: print(mid)
+              if ctx >= 8000:
+                  print(mid)
           PY
           selected=''
           while IFS= read -r model; do
@@ -109,7 +122,12 @@ jobs:
           print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
           PY
             )"
-            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' -H 'X-Title: CarDiag Autonomous Agent' -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
+            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' \
+              -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' \
+              -H 'X-Title: CarDiag Autonomous Agent' \
+              -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
             echo "OPENROUTER_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
