@@ -38,6 +38,8 @@ jobs:
           test -x android/gradlew
           test -f android/app/build.gradle.kts
           test -n "${{ secrets.OPEN_ROUTER_API_KEY }}"
+          python3 -m py_compile scripts/openrouter-codex-proxy.py
+          bash -n scripts/autonomous-agent.sh
 
       - name: Java
         uses: actions/setup-java@v5
@@ -52,61 +54,92 @@ jobs:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
           accept-android-sdk-licenses: true
 
-      - name: Node and Codex
+      - name: Node
         uses: actions/setup-node@v5
         with:
           node-version: '22'
           package-manager-cache: false
 
-      - name: Install Codex
+      - name: Install Codex CLI
         run: |
           set -euo pipefail
-          rm -rf /tmp/codex-cli
-          npm install --prefix /tmp/codex-cli --no-save @openai/codex
-          echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          npm install --global --no-audit --no-fund @openai/codex@0.151.0
+          command -v codex
           codex --version
+          codex --help >/dev/null
+          npm root --global
 
-      - name: OpenRouter preflight
+      - name: OpenRouter preflight and model probe
         id: provider
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" "$OPENROUTER_BASE_URL/models" -o /tmp/models.json
-          python3 - /tmp/models.json <<'PY' > /tmp/model.txt
-          import json,sys
-          d=json.load(open(sys.argv[1],encoding='utf-8'))
-          ms=d.get('data',[])
+          curl -fsS --max-time 20 \
+            -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
+            -H 'Accept: application/json' \
+            "$OPENROUTER_BASE_URL/models" -o /tmp/models.json
+          python3 - /tmp/models.json <<'PY' > /tmp/model-candidates.txt
+          import json, sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          models=data.get('data',[])
+          blocked=('vision','audio','image','tts','whisper','embed','moderation')
+          preferred=('openai/gpt-oss-120b:free','openai/gpt-oss-20b:free','qwen/qwen3-coder:free','deepseek/deepseek-chat-v3.1:free')
           def score(m):
-              x=(m.get('id') or '').lower()
-              p=set(m.get('supported_parameters') or [])
-              if 'tools' not in p and 'tool_choice' not in p: return -1
-              if any(k in x for k in ('vision','audio','image','tts','whisper','embed','moderation')): return -1
-              return (100000 if x.endswith(':free') else 0)+(5000 if 'code' in x or 'coder' in x else 0)+(4000 if 'gpt-oss' in x else 0)+min(int(m.get('context_length') or 0),128000)//1000
-          candidates=sorted((m for m in ms if score(m)>0),key=score,reverse=True)
-          for m in candidates:
-              print(m['id']); break
+              mid=(m.get('id') or '').lower()
+              params=set(m.get('supported_parameters') or [])
+              if 'tools' not in params and 'tool_choice' not in params: return -10**9
+              if any(x in mid for x in blocked): return -10**9
+              try: ctx=int(m.get('context_length') or 0)
+              except Exception: ctx=0
+              pref=(len(preferred)-preferred.index(mid))*100000 if mid in preferred else 0
+              return pref + (5000 if 'code' in mid or 'coder' in mid else 0) + (4000 if 'gpt-oss' in mid else 0) + (1000 if mid.endswith(':free') else 0) + min(ctx,128000)//1000
+          for m in sorted((m for m in models if m.get('id')),key=score,reverse=True):
+              if score(m)>0: print(m['id'])
           PY
-          test -s /tmp/model.txt
-          echo "model=$(cat /tmp/model.txt)" >> "$GITHUB_OUTPUT"
+          test -s /tmp/model-candidates.txt
+          selected=''
+          while IFS= read -r model; do
+            [ -n "$model" ] || continue
+            payload="$(MODEL="$model" python3 - <<'PY'
+          import json, os
+          print(json.dumps({'model':os.environ['MODEL'],'input':'Reply with exactly OK','max_output_tokens':16}))
+          PY
+            )"
+            response="$(curl -sS --max-time 30 -w '\n%{http_code}' \
+              -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
+              -H 'Content-Type: application/json' \
+              -d "$payload" "$OPENROUTER_BASE_URL/responses" || true)"
+            code="$(printf '%s\n' "$response" | tail -n1)"
+            echo "MODEL_PROBE model=$model http=$code"
+            if [ "$code" = 200 ]; then selected="$model"; break; fi
+          done < /tmp/model-candidates.txt
+          test -n "$selected" || { echo 'No currently usable OpenRouter model passed the Responses probe.' >&2; exit 44; }
+          echo "model=$selected" >> "$GITHUB_OUTPUT"
+          echo "SELECTED_MODEL=$selected"
 
-      - name: Start token interceptor
+      - name: Start and self-test token interceptor
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           set -euo pipefail
+          export OPENROUTER_PROXY_MAX_TOKENS=12000
           python3 scripts/openrouter-codex-proxy.py >/tmp/openrouter-proxy.log 2>&1 &
           echo $! >/tmp/proxy.pid
-          sleep 1
+          for i in $(seq 1 30); do
+            curl -fsS --max-time 1 http://127.0.0.1:8787/v1/models >/dev/null 2>&1 && break
+            sleep 1
+          done
           kill -0 "$(cat /tmp/proxy.pid)"
           python3 - <<'PY'
           import json, urllib.request
-          req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps({'model':'interceptor-test','input':'x','max_output_tokens':65536}).encode(),headers={'Content-Type':'application/json'},method='POST')
-          try: urllib.request.urlopen(req,timeout=3)
+          req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps({'model':'interceptor-test','input':'x','max_output_tokens':65536}).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
+          try: urllib.request.urlopen(req,timeout=5)
           except Exception: pass
           PY
-          grep -Eq 'TOKEN_(CLAMP|INJECT).*effective=12000' /tmp/openrouter-proxy.log
+          grep -Eq 'TOKEN_CLAMP.*original=65536.*effective=12000' /tmp/openrouter-proxy.log
           echo 'TOKEN_INTERCEPTOR_TEST=PASS'
+          cat /tmp/openrouter-proxy.log
 
       - name: Run GPS-only Codex agent
         env:
