@@ -17,19 +17,17 @@ Inspect relevant existing Android code, make the smallest complete production-qu
 If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in agent-state.md. Never claim unfinished work is complete.
 Do not commit or push; the workflow handles verified commits. Stop after this single task.
 EOF
-# Set the output budget in Codex itself. Codex CLI exposes model_max_output_tokens
-# specifically for the model's maximum response output; this prevents the 65536 default
-# from reaching OpenRouter in the first place. The proxy remains only as a defense-in-depth guard.
-CODEX_MAX_OUTPUT_TOKENS="${CODEX_MAX_OUTPUT_TOKENS:-12000}"
-case "$CODEX_MAX_OUTPUT_TOKENS" in ''|*[!0-9]*) echo "Invalid CODEX_MAX_OUTPUT_TOKENS" >&2; exit 17;; esac
-test "$CODEX_MAX_OUTPUT_TOKENS" -gt 0 || { echo "CODEX_MAX_OUTPUT_TOKENS must be positive" >&2; exit 18; }
-echo "CODEX_MAX_OUTPUT_TOKENS=$CODEX_MAX_OUTPUT_TOKENS"
+# Codex 0.151.0 does not reliably honor model_max_output_tokens on the Responses
+# wire. Do not pretend this config changes the request. The local OpenRouter gateway
+# is the authoritative HTTP boundary and injects/clamps max_output_tokens before upstream.
+echo "CODEX_OUTPUT_GUARD=HTTP_PROXY"
+echo "CODEX_PROXY_BUDGET=${OPENROUTER_PROXY_MAX_TOKENS:-12000}"
 codex exec --ephemeral --color never \
  -c "model=\"$MODEL\"" -c "model_provider=\"$PROVIDER\"" \
  -c "model_providers.$PROVIDER.name=\"$PROVIDER\"" -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
  -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
  -c "model_providers.$PROVIDER.request_max_retries=1" -c "model_providers.$PROVIDER.stream_max_retries=1" \
- -c "model_context_window=32768" -c "model_max_output_tokens=$CODEX_MAX_OUTPUT_TOKENS" \
+ -c "model_context_window=32768" \
  -c "project_doc_max_bytes=0" -c "web_search=\"disabled\"" \
  --sandbox danger-full-access --skip-git-repo-check "$(cat /tmp/cardiag-agent-prompt)" < /dev/null
 CHANGED_FILES="$(git diff --name-only && git ls-files --others --exclude-standard)"
