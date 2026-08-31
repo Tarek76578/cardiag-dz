@@ -140,13 +140,14 @@ PY
   echo "CODEX_EFFECTIVE_PROVIDER=$PROVIDER"
   echo "CODEX_EFFECTIVE_MODEL=$MODEL"
   set +e
+  CODEX_PROMPT="$(cat "$PROMPT")"
   codex exec --ephemeral --color never \
     -c "model=\"$MODEL\"" -c "model_provider=\"$PROVIDER\"" \
     -c "model_providers.$PROVIDER.name=\"$PROVIDER\"" -c "model_providers.$PROVIDER.base_url=\"$BASE_URL\"" \
     -c "model_providers.$PROVIDER.wire_api=\"$WIRE_API\"" -c "model_providers.$PROVIDER.env_key=\"$ENV_KEY\"" \
     -c "model_providers.$PROVIDER.request_max_retries=1" -c "model_providers.$PROVIDER.stream_max_retries=1" \
     -c "model_context_window=32768" -c "project_doc_max_bytes=0" -c "web_search=\"disabled\"" \
-    --sandbox danger-full-access --skip-git-repo-check "$PROMPT" < /dev/null 2>&1 | tee "${RUNNER_TEMP:-/tmp}/cardiag-codex-cycle-$cycle.log"
+    --sandbox danger-full-access --skip-git-repo-check "$CODEX_PROMPT" < /dev/null 2>&1 | tee "${RUNNER_TEMP:-/tmp}/cardiag-codex-cycle-$cycle.log"
   rc=${PIPESTATUS[0]}
   set -e
 
