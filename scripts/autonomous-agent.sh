@@ -58,13 +58,20 @@ start_gateway() {
   pkill -f 'scripts/ai-gateway.py' 2>/dev/null || true
   sleep 1
   export AI_PROVIDER=openrouter AI_MODEL="$model" OPENROUTER_MODEL="$model"
-  python3 scripts/ai-gateway.py >/tmp/cardiag-ai-gateway-codex.log 2>&1 &
+  python3 scripts/ai_gateway.py >/tmp/cardiag-ai-gateway-codex.log 2>&1 &
   echo $! >/tmp/gateway.pid
   for i in $(seq 1 30); do
     curl -fsS --max-time 1 http://127.0.0.1:8787/health >/tmp/gateway-codex-health.json 2>/dev/null && return 0
     sleep 1
   done
   return 1
+}
+
+save_checkpoint() {
+  echo "AI_AGENT_CHECKPOINT=$1"
+  git status --short
+  git diff --check || true
+  test -f agent-state.md && cp agent-state.md /tmp/cardiag-agent-state-checkpoint.md || true
 }
 
 for cycle in $(seq 1 "$MAX_CYCLES"); do
@@ -74,21 +81,18 @@ for cycle in $(seq 1 "$MAX_CYCLES"); do
   echo "AI_AGENT_MODEL=$MODEL"
   if ! start_gateway "$MODEL"; then
     echo "AI_AGENT_GATEWAY_START_FAILED=$MODEL" >&2
+    save_checkpoint "gateway-start-failed"
     continue
   fi
   if python3 - <<'PY'
 import json,os,sys,urllib.request
 h=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=5))
-p=h['providers'].get('openrouter',{})
+p=h.get('providers',{}).get('openrouter',{})
 ok=p.get('configured') and p.get('codex_compatible') and p.get('model') == os.environ['AI_MODEL']
 print('AI_AGENT_GATEWAY_ROUTE='+('PASS' if ok else 'FAIL'))
 sys.exit(0 if ok else 1)
 PY
-  then
-    :
-  else
-    continue
-  fi
+  then :; else save_checkpoint "gateway-route-failed"; continue; fi
   export CODEX_PROVIDER="$PROVIDER" CODEX_BASE_URL="$BASE_URL" CODEX_ENV_KEY="$ENV_KEY" CODEX_WIRE_API="$WIRE_API" AI_MODEL="$MODEL"
   echo "CODEX_EFFECTIVE_PROVIDER=$PROVIDER"
   echo "CODEX_EFFECTIVE_MODEL=$MODEL"
@@ -107,10 +111,12 @@ PY
     echo "AI_PROVIDER_SUCCESS=$PROVIDER/$MODEL"
     exit 0
   fi
-  if grep -Eiq 'rate limit|rate_limit|HTTP 429|status 429|503 Service Unavailable|provider_exhausted|All compatible AI providers failed|temporarily unavailable' "/tmp/cardiag-codex-cycle-$cycle.log"; then
+  if grep -Eiq 'rate limit|rate_limit|HTTP 429|status 429|503 Service Unavailable|provider_exhausted|All compatible AI providers failed|temporarily unavailable|context window|maximum context|token limit' "/tmp/cardiag-codex-cycle-$cycle.log"; then
+    save_checkpoint "provider-limit-or-context"
     echo "AI_AGENT_ROTATING_AFTER_PROVIDER_LIMIT=$MODEL"
     continue
   fi
+  save_checkpoint "provider-error"
   echo "AI_AGENT_ROTATING_AFTER_PROVIDER_ERROR=$MODEL rc=$rc"
 done
 
