@@ -1,156 +1,303 @@
 #!/usr/bin/env python3
+"""CarDiag AI Gateway.
+
+The recovery lifecycle is deliberately inspired by the provider-admission patterns
+used by the MIT-licensed Free Claude Code project: classify upstream failures,
+keep a bounded per-provider attempt budget, coordinate concurrency per provider,
+and route to the next healthy provider before returning a terminal error.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 import random
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 MAX_TOKENS = int(os.getenv("AI_GATEWAY_MAX_OUTPUT_TOKENS", "12000"))
 MIN_TOKENS = int(os.getenv("AI_GATEWAY_MIN_OUTPUT_TOKENS", "1024"))
 TIMEOUT = int(os.getenv("AI_GATEWAY_TIMEOUT", "300"))
-MAX_ATTEMPTS = int(os.getenv("AI_GATEWAY_MAX_ATTEMPTS", "2"))
+MAX_ATTEMPTS = int(os.getenv("AI_GATEWAY_MAX_ATTEMPTS", "3"))
 BASE_COOLDOWN = float(os.getenv("AI_GATEWAY_COOLDOWN_SECONDS", "30"))
 MAX_COOLDOWN = float(os.getenv("AI_GATEWAY_MAX_COOLDOWN_SECONDS", "300"))
 JITTER = float(os.getenv("AI_GATEWAY_JITTER_SECONDS", "1"))
+RATE_LIMIT = int(os.getenv("AI_GATEWAY_RATE_LIMIT", "20"))
+RATE_WINDOW = float(os.getenv("AI_GATEWAY_RATE_WINDOW_SECONDS", "60"))
 
-PROVIDERS = {
+DEFAULT_PROVIDER_ORDER = "openrouter,groq,nvidia,deepseek,gemini"
+ORDER = [x.strip() for x in os.getenv("AI_GATEWAY_PROVIDER_ORDER", DEFAULT_PROVIDER_ORDER).split(",") if x.strip()]
+
+PROVIDERS: dict[str, dict[str, str]] = {
     "openrouter": {
         "base": os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         "key": os.getenv("OPEN_ROUTER_API_KEY", ""),
         "model": os.getenv("OPENROUTER_MODEL", ""),
+        "protocol": "responses",
     },
     "groq": {
         "base": os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
         "key": os.getenv("GROQ_API_KEY", ""),
         "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "protocol": "responses",
     },
     "nvidia": {
         "base": os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
         "key": os.getenv("NVIDIA_API_KEY", ""),
         "model": os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct"),
+        "protocol": "chat",
     },
     "deepseek": {
-        "base": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
+        "base": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         "key": os.getenv("DEEPSEEK_API_KEY", ""),
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
+        "protocol": "responses",
     },
     "gemini": {
         "base": os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai"),
         "key": os.getenv("GEMINI_API_KEY", os.getenv("GEMINI_KEY", "")),
         "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "protocol": "chat",
     },
 }
 
-ORDER = [p.strip() for p in os.getenv("AI_GATEWAY_PROVIDER_ORDER", "openrouter,groq,nvidia,deepseek,gemini").split(",") if p.strip()]
 state_lock = threading.Lock()
-provider_state = {name: {"failures": 0, "cooldown_until": 0.0, "last_error": "", "success": 0} for name in PROVIDERS}
 provider_locks = {name: threading.Lock() for name in PROVIDERS}
 
 
-def clamp_budget(body):
+@dataclass
+class ProviderState:
+    failures: int = 0
+    successes: int = 0
+    cooldown_until: float = 0.0
+    last_error: str = ""
+    recovery_generation: int = 0
+    recent_calls: deque[float] | None = None
+
+
+provider_state = {
+    name: ProviderState(recent_calls=deque()) for name in PROVIDERS
+}
+
+
+def clamp_budget(body: dict[str, Any]) -> None:
     field = "max_output_tokens" if "max_output_tokens" in body else "max_tokens"
     value = body.get(field)
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         body["max_output_tokens"] = MAX_TOKENS
-        return
-    if value > MAX_TOKENS:
+        print(f"TOKEN_INJECT effective={MAX_TOKENS}", flush=True)
+    elif value > MAX_TOKENS:
         body[field] = MAX_TOKENS
+        print(f"TOKEN_CLAMP field={field} original={value} effective={MAX_TOKENS}", flush=True)
 
 
-def classify(code, data):
-    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
-    low = text.lower()
-    if code == 429 or any(x in low for x in ("rate limit", "too many requests", "rate_limit", "resource exhausted")):
+def body_text(data: bytes | str | Any) -> str:
+    if isinstance(data, bytes):
+        return data.decode("utf-8", "replace")
+    if isinstance(data, str):
+        return data
+    return json.dumps(data, ensure_ascii=False, default=str)
+
+
+def classify(code: int | None, data: bytes | str) -> str:
+    low = body_text(data).lower()
+    if code == 429 or any(x in low for x in ("rate_limit", "rate limit", "too many requests", "resource exhausted")):
         return "rate_limit"
-    if code in (408, 425, 500, 502, 503, 504) or any(x in low for x in ("timeout", "overloaded", "capacity")):
+    if code in (408, 425, 500, 502, 503, 504) or any(x in low for x in ("timeout", "overloaded", "capacity", "temporarily unavailable")):
         return "transient"
-    if code == 401:
+    if code == 401 or "invalid api key" in low or "authentication" in low:
         return "auth"
+    if code == 402 or "payment required" in low or "billing" in low or "credits" in low and "required" in low:
+        return "billing"
     if code == 403:
         return "permission"
+    if code == 413 or "context length" in low or "too large" in low:
+        return "request_too_large"
     if code == 400:
         return "invalid_request"
     return "upstream"
 
 
-def retry_after(headers, body):
+def retry_after(headers: Any, data: bytes | str) -> float | None:
     raw = headers.get("Retry-After") if headers else None
     if raw:
         try:
             return max(0.0, float(raw))
-        except ValueError:
+        except (TypeError, ValueError):
             pass
-    low = body.decode("utf-8", "replace").lower() if isinstance(body, bytes) else str(body).lower()
+    low = body_text(data).lower()
     marker = "retry after"
     if marker in low:
         tail = low.split(marker, 1)[1].strip(" :.,\"')")
-        num = "".join(ch for ch in tail if ch.isdigit() or ch == ".")
-        try:
-            return max(0.0, float(num))
-        except ValueError:
-            pass
+        token = ""
+        for ch in tail:
+            if ch.isdigit() or ch == ".":
+                token += ch
+            elif token:
+                break
+        if token:
+            try:
+                return max(0.0, float(token))
+            except ValueError:
+                pass
     return None
 
 
-def mark_failure(provider, reason, delay=None):
-    with state_lock:
-        s = provider_state[provider]
-        s["failures"] += 1
-        s["last_error"] = reason
-        if delay is None:
-            delay = min(MAX_COOLDOWN, BASE_COOLDOWN * (2 ** min(s["failures"] - 1, 4)))
-        s["cooldown_until"] = time.time() + delay
-
-
-def mark_success(provider):
-    with state_lock:
-        s = provider_state[provider]
-        s["success"] += 1
-        s["failures"] = 0
-        s["cooldown_until"] = 0.0
-        s["last_error"] = ""
-
-
-def available(provider):
+def model_for(provider: str, requested: str | None) -> str:
     cfg = PROVIDERS[provider]
-    if not cfg["key"]:
+    if provider == "openrouter" and requested and requested != "interceptor-test":
+        return requested
+    if cfg["model"]:
+        return cfg["model"]
+    return requested or ""
+
+
+def available(provider: str) -> bool:
+    cfg = PROVIDERS[provider]
+    if not cfg["key"] or not model_for(provider, None):
         return False
     with state_lock:
-        return time.time() >= provider_state[provider]["cooldown_until"]
+        state = provider_state[provider]
+        return time.monotonic() >= state.cooldown_until
 
 
-def choose_model(body, provider):
-    requested = body.get("model")
-    if provider == "openrouter" and requested and requested not in ("interceptor-test", ""):
-        return requested
-    return PROVIDERS[provider]["model"]
+def acquire_rate_slot(provider: str) -> None:
+    while True:
+        now = time.monotonic()
+        with state_lock:
+            calls = provider_state[provider].recent_calls
+            assert calls is not None
+            while calls and now - calls[0] >= RATE_WINDOW:
+                calls.popleft()
+            if len(calls) < RATE_LIMIT:
+                calls.append(now)
+                return
+            delay = RATE_WINDOW - (now - calls[0])
+        time.sleep(max(0.05, delay))
 
 
-def candidates(requested_provider=None):
-    preferred = requested_provider or os.getenv("AI_PROVIDER", "openrouter")
+def mark_failure(provider: str, reason: str, delay: float | None = None) -> None:
+    with state_lock:
+        state = provider_state[provider]
+        state.failures += 1
+        state.last_error = reason
+        state.recovery_generation += 1
+        if delay is None:
+            delay = min(MAX_COOLDOWN, BASE_COOLDOWN * (2 ** min(state.failures - 1, 4)))
+        state.cooldown_until = time.monotonic() + max(0.0, delay)
+
+
+def mark_success(provider: str) -> None:
+    with state_lock:
+        state = provider_state[provider]
+        state.successes += 1
+        state.failures = 0
+        state.last_error = ""
+        state.cooldown_until = 0.0
+
+
+def provider_candidates(requested_provider: str, requested_model: str | None) -> list[tuple[str, str]]:
+    preferred = requested_provider if requested_provider in PROVIDERS else "openrouter"
     ordered = [preferred] + [p for p in ORDER if p != preferred]
-    return [p for p in ordered if p in PROVIDERS and available(p)]
+    result: list[tuple[str, str]] = []
+    for provider in ordered:
+        if available(provider):
+            result.append((provider, model_for(provider, requested_model)))
+    return result
 
 
-def upstream(provider, body, accept):
+def input_to_messages(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, str):
+        return [{"role": "user", "content": value}]
+    if isinstance(value, list):
+        messages: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "message":
+                role = item.get("role", "user")
+                content = item.get("content", "")
+                if isinstance(content, list):
+                    text_parts = [x.get("text", "") for x in content if isinstance(x, dict) and x.get("type") in ("input_text", "text")]
+                    content = "".join(text_parts)
+                messages.append({"role": role, "content": content})
+            elif item.get("role") in ("system", "developer", "user", "assistant"):
+                messages.append({"role": item["role"], "content": item.get("content", "")})
+        if messages:
+            return messages
+    return [{"role": "user", "content": body_text(value)}]
+
+
+def build_payload(provider: str, body: dict[str, Any], model: str) -> tuple[str, dict[str, Any]]:
     cfg = PROVIDERS[provider]
     payload = dict(body)
-    payload["model"] = choose_model(body, provider)
-    # Never leak the local gateway's synthetic probe model upstream.
-    if payload["model"] == "interceptor-test":
-        payload["model"] = cfg["model"]
-    req = Request(cfg["base"].rstrip("/") + "/responses", data=json.dumps(payload, separators=(",", ":")).encode(), method="POST", headers={
-        "Authorization": f"Bearer {cfg['key']}",
+    payload["model"] = model
+    if body.get("model") == "interceptor-test":
+        payload["model"] = model
+    if cfg["protocol"] == "responses":
+        return cfg["base"].rstrip("/") + "/responses", payload
+
+    # NVIDIA NIM and Gemini currently expose OpenAI-compatible chat completions.
+    chat: dict[str, Any] = {
+        "model": model,
+        "messages": input_to_messages(body.get("input", "")),
+        "stream": bool(body.get("stream", False)),
+    }
+    if "instructions" in body and body["instructions"]:
+        chat["messages"] = [{"role": "system", "content": body["instructions"]}] + chat["messages"]
+    if "max_output_tokens" in body:
+        chat["max_tokens"] = body["max_output_tokens"]
+    elif "max_tokens" in body:
+        chat["max_tokens"] = body["max_tokens"]
+    for key in ("temperature", "top_p", "tools", "tool_choice"):
+        if key in body:
+            chat[key] = body[key]
+    return cfg["base"].rstrip("/") + "/chat/completions", chat
+
+
+def upstream_call(provider: str, body: dict[str, Any], accept: str | None):
+    model = model_for(provider, body.get("model"))
+    url, payload = build_payload(provider, body, model)
+    key = PROVIDERS[provider]["key"]
+    headers = {
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Accept": accept or "application/json",
         "HTTP-Referer": "https://github.com/Tarek76578/cardiag-dz",
         "X-Title": "CarDiag Autonomous Agent",
-    })
-    return urlopen(req, timeout=TIMEOUT)
+    }
+    return urlopen(Request(url, data=json.dumps(payload, separators=(",", ":")).encode(), method="POST", headers=headers), timeout=TIMEOUT)
+
+
+def forward_response(handler: BaseHTTPRequestHandler, response: Any) -> None:
+    with response as upstream_response:
+        content_type = upstream_response.headers.get("Content-Type", "application/json")
+        handler.send_response(upstream_response.status)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "close")
+        handler.send_header("Transfer-Encoding", "chunked")
+        handler.end_headers()
+        committed = False
+        while True:
+            chunk = upstream_response.read(16384)
+            if not chunk:
+                break
+            committed = True
+            handler.wfile.write(f"{len(chunk):X}\r\n".encode())
+            handler.wfile.write(chunk)
+            handler.wfile.write(b"\r\n")
+            handler.wfile.flush()
+        handler.wfile.write(b"0\r\n\r\n")
+        handler.wfile.flush()
+        return committed
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,11 +306,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("[gateway] " + (fmt % args), flush=True)
 
-    def send_bytes(self, code, data, content_type="application/json"):
-        if not isinstance(data, bytes):
-            data = str(data).encode()
+    def send_json(self, code: int, value: dict[str, Any]) -> None:
+        data = json.dumps(value, ensure_ascii=False).encode()
         self.send_response(code)
-        self.send_header("Content-Type", content_type or "application/json")
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Connection", "close")
         self.end_headers()
@@ -172,78 +318,77 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path == "/v1/models":
-            data = []
-            for name in ORDER:
-                if name in PROVIDERS and PROVIDERS[name]["key"]:
-                    data.append({"id": PROVIDERS[name]["model"], "object": "model", "owned_by": name})
-            self.send_bytes(200, json.dumps({"object": "list", "data": data}).encode())
-            return
         if path == "/health":
             with state_lock:
-                health = {p: dict(s) for p, s in provider_state.items()}
-            self.send_bytes(200, json.dumps({"status": "ok", "providers": health}).encode())
+                providers = {
+                    name: {
+                        "configured": bool(cfg["key"]),
+                        "model": cfg["model"],
+                        "failures": state.failures,
+                        "successes": state.successes,
+                        "cooldown_remaining": max(0.0, state.cooldown_until - time.monotonic()),
+                        "last_error": state.last_error,
+                        "recovery_generation": state.recovery_generation,
+                    }
+                    for name, cfg in PROVIDERS.items()
+                    for state in [provider_state[name]]
+                }
+            self.send_json(200, {"status": "ok", "providers": providers})
             return
-        self.send_bytes(404, b'{"error":{"message":"not found"}}')
+        if path == "/v1/models":
+            data = [
+                {"id": model_for(p, None), "object": "model", "owned_by": p}
+                for p in ORDER if p in PROVIDERS and available(p)
+            ]
+            self.send_json(200, {"object": "list", "data": data})
+            return
+        self.send_json(404, {"error": {"message": "not found"}})
 
     def do_POST(self):
-        path = urlsplit(self.path).path
-        if path != "/v1/responses":
-            self.send_bytes(404, b'{"error":{"message":"not found"}}')
+        if urlsplit(self.path).path != "/v1/responses":
+            self.send_json(404, {"error": {"message": "not found"}})
             return
         try:
-            n = int(self.headers.get("Content-Length", "0"))
-            body = json.loads(self.rfile.read(n))
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError("JSON object required")
         except Exception as exc:
-            self.send_bytes(400, json.dumps({"error": {"message": f"invalid JSON: {exc}"}}).encode())
+            self.send_json(400, {"error": {"message": f"invalid JSON: {exc}"}})
             return
 
         clamp_budget(body)
-        requested_provider = os.getenv("CODEX_PROVIDER") or os.getenv("AI_PROVIDER") or "openrouter"
-        tried = []
-        for provider in candidates(requested_provider):
-            tried.append(provider)
-            # Keep OpenRouter's current anti-inflight behavior, but scope it per provider.
+        requested_provider = os.getenv("AI_PROVIDER", "openrouter")
+        tried: list[str] = []
+
+        for provider, model in provider_candidates(requested_provider, body.get("model")):
+            tried.append(f"{provider}/{model}")
             with provider_locks[provider]:
-                for attempt in range(MAX_ATTEMPTS):
+                # Another request may have cooled this provider while we waited.
+                if not available(provider):
+                    continue
+                for attempt in range(1, MAX_ATTEMPTS + 1):
+                    acquire_rate_slot(provider)
+                    print(f"ROUTE provider={provider} model={model} attempt={attempt}/{MAX_ATTEMPTS}", flush=True)
                     try:
-                        print(f"ROUTE provider={provider} model={choose_model(body, provider)} attempt={attempt + 1}", flush=True)
-                        response = upstream(provider, body, self.headers.get("Accept"))
-                        with response as upstream_response:
-                            mark_success(provider)
-                            content_type = upstream_response.headers.get("Content-Type", "application/json")
-                            self.send_response(upstream_response.status)
-                            self.send_header("Content-Type", content_type)
-                            self.send_header("Cache-Control", "no-cache")
-                            self.send_header("Connection", "close")
-                            self.send_header("Transfer-Encoding", "chunked")
-                            self.end_headers()
-                            while True:
-                                chunk = upstream_response.read(16384)
-                                if not chunk:
-                                    break
-                                self.wfile.write(f"{len(chunk):X}\r\n".encode())
-                                self.wfile.write(chunk)
-                                self.wfile.write(b"\r\n")
-                                self.wfile.flush()
-                            self.wfile.write(b"0\r\n\r\n")
-                            self.wfile.flush()
+                        response = upstream_call(provider, body, self.headers.get("Accept"))
+                        forward_response(self, response)
+                        mark_success(provider)
                         return
                     except HTTPError as exc:
                         data = exc.read()
                         kind = classify(exc.code, data)
                         print(f"UPSTREAM_ERROR provider={provider} code={exc.code} class={kind}", flush=True)
-                        if kind in ("auth", "permission", "invalid_request"):
+                        if kind in ("auth", "permission", "billing", "invalid_request", "request_too_large"):
                             mark_failure(provider, kind, MAX_COOLDOWN)
                             break
                         delay = retry_after(exc.headers, data)
-                        if kind in ("rate_limit", "transient") and attempt + 1 < MAX_ATTEMPTS:
-                            delay = delay if delay is not None else min(MAX_COOLDOWN, BASE_COOLDOWN * (attempt + 1))
-                            delay += random.uniform(0, JITTER)
+                        if kind in ("rate_limit", "transient") and attempt < MAX_ATTEMPTS:
+                            if delay is None:
+                                delay = min(MAX_COOLDOWN, BASE_COOLDOWN * attempt)
+                            delay += random.uniform(0.0, JITTER)
                             mark_failure(provider, kind, delay)
-                            print(f"RECOVERY provider={provider} sleep={delay:.2f}", flush=True)
+                            print(f"RECOVERY provider={provider} generation={provider_state[provider].recovery_generation} sleep={delay:.2f}", flush=True)
                             time.sleep(delay)
                             continue
                         mark_failure(provider, kind)
@@ -252,17 +397,25 @@ class Handler(BaseHTTPRequestHandler):
                         mark_failure(provider, "network")
                         print(f"UPSTREAM_NETWORK_ERROR provider={provider} error={type(exc).__name__}", flush=True)
                         break
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
                     except Exception as exc:
                         mark_failure(provider, "unexpected")
                         print(f"UPSTREAM_EXCEPTION provider={provider} error={type(exc).__name__}", flush=True)
                         break
 
-        self.send_bytes(503, json.dumps({
-            "error": {"message": "All configured AI providers failed", "type": "provider_exhausted", "providers_tried": tried}
-        }).encode())
+        self.send_json(503, {
+            "error": {
+                "message": "All configured AI providers failed",
+                "type": "provider_exhausted",
+                "providers_tried": tried,
+            }
+        })
 
 
 if __name__ == "__main__":
     if MAX_TOKENS <= 0 or MIN_TOKENS <= 0 or MIN_TOKENS > MAX_TOKENS:
         raise SystemExit("Invalid token budget configuration")
+    if RATE_LIMIT <= 0 or RATE_WINDOW <= 0 or MAX_ATTEMPTS <= 0:
+        raise SystemExit("Invalid gateway admission configuration")
     ThreadingHTTPServer(("127.0.0.1", 8787), Handler).serve_forever()
