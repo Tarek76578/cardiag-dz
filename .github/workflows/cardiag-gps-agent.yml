@@ -26,16 +26,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Normalize clean working tree
-        run: |
-          set -euo pipefail
-          git fetch origin main --prune
-          git reset --hard origin/main
-          git clean -fdx
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          test -z "$(git status --porcelain)"
-          echo "GIT_BASE=$(git rev-parse HEAD)"
-
       - name: Verify repository
         run: |
           set -euo pipefail
