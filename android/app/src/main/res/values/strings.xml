@@ -611,6 +611,10 @@
     <string name="ra_filter">Filtrer</string>
     <string name="ra_results_count">%1$d catégorie(s)</string>
     <string name="ra_no_category_selected">Sélectionnez au moins une catégorie.</string>
+    <string name="ra_map_title">Carte</string>
+    <string name="ra_map_subtitle">Position actuelle centrée sur la carte</string>
+    <string name="ra_map_default_location">Position par défaut : Algérie</string>
+    <string name="ra_map_no_location">Localisation indisponible, carte centrée sur l\'Algérie</string>
 
     <string name="state_unauthorized">Non autorisé</string>
     <string name="more_login">Se connecter / Créer un compte</string>

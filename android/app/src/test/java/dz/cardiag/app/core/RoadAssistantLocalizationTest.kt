@@ -70,7 +70,11 @@ class RoadAssistantLocalizationTest {
             "emergency_fire",
             "emergency_ambulance",
             "emergency_protection_civile",
-            "driver_actions_find_service"
+            "driver_actions_find_service",
+            "ra_map_title",
+            "ra_map_subtitle",
+            "ra_map_default_location",
+            "ra_map_no_location"
         )
         required.forEach { key ->
             assertTrue("FR missing $key", fr[key]?.isNotBlank() == true)
@@ -89,7 +93,11 @@ class RoadAssistantLocalizationTest {
             "ra_category_roadside",
             "ra_hazards_title",
             "driver_actions_find_service",
-            "emergency_police"
+            "emergency_police",
+            "ra_map_title",
+            "ra_map_subtitle",
+            "ra_map_default_location",
+            "ra_map_no_location"
         ).forEach { key ->
             val v = ar[key] ?: error("missing $key")
             assertTrue("$key has no Arabic script: $v", arabicPattern.containsMatchIn(v))

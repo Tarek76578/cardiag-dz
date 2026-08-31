@@ -66,12 +66,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import dz.cardiag.app.core.road.AndroidLocationProvider
+import dz.cardiag.app.core.road.CoarseLocation
+import dz.cardiag.app.core.road.MapDefaults
 import dz.cardiag.app.core.road.NearbyService
 import dz.cardiag.app.core.road.OfflineRoadDataProvider
 import dz.cardiag.app.core.road.RoadAssistantContext
 import dz.cardiag.app.core.road.RoadAssistantService
 import dz.cardiag.app.core.road.RoadAssistantSnapshot
 import dz.cardiag.app.core.road.ServiceCategory
+import dz.cardiag.app.ui.components.InteractiveMapView
 import dz.cardiag.app.ui.theme.CarDiagShapes
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -196,6 +199,7 @@ fun RoadAssistantScreen(
             item { RoadAssistantControls(arabic, radiusKm, { radiusKm = it }, selected, { cat ->
                 selected = if (cat in selected) selected - cat else selected + cat
             }, query, { query = it }) }
+            item { RoadAssistantMapCard(snapshot?.location, arabic) }
             item {
                 val langKey = if (arabic) "ar" else "fr"
                 val providerLabel = stringResource(R.string.ra_offline_catalog)
@@ -312,6 +316,43 @@ private fun RoadAssistantPermissionCard(
                 Button(onClick = onRequest) { Text(stringResource(R.string.ra_request_permission)) }
                 OutlinedButton(onClick = onOpenSettings) { Text(stringResource(R.string.ra_open_settings)) }
             }
+        }
+    }
+}
+
+@Composable
+private fun RoadAssistantMapCard(loc: dz.cardiag.app.core.road.CoarseLocation?, arabic: Boolean) {
+    val mapTitle = stringResource(R.string.ra_map_title)
+    val mapSubtitle = stringResource(R.string.ra_map_subtitle)
+    val mapDesc = when {
+        loc == null -> stringResource(R.string.ra_map_no_location)
+        loc.latitude.isNaN() || loc.longitude.isNaN() -> stringResource(R.string.ra_map_no_location)
+        else -> mapSubtitle
+    }
+    Card(modifier = Modifier.fillMaxWidth(), shape = CarDiagShapes.Card) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                text = mapTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = mapSubtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            InteractiveMapView(
+                latitude = loc?.latitude,
+                longitude = loc?.longitude,
+                accuracyMeters = loc?.accuracyMeters,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 180.dp)
+                    .height(220.dp),
+                contentDescriptionText = mapDesc
+            )
         }
     }
 }

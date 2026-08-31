@@ -45,3 +45,20 @@ The repository uses `.github/workflows/groq-autonomous-agent.yml` as the histori
 5. Add OBD hardware validation on a maintained CI runner.
 6. Expand the offline DTC catalog with more B/C/U codes and richer repair guidance without inventing facts.
 7. Continue RTL accessibility audit (touch targets, contrast, semantic labels, dynamic font scale).
+
+## GPS + interactive map milestone — evidence
+- Scope per `docs/agent-next-task.md`: GPS + interactive map only (no background tracking, no location persistence, no new deps). Implemented in `android/app/src/main/java/dz/cardiag/app/core/road/MapDefaults.kt` (41 lines: `MapDefaults.DEFAULT_ZOOM`, `MIN_ZOOM`, `MAX_ZOOM`, `DEFAULT_LATITUDE`, `DEFAULT_LONGITUDE`, `validateZoom`), `core/road/MapProjection.kt` (78 lines, deterministic Web-Mercator-style projection with NaN-safe math, clamped zoom, null/zero/negative-canvas handling), and `ui/components/InteractiveMapView.kt` (263 lines, pure-Compose canvas view: world grid, lat/lon graticule, default-location dot, current-location pin, zoom +/- controls, pan, accessibility/content-description).
+- Strings: added `ra_map_title`, `ra_map_subtitle`, `ra_map_default_location`, `ra_map_no_location` to both `res/values/strings.xml` (FR) and `res/values-ar/strings.xml` (AR).
+- `RoadAssistantScreen.kt`: imports `dz.cardiag.app.ui.components.InteractiveMapView`; `item { RoadAssistantMapCard(snapshot?.location, arabic) }` inserted at line 202 between controls and the source card; `private fun RoadAssistantMapCard` composable at line 324 wraps `InteractiveMapView`.
+- Fixed AAPT2 escape: `ra_map_no_location` (FR) `l'Algérie` -> `l\'Algérie`.
+- Tests added under `app/src/test/java/dz/cardiag/app/core/`:
+  - `MapDefaultsTest.kt` - 4 cases (null zoom -> `DEFAULT_ZOOM`, NaN zoom -> `DEFAULT_ZOOM`, below-min clamps to `MIN_ZOOM`, above-max clamps to `MAX_ZOOM`).
+  - `MapProjectionTest.kt` - 12 cases (center at 0,0; north/east hemispheres; zero / negative canvas falls back to 0; NaN lat/lon yields 0; +/-91 latitude clamped to +/-90; zoom < min clamps but not null; zoom > max clamps but not null; null zoom falls back to `MIN_ZOOM`).
+  - Extended `RoadAssistantLocalizationTest.kt` - added the four `ra_map_*` keys to both the FR and AR `required` lists and to the Arabic-script-presence check list.
+- Validation (re-run this resumed cycle from `android/`, `--rerun-tasks` where applicable):
+  - `./gradlew :app:testDebugUnitTest --rerun-tasks` -> 25 suites, 157 tests, 0 failures, 0 errors, 0 skipped (baseline was 22 suites / 141 tests; +3 suites, +16 tests from `MapDefaultsTest`, `MapProjectionTest`, and the extended `RoadAssistantLocalizationTest`).
+  - `./gradlew :app:lintDebug --rerun-tasks` -> BUILD SUCCESSFUL, 0 errors, 269 warnings, 12 information (unchanged from baseline; no new warnings introduced).
+  - `./gradlew :app:assembleDebug` -> BUILD SUCCESSFUL, `app-debug.apk` (~22.4 MB) written under `app/build/outputs/apk/debug/`.
+- Working tree state (intentionally not committed): `RoadAssistantScreen.kt` (M), `values/strings.xml` (M), `values-ar/strings.xml` (M), `RoadAssistantLocalizationTest.kt` (M), plus untracked `MapDefaults.kt`, `MapProjection.kt`, `InteractiveMapView.kt`, `MapDefaultsTest.kt`, `MapProjectionTest.kt`. The `.codex/*` runtime SQLite/tmp state is preserved untouched.
+
+GPS_MAP_MILESTONE=COMPLETE

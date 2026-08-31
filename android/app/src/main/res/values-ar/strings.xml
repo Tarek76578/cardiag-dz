@@ -611,6 +611,10 @@
     <string name="ra_filter">تصفية</string>
     <string name="ra_results_count">%1$d فئة</string>
     <string name="ra_no_category_selected">اختر فئة واحدة على الأقل.</string>
+    <string name="ra_map_title">الخريطة</string>
+    <string name="ra_map_subtitle">تمركز الخريطة على موقعك الحالي</string>
+    <string name="ra_map_default_location">الموقع الافتراضي: الجزائر</string>
+    <string name="ra_map_no_location">الموقع غير متوفر، تمركز الخريطة على الجزائر</string>
 
     <string name="state_unauthorized">غير مصرّح</string>
     <string name="more_login">تسجيل الدخول / إنشاء حساب</string>
