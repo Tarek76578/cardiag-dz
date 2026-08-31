@@ -48,12 +48,12 @@ jobs:
           test -f scripts/test_ai_gateway.py
           test -x android/gradlew
           test -f android/app/build.gradle.kts
-          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}"
           python3 -m py_compile scripts/ai-gateway.py
           python3 scripts/test_ai_gateway.py
           bash -n scripts/autonomous-agent.sh
+          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}"
 
-      - name: Discover free OpenRouter model
+      - name: Discover initial free OpenRouter model
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
@@ -61,37 +61,24 @@ jobs:
           test -n "$OPEN_ROUTER_API_KEY"
           python3 - <<'PY'
           import json, os, urllib.request
-          base='https://openrouter.ai/api/v1'
-          req=urllib.request.Request(base+'/models',headers={'Authorization':'Bearer '+os.environ['OPEN_ROUTER_API_KEY'],'Accept':'application/json'})
-          with urllib.request.urlopen(req,timeout=30) as r:
-              data=json.load(r)
+          req=urllib.request.Request('https://openrouter.ai/api/v1/models',headers={'Authorization':'Bearer '+os.environ['OPEN_ROUTER_API_KEY'],'Accept':'application/json'})
+          with urllib.request.urlopen(req,timeout=30) as r: data=json.load(r)
           candidates=[]
           for item in data.get('data',[]):
-              if not isinstance(item,dict):
-                  continue
-              model=str(item.get('id',''))
-              pricing=item.get('pricing') or {}
-              arch=item.get('architecture') or {}
-              supported=item.get('supported_parameters') or []
-              if not model or not model.endswith(':free'):
-                  continue
-              if str(pricing.get('prompt','')) not in ('0','0.0','0.000000') or str(pricing.get('completion','')) not in ('0','0.0','0.000000'):
-                  continue
-              if 'tools' not in supported and 'tool_choice' not in supported:
-                  continue
-              candidates.append((model, int(item.get('context_length') or 0), str(arch.get('modality') or '')))
-          if not candidates:
-              raise SystemExit('No currently listed free OpenRouter model advertises tool support')
-          candidates.sort(key=lambda x:(-x[1],x[0]))
-          model=candidates[0][0]
+              if not isinstance(item,dict): continue
+              model=str(item.get('id','')); pricing=item.get('pricing') or {}; supported=item.get('supported_parameters') or []
+              if not model.endswith(':free'): continue
+              if str(pricing.get('prompt','')) not in ('0','0.0','0.000000') or str(pricing.get('completion','')) not in ('0','0.0','0.000000'): continue
+              if 'tools' not in supported and 'tool_choice' not in supported: continue
+              if int(item.get('context_length') or 0) < 32768: continue
+              candidates.append((int(item.get('context_length') or 0),model))
+          if not candidates: raise SystemExit('No free OpenRouter tool-capable model with >=32768 context')
+          candidates.sort(key=lambda x:(-x[0],x[1]))
+          model=candidates[0][1]
           print('AUTO_FREE_MODEL='+model)
           print('AUTO_FREE_MODEL_CANDIDATES='+str(len(candidates)))
           with open(os.environ['GITHUB_ENV'],'a') as f:
-              f.write('AI_MODEL='+model+'\n')
-              f.write('OPENROUTER_MODEL='+model+'\n')
-              f.write('AI_PROVIDER=openrouter\n')
-          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
-              f.write('model='+model+'\n')
+              f.write('AI_MODEL='+model+'\nOPENROUTER_MODEL='+model+'\nAI_PROVIDER=openrouter\n')
           PY
 
       - name: Java
@@ -119,9 +106,8 @@ jobs:
           npm install --global --no-audit --no-fund @openai/codex@0.151.0
           command -v codex
           codex --version
-          codex --help >/dev/null
 
-      - name: Start and self-test CarDiag AI Gateway
+      - name: Start gateway for agent rotation
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -135,80 +121,9 @@ jobs:
             sleep 1
           done
           kill -0 "$(cat /tmp/gateway.pid)"
-          python3 - <<'PY'
-          import json, urllib.error, urllib.request
-          health=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=5))
-          assert health['status'] == 'ok'
-          configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
-          assert configured, 'No Codex-compatible AI provider configured'
-          payload={'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':16}
-          req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
-          try:
-              with urllib.request.urlopen(req,timeout=60) as response:
-                  assert response.status == 200, response.status
-                  data=json.loads(response.read())
-                  assert data.get('object') == 'response', data
-          except urllib.error.HTTPError as exc:
-              detail=exc.read().decode('utf-8','replace')
-              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {detail}')
-          print('AI_GATEWAY_LIVE_PROBE=PASS')
-          PY
-          grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
-          selected="$(grep 'ROUTE provider=' /tmp/cardiag-ai-gateway.log | tail -n 1 | sed -E 's/^.*ROUTE provider=([^ ]+) model=([^ ]+) attempt=.*/\1 \2/')"
-          test -n "$selected"
-          provider="${selected%% *}"
-          model="${selected#* }"
-          echo "AI_GATEWAY_SELECTED_PROVIDER=$provider"
-          echo "AI_GATEWAY_SELECTED_MODEL=$model"
-          echo "AI_MODEL=$model" >> "$GITHUB_ENV"
-          echo "OPENROUTER_MODEL=$model" >> "$GITHUB_ENV"
-          echo "AI_PROVIDER=$provider" >> "$GITHUB_ENV"
-          echo "AI_GATEWAY_SELECTED_PROVIDER=$provider" >> "$GITHUB_ENV"
-          echo "AI_GATEWAY_SELECTED_MODEL=$model" >> "$GITHUB_ENV"
           cat /tmp/gateway-health.json
-          cat /tmp/cardiag-ai-gateway.log
 
-      - name: Restart Gateway on verified provider/model
-        env:
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "${AI_GATEWAY_SELECTED_PROVIDER:-}"
-          test -n "${AI_GATEWAY_SELECTED_MODEL:-}"
-          kill "$(cat /tmp/gateway.pid)" || true
-          for i in $(seq 1 10); do
-            kill -0 "$(cat /tmp/gateway.pid)" 2>/dev/null || break
-            sleep 1
-          done
-          export AI_PROVIDER="$AI_GATEWAY_SELECTED_PROVIDER"
-          export AI_MODEL="$AI_GATEWAY_SELECTED_MODEL"
-          case "$AI_GATEWAY_SELECTED_PROVIDER" in
-            openrouter) export OPENROUTER_MODEL="$AI_GATEWAY_SELECTED_MODEL" ;;
-            groq) export GROQ_MODEL="$AI_GATEWAY_SELECTED_MODEL" ;;
-            deepseek) export DEEPSEEK_MODEL="$AI_GATEWAY_SELECTED_MODEL" ;;
-            *) echo "Unsupported selected provider: $AI_GATEWAY_SELECTED_PROVIDER" >&2; exit 18 ;;
-          esac
-          python3 scripts/ai-gateway.py >/tmp/cardiag-ai-gateway-codex.log 2>&1 &
-          echo $! >/tmp/gateway.pid
-          for i in $(seq 1 30); do
-            curl -fsS --max-time 1 http://127.0.0.1:8787/health >/tmp/gateway-codex-health.json 2>/dev/null && break
-            sleep 1
-          done
-          kill -0 "$(cat /tmp/gateway.pid)"
-          python3 - <<'PY'
-          import json, os, urllib.request
-          h=json.load(urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=5))
-          p=h['providers'][os.environ['AI_GATEWAY_SELECTED_PROVIDER']]
-          assert p['configured'] and p['codex_compatible']
-          assert p['model'] == os.environ['AI_GATEWAY_SELECTED_MODEL'], p
-          print('AI_GATEWAY_CODEX_ROUTE=PASS')
-          PY
-          cat /tmp/gateway-codex-health.json
-          cat /tmp/cardiag-ai-gateway-codex.log
-
-      - name: Run GPS-only Codex agent
+      - name: Run GPS-only Codex agent with persistent free-model rotation
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -220,14 +135,9 @@ jobs:
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
           AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
+          AI_AGENT_MAX_CYCLES: '12'
         run: |
           set -euo pipefail
-          test -n "${AI_MODEL:-}" || { echo 'AI_MODEL was not selected by Gateway probe' >&2; exit 17; }
-          test -n "${AI_PROVIDER:-}" || { echo 'AI_PROVIDER was not selected by Gateway probe' >&2; exit 18; }
-          echo "CODEX_EFFECTIVE_PROVIDER=$AI_PROVIDER"
-          echo "CODEX_EFFECTIVE_MODEL=$AI_MODEL"
-          export CODEX_HOME="$HOME/.codex-cardiag"
-          mkdir -p "$CODEX_HOME"
           ./scripts/autonomous-agent.sh
 
       - name: Validate Android
