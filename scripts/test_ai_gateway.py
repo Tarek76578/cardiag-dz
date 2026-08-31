@@ -18,6 +18,7 @@ def test_classification():
     assert module.classify(401, b"invalid api key") == "auth"
     assert module.classify(402, b"credits required") == "billing"
     assert module.classify(413, b"context too large") == "request_too_large"
+    assert module.classify(404, b"model not found") == "not_found"
     assert module.classify(400, b"bad request") == "invalid_request"
 
 
@@ -41,6 +42,22 @@ def test_chat_payload():
     assert payload["max_tokens"] == 100
 
 
+def test_chat_response_normalization():
+    raw = b'{"id":"chat_1","choices":[{"message":{"role":"assistant","content":"OK"}}]}'
+    normalized = module.normalize_chat_response(raw, "gemini-3.7-flash")
+    data = __import__("json").loads(normalized)
+    assert data["object"] == "response"
+    assert data["model"] == "gemini-3.7-flash"
+    assert data["output"][0]["content"][0]["text"] == "OK"
+
+
+def test_provider_capabilities():
+    assert module.PROVIDERS["openrouter"]["codex"] is True
+    assert module.PROVIDERS["groq"]["protocol"] == "responses"
+    assert module.PROVIDERS["gemini"]["protocol"] == "chat"
+    assert module.PROVIDERS["gemini"]["codex"] is False
+
+
 def test_candidates_skip_unconfigured_and_cooling():
     original_key = module.PROVIDERS["groq"]["key"]
     original_model = module.PROVIDERS["groq"]["model"]
@@ -56,10 +73,22 @@ def test_candidates_skip_unconfigured_and_cooling():
         module.PROVIDERS["groq"]["model"] = original_model
 
 
+def test_model_options_include_provider_fallbacks():
+    original_model = module.PROVIDERS["groq"]["model"]
+    try:
+        module.PROVIDERS["groq"]["model"] = "openai/gpt-oss-120b"
+        options = module.model_options("groq", "missing-model")
+        assert options[0] == "openai/gpt-oss-120b"
+        assert "openai/gpt-oss-20b" in options
+    finally:
+        module.PROVIDERS["groq"]["model"] = original_model
+
+
 def test_failure_policy_exports():
     assert module.classify(429, b"") == "rate_limit"
     assert module.classify(503, b"") == "transient"
     assert module.classify(403, b"") == "permission"
+    assert module.classify(404, b"") == "not_found"
     assert module.classify(400, b"") == "invalid_request"
 
 
@@ -69,7 +98,10 @@ if __name__ == "__main__":
         test_retry_after,
         test_budget_clamp,
         test_chat_payload,
+        test_chat_response_normalization,
+        test_provider_capabilities,
         test_candidates_skip_unconfigured_and_cooling,
+        test_model_options_include_provider_fallbacks,
         test_failure_policy_exports,
     ):
         test()
