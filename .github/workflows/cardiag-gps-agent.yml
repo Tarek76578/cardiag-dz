@@ -135,10 +135,22 @@ jobs:
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
           AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
-          AI_AGENT_MAX_CYCLES: '12'
+          AI_AGENT_MAX_CYCLES: '24'
         run: |
           set -euo pipefail
           ./scripts/autonomous-agent.sh
+
+      - name: Upload agent checkpoint on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardiag-gps-agent-checkpoint-${{ github.run_id }}
+          path: |
+            /tmp/cardiag-agent-checkpoint/
+            agent-state.md
+            docs/agent-next-task.md
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Validate Android
         if: success()
