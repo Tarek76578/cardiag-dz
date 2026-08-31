@@ -25,6 +25,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Normalize clean working tree
+        run: |
+          set -euo pipefail
+          git fetch origin main --prune
+          git reset --hard origin/main
+          git clean -fdx
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain)"
+          echo "GIT_BASE=$(git rev-parse HEAD)"
+
       - name: Verify repository
         run: |
           set -euo pipefail
@@ -75,10 +85,7 @@ jobs:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          curl -fsS --max-time 20 \
-            -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
-            -H 'Accept: application/json' \
-            "$OPENROUTER_BASE_URL/models" -o /tmp/models.json
+          curl -fsS --max-time 20 -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Accept: application/json' "$OPENROUTER_BASE_URL/models" -o /tmp/models.json
           python3 - /tmp/models.json <<'PY' > /tmp/model-candidates.txt
           import json, sys
           data=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -86,14 +93,13 @@ jobs:
           blocked=('vision','audio','image','tts','whisper','embed','moderation')
           preferred=('openai/gpt-oss-120b:free','openai/gpt-oss-20b:free','qwen/qwen3-coder:free','deepseek/deepseek-chat-v3.1:free')
           def score(m):
-              mid=(m.get('id') or '').lower()
-              params=set(m.get('supported_parameters') or [])
+              mid=(m.get('id') or '').lower(); params=set(m.get('supported_parameters') or [])
               if 'tools' not in params and 'tool_choice' not in params: return -10**9
               if any(x in mid for x in blocked): return -10**9
               try: ctx=int(m.get('context_length') or 0)
               except Exception: ctx=0
               pref=(len(preferred)-preferred.index(mid))*100000 if mid in preferred else 0
-              return pref + (5000 if 'code' in mid or 'coder' in mid else 0) + (4000 if 'gpt-oss' in mid else 0) + (1000 if mid.endswith(':free') else 0) + min(ctx,128000)//1000
+              return pref+(5000 if 'code' in mid or 'coder' in mid else 0)+(4000 if 'gpt-oss' in mid else 0)+(1000 if mid.endswith(':free') else 0)+min(ctx,128000)//1000
           for m in sorted((m for m in models if m.get('id')),key=score,reverse=True):
               if score(m)>0: print(m['id'])
           PY
@@ -106,10 +112,7 @@ jobs:
           print(json.dumps({'model':os.environ['MODEL'],'input':'Reply with exactly OK','max_output_tokens':16}))
           PY
             )"
-            response="$(curl -sS --max-time 30 -w '\n%{http_code}' \
-              -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" \
-              -H 'Content-Type: application/json' \
-              -d "$payload" "$OPENROUTER_BASE_URL/responses" || true)"
+            response="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' -d "$payload" "$OPENROUTER_BASE_URL/responses" || true)"
             code="$(printf '%s\n' "$response" | tail -n1)"
             echo "MODEL_PROBE model=$model http=$code"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
