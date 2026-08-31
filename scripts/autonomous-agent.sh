@@ -23,6 +23,9 @@ IMPORTANT: this is a continuation cycle. Existing uncommitted code changes are i
 Read ROOT/agent-state.md and the current working tree first, then continue from the highest-value unfinished point.
 Make the smallest complete production-quality change, add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
 If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in ROOT/agent-state.md. Never claim unfinished work is complete.
+Only when the GPS + interactive map milestone is genuinely implemented and its required validation has passed, add this exact line to ROOT/agent-state.md:
+GPS_MAP_MILESTONE=COMPLETE
+If it is not genuinely complete, do NOT add that line.
 Do not spend the cycle on broad repository exploration once the relevant GPS/map files are identified. Do not repeatedly inspect unrelated files.
 Do not commit or push; the workflow handles verified commits. Stop after this single task.
 EOF
@@ -55,7 +58,7 @@ PY
 
 start_gateway() {
   local model="$1"
-  pkill -f 'scripts/ai-gateway.py' 2>/dev/null || true
+  pkill -f 'scripts/ai_gateway.py' 2>/dev/null || true
   sleep 1
   export AI_PROVIDER=openrouter AI_MODEL="$model" OPENROUTER_MODEL="$model"
   python3 scripts/ai_gateway.py >/tmp/cardiag-ai-gateway-codex.log 2>&1 &
@@ -68,10 +71,28 @@ start_gateway() {
 }
 
 save_checkpoint() {
-  echo "AI_AGENT_CHECKPOINT=$1"
+  local reason="$1"
+  echo "AI_AGENT_CHECKPOINT=$reason"
   git status --short
   git diff --check || true
   test -f agent-state.md && cp agent-state.md /tmp/cardiag-agent-state-checkpoint.md || true
+}
+
+validate_completion() {
+  echo "AI_AGENT_COMPLETION_GATE=START"
+  grep -Fxq 'GPS_MAP_MILESTONE=COMPLETE' agent-state.md || {
+    echo "AI_AGENT_COMPLETION_GATE=INCOMPLETE_MARKER_MISSING"
+    return 1
+  }
+  test -d android || { echo "AI_AGENT_COMPLETION_GATE=ANDROID_DIR_MISSING"; return 1; }
+  if [ -x android/gradlew ]; then GRADLE=(./gradlew); else GRADLE=(gradle); fi
+  (
+    cd android
+    "${GRADLE[@]}" --no-daemon testDebugUnitTest lintDebug assembleDebug
+  )
+  git diff --check
+  echo "AI_AGENT_COMPLETION_GATE=PASS"
+  return 0
 }
 
 for cycle in $(seq 1 "$MAX_CYCLES"); do
@@ -107,9 +128,14 @@ PY
   rc=${PIPESTATUS[0]}
   set -e
   if [ "$rc" -eq 0 ]; then
-    echo "AI_AGENT_SUCCESS=codex"
-    echo "AI_PROVIDER_SUCCESS=$PROVIDER/$MODEL"
-    exit 0
+    if validate_completion; then
+      echo "AI_AGENT_SUCCESS=codex"
+      echo "AI_PROVIDER_SUCCESS=$PROVIDER/$MODEL"
+      exit 0
+    fi
+    save_checkpoint "codex-finished-but-completion-gate-failed"
+    echo "AI_AGENT_ROTATING_AFTER_INCOMPLETE=$MODEL"
+    continue
   fi
   if grep -Eiq 'rate limit|rate_limit|HTTP 429|status 429|503 Service Unavailable|provider_exhausted|All compatible AI providers failed|temporarily unavailable|context window|maximum context|token limit' "/tmp/cardiag-codex-cycle-$cycle.log"; then
     save_checkpoint "provider-limit-or-context"
