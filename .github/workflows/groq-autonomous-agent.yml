@@ -39,6 +39,8 @@ jobs:
           test -f docs/agent-next-task.md && test -f agent-state.md
           test -x scripts/autonomous-agent.sh && test -f scripts/openrouter-codex-proxy.py
           test -n "${{ secrets.OPEN_ROUTER_API_KEY }}" && test -z "$(git status --porcelain)"
+          python3 -m py_compile scripts/openrouter-codex-proxy.py
+          bash -n scripts/autonomous-agent.sh
       - name: Java
         uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '17', cache: gradle}
@@ -53,10 +55,10 @@ jobs:
       - name: Install Codex CLI
         run: |
           set -euo pipefail
-          rm -rf /tmp/codex-cli
-          npm install --prefix /tmp/codex-cli --no-save @openai/codex
-          echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
-          /tmp/codex-cli/node_modules/.bin/codex --version
+          npm install --global --no-audit --no-fund @openai/codex@0.151.0
+          command -v codex
+          codex --version
+          codex --help >/dev/null
       - name: OpenRouter preflight
         id: provider
         env: {OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}}
