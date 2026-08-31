@@ -34,9 +34,9 @@ Keep the implementation focused: do not perform broad repository rewrites or unr
 EOF
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed." >&2; exit 21; }
 codex --version
-# OpenRouter is used as an OpenAI-compatible Responses provider. Keep the model explicitly pinned
-# by the workflow's preflight and configure conservative request limits so the free/low-credit
-# route cannot inherit Codex's 65536-token default.
+# Do not impose an artificial output-token cap. The selected OpenRouter model/provider
+# decides the affordable maximum. Give Codex a large context window and let the provider
+# reject only requests that exceed the actual account/model budget.
 codex exec --ephemeral --color never \
   -c "model=\"$MODEL\"" \
   -c "model_provider=\"$PROVIDER\"" \
@@ -48,7 +48,7 @@ codex exec --ephemeral --color never \
   -c "model_providers.$PROVIDER.stream_max_retries=1" \
   -c "model_providers.$PROVIDER.supports_websockets=false" \
   -c "model_providers.$PROVIDER.requires_openai_auth=true" \
-  -c "model_context_window=32768" \
+  -c "model_context_window=131072" \
   -c "project_doc_max_bytes=0" \
   -c "web_search=\"disabled\"" \
   --sandbox danger-full-access --skip-git-repo-check "$(cat "$PROMPT_FILE")" < /dev/null
