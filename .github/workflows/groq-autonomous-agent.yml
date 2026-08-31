@@ -47,7 +47,7 @@ jobs:
           test -f docs/agent-next-task.md
           test -f agent-state.md
           test -x scripts/autonomous-agent.sh
-          test -n "${{ secrets.OPENROUTER_API_KEY }}"
+          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}"
           test -z "$(git status --porcelain)"
       - name: Java
         uses: actions/setup-java@v5
@@ -75,10 +75,10 @@ jobs:
       - name: OpenRouter preflight
         id: provider
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          body="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'Content-Type: application/json' "$OPENROUTER_BASE_URL/models")" || exit 40
+          body="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' "$OPENROUTER_BASE_URL/models")" || exit 40
           http_code="$(printf '%s\n' "$body" | tail -n1)"
           response="$(printf '%s\n' "$body" | sed '$d')"
           case "$http_code" in
@@ -101,7 +101,6 @@ jobs:
               ctx=m.get("context_length",0) or 0
               if ctx >= 8000: print(mid)
           PY
-          cat /tmp/openrouter-candidates.txt
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
@@ -110,7 +109,7 @@ jobs:
           print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
           PY
             )"
-            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'Content-Type: application/json' -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' -H 'X-Title: CarDiag Autonomous Agent' -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
+            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPEN_ROUTER_API_KEY" -H 'Content-Type: application/json' -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' -H 'X-Title: CarDiag Autonomous Agent' -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
             echo "OPENROUTER_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
@@ -119,7 +118,7 @@ jobs:
           echo "model=$selected" >> "$GITHUB_OUTPUT"
       - name: Run Codex with OpenRouter
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           OPENROUTER_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
           OPENROUTER_FALLBACK_MODEL: ${{ env.OPENROUTER_FALLBACK_MODEL }}
           OPENROUTER_RATE_LIMIT_RETRIES: ${{ env.OPENROUTER_RATE_LIMIT_RETRIES }}
@@ -130,7 +129,7 @@ jobs:
           AI_PROVIDER: openrouter
           AI_MODEL: ${{ steps.provider.outputs.model }}
           CODEX_BASE_URL: https://openrouter.ai/api/v1
-          CODEX_ENV_KEY: OPENROUTER_API_KEY
+          CODEX_ENV_KEY: OPEN_ROUTER_API_KEY
           CODEX_WIRE_API: responses
         run: |
           set -euo pipefail
