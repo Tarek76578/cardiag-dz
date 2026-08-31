@@ -22,7 +22,7 @@ env:
   OPENROUTER_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
   AI_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
   AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-  AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,nvidia,deepseek,gemini
+  AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
 
 jobs:
   gps-agent:
@@ -47,7 +47,7 @@ jobs:
           test -f scripts/test_ai_gateway.py
           test -x android/gradlew
           test -f android/app/build.gradle.kts
-          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.NVIDIA_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}${{ secrets.GEMINI_API_KEY }}${{ secrets.GEMINI_KEY }}"
+          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}"
           python3 -m py_compile scripts/ai-gateway.py
           python3 scripts/test_ai_gateway.py
           bash -n scripts/autonomous-agent.sh
@@ -83,10 +83,7 @@ jobs:
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
         run: |
           set -euo pipefail
           python3 scripts/ai-gateway.py >/tmp/cardiag-ai-gateway.log 2>&1 &
@@ -102,16 +99,17 @@ jobs:
           assert health['status'] == 'ok'
           configured=[n for n,i in health['providers'].items() if i['configured'] and i['codex_compatible']]
           assert configured, 'No Codex-compatible AI provider configured'
-          print('CONFIGURED_CODEX_PROVIDERS=' + ','.join(configured))
           payload={'model':'interceptor-test','input':'Reply with exactly OK','max_output_tokens':16}
           req=urllib.request.Request('http://127.0.0.1:8787/v1/responses',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','Accept':'application/json'},method='POST')
           try:
-              with urllib.request.urlopen(req,timeout=45) as response:
+              with urllib.request.urlopen(req,timeout=60) as response:
                   assert response.status == 200, response.status
-                  data=json.load(response)
+                  raw=response.read()
+                  data=json.loads(raw)
                   assert data.get('object') == 'response', data
           except urllib.error.HTTPError as exc:
-              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {exc.read().decode("utf-8","replace")}')
+              detail=exc.read().decode('utf-8','replace')
+              raise SystemExit(f'Gateway live probe failed HTTP {exc.code}: {detail}')
           print('AI_GATEWAY_LIVE_PROBE=PASS')
           PY
           grep -Eq 'ROUTE provider=' /tmp/cardiag-ai-gateway.log
@@ -122,19 +120,17 @@ jobs:
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          CARDIAG_GATEWAY_KEY: local-gateway-key
           CODEX_PROVIDER: cardiag_gateway
           AI_PROVIDER: openrouter
           AI_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
           OPENROUTER_MODEL: ${{ vars.AI_MODEL || 'openai/gpt-oss-120b:free' }}
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
-          CODEX_ENV_KEY: OPEN_ROUTER_API_KEY
+          CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
           AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
-          AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,nvidia,deepseek,gemini
+          AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
         run: |
           set -euo pipefail
           export CODEX_HOME="$HOME/.codex-cardiag"
