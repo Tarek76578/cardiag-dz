@@ -1,4 +1,4 @@
-name: CarDiag Autonomous Agent (Groq)
+name: CarDiag Autonomous Agent (OpenRouter)
 
 on:
   workflow_dispatch:
@@ -11,16 +11,14 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GROQ_BASE_URL: https://api.groq.com/openai/v1
-  GROQ_WIRE_API: responses
-  GROQ_PRIMARY_MODEL: openai/gpt-oss-120b
-  GROQ_FALLBACK_MODEL: openai/gpt-oss-20b
-  GROQ_RATE_LIMIT_RETRIES: '2'
-  GROQ_DEFAULT_RETRY_SECONDS: '45'
-  GROQ_MAX_OUTPUT_TOKENS: '512'
-  GROQ_MAX_INPUT_TOKENS: '1500'
-  GROQ_TPM_LIMIT: '8000'
-  GROQ_TPM_SAFETY_MARGIN: '1000'
+  OPENROUTER_BASE_URL: https://openrouter.ai/api/v1
+  OPENROUTER_WIRE_API: responses
+  OPENROUTER_PRIMARY_MODEL: openai/gpt-oss-120b:free
+  OPENROUTER_FALLBACK_MODEL: openai/gpt-oss-20b:free
+  OPENROUTER_RATE_LIMIT_RETRIES: '3'
+  OPENROUTER_DEFAULT_RETRY_SECONDS: '30'
+  OPENROUTER_MAX_OUTPUT_TOKENS: '1200'
+  OPENROUTER_MAX_INPUT_TOKENS: '6000'
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
@@ -49,9 +47,7 @@ jobs:
           test -f docs/agent-next-task.md
           test -f agent-state.md
           test -x scripts/autonomous-agent.sh
-          test -f scripts/codex-groq-capture-proxy.py
-          test -f scripts/test_codex_groq_proxy.py
-          test -n "${{ secrets.GROQ_API_KEY }}"
+          test -n "${{ secrets.OPENROUTER_API_KEY }}"
           test -z "$(git status --porcelain)"
       - name: Java
         uses: actions/setup-java@v5
@@ -76,48 +72,36 @@ jobs:
           npm install --prefix /tmp/codex-cli --no-save @openai/codex
           echo "/tmp/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
           /tmp/codex-cli/node_modules/.bin/codex --version
-      - name: Static and proxy regression gate
-        run: |
-          set -euo pipefail
-          python3 -m py_compile scripts/codex-groq-capture-proxy.py scripts/test_codex_groq_proxy.py
-          python3 scripts/test_codex_groq_proxy.py
-          git diff --check
-          find scripts -type d -name __pycache__ -prune -exec rm -rf {} +
-          find . -type f -name '*.pyc' -delete
-          test -z "$(git status --porcelain)"
-      - name: Discover and probe Groq Responses models
+      - name: OpenRouter preflight
         id: provider
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          body="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "Authorization: Bearer $GROQ_API_KEY" -H 'Content-Type: application/json' "$GROQ_BASE_URL/models")" || exit 40
+          body="$(curl -sS --max-time 20 -w '\n%{http_code}' -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'Content-Type: application/json' "$OPENROUTER_BASE_URL/models")" || exit 40
           http_code="$(printf '%s\n' "$body" | tail -n1)"
           response="$(printf '%s\n' "$body" | sed '$d')"
           case "$http_code" in
             200) ;;
-            401|403) echo "GROQ_API_AUTH_FAILED_HTTP=$http_code"; exit 41 ;;
-            429) echo 'GROQ_API_RATE_LIMITED=1'; exit 75 ;;
-            *) echo "GROQ_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
+            401|403) echo "OPENROUTER_API_AUTH_FAILED_HTTP=$http_code"; exit 41 ;;
+            429) echo 'OPENROUTER_RATE_LIMITED=1'; exit 75 ;;
+            *) echo "OPENROUTER_PREFLIGHT_HTTP=$http_code"; printf '%s\n' "$response" | head -c 1000; exit 42 ;;
           esac
-          MODEL_LIST="$response" python3 <<'PY' > /tmp/groq-candidates.txt
+          MODEL_LIST="$response" python3 <<'PY' > /tmp/openrouter-candidates.txt
           import json, os
           data=json.loads(os.environ["MODEL_LIST"])
           models=data.get("data",[])
-          blocked=("whisper","tts","guard","safeguard")
+          preferred=["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free", "qwen/qwen3-coder:free", "deepseek/deepseek-chat-v3.1:free"]
           ids={m.get("id",""):m for m in models}
-          preferred=["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
           for mid in preferred:
               if mid in ids: print(mid)
-          rows=[]
           for m in models:
               mid=m.get("id","")
-              if not mid or mid in preferred or any(x in mid.lower() for x in blocked): continue
-              ctx=m.get("context_window",0) or 0
-              rows.append((0 if mid.startswith(("openai/gpt-oss", "qwen/", "moonshotai/", "meta-llama/", "llama-")) else 1,-ctx,mid))
-          for _,__,mid in sorted(rows): print(mid)
+              if not mid or mid in preferred or not mid.endswith(":free"): continue
+              ctx=m.get("context_length",0) or 0
+              if ctx >= 8000: print(mid)
           PY
-          cat /tmp/groq-candidates.txt
+          cat /tmp/openrouter-candidates.txt
           selected=''
           while IFS= read -r model; do
             [ -n "$model" ] || continue
@@ -126,73 +110,33 @@ jobs:
           print(json.dumps({"model":os.environ["MODEL"],"input":"Reply with exactly OK","max_output_tokens":16}))
           PY
             )"
-            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $GROQ_API_KEY" -H 'Content-Type: application/json' -d "$payload" "$GROQ_BASE_URL/responses")" || true
+            probe="$(curl -sS --max-time 30 -w '\n%{http_code}' -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'Content-Type: application/json' -H 'HTTP-Referer: https://github.com/Tarek76578/cardiag-dz' -H 'X-Title: CarDiag Autonomous Agent' -d "$payload" "$OPENROUTER_BASE_URL/responses")" || true
             code="$(printf '%s\n' "$probe" | tail -n1)"
-            echo "GROQ_RESPONSES_PROBE_HTTP=$code MODEL=$model"
+            echo "OPENROUTER_RESPONSES_PROBE_HTTP=$code MODEL=$model"
             if [ "$code" = 200 ]; then selected="$model"; break; fi
-          done < /tmp/groq-candidates.txt
+          done < /tmp/openrouter-candidates.txt
           test -n "$selected" || exit 43
-          {
-            echo 'provider=groq'; echo "model=$selected"; echo "fallback_model=$GROQ_FALLBACK_MODEL"; echo "base_url=$GROQ_BASE_URL"; echo 'env_key=GROQ_API_KEY'; echo 'wire_api=responses'
-          } >> "$GITHUB_OUTPUT"
-      - name: Run Codex with Groq compatibility adapter
+          echo "model=$selected" >> "$GITHUB_OUTPUT"
+      - name: Run Codex with OpenRouter
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
-          GROQ_FALLBACK_MODEL: ${{ env.GROQ_FALLBACK_MODEL }}
-          GROQ_RATE_LIMIT_RETRIES: ${{ env.GROQ_RATE_LIMIT_RETRIES }}
-          GROQ_DEFAULT_RETRY_SECONDS: ${{ env.GROQ_DEFAULT_RETRY_SECONDS }}
-          GROQ_MAX_OUTPUT_TOKENS: ${{ env.GROQ_MAX_OUTPUT_TOKENS }}
-          GROQ_MAX_INPUT_TOKENS: ${{ env.GROQ_MAX_INPUT_TOKENS }}
-          GROQ_TPM_LIMIT: ${{ env.GROQ_TPM_LIMIT }}
-          GROQ_TPM_SAFETY_MARGIN: ${{ env.GROQ_TPM_SAFETY_MARGIN }}
-          CODEX_PROVIDER: ${{ steps.provider.outputs.provider }}
-          AI_PROVIDER: ${{ steps.provider.outputs.provider }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_PRIMARY_MODEL: ${{ steps.provider.outputs.model }}
+          OPENROUTER_FALLBACK_MODEL: ${{ env.OPENROUTER_FALLBACK_MODEL }}
+          OPENROUTER_RATE_LIMIT_RETRIES: ${{ env.OPENROUTER_RATE_LIMIT_RETRIES }}
+          OPENROUTER_DEFAULT_RETRY_SECONDS: ${{ env.OPENROUTER_DEFAULT_RETRY_SECONDS }}
+          OPENROUTER_MAX_OUTPUT_TOKENS: ${{ env.OPENROUTER_MAX_OUTPUT_TOKENS }}
+          OPENROUTER_MAX_INPUT_TOKENS: ${{ env.OPENROUTER_MAX_INPUT_TOKENS }}
+          CODEX_PROVIDER: openrouter
+          AI_PROVIDER: openrouter
           AI_MODEL: ${{ steps.provider.outputs.model }}
-          CODEX_BASE_URL: http://127.0.0.1:8787/openai/v1
-          CODEX_ENV_KEY: GROQ_API_KEY
+          CODEX_BASE_URL: https://openrouter.ai/api/v1
+          CODEX_ENV_KEY: OPENROUTER_API_KEY
           CODEX_WIRE_API: responses
         run: |
           set -euo pipefail
-          cleanup() { if [ -n "${PROXY_PID:-}" ]; then kill "$PROXY_PID" 2>/dev/null || true; wait "$PROXY_PID" 2>/dev/null || true; fi; }
-          trap cleanup EXIT INT TERM
-          rm -f /tmp/codex-groq-request.json /tmp/codex-groq-adapted-request.json /tmp/codex-groq-response.json /tmp/codex-groq-proxy.log /tmp/codex-agent.log /tmp/codex-groq-health.json /tmp/codex-groq-proxy.pid
-          cp scripts/codex-groq-capture-proxy.py /tmp/codex-groq-capture-proxy.py
-          chmod +x /tmp/codex-groq-capture-proxy.py
-          python3 -m py_compile /tmp/codex-groq-capture-proxy.py
-          nohup env GROQ_PRIMARY_MODEL="$GROQ_PRIMARY_MODEL" GROQ_FALLBACK_MODEL="$GROQ_FALLBACK_MODEL" GROQ_RATE_LIMIT_RETRIES="$GROQ_RATE_LIMIT_RETRIES" GROQ_DEFAULT_RETRY_SECONDS="$GROQ_DEFAULT_RETRY_SECONDS" GROQ_MAX_OUTPUT_TOKENS="$GROQ_MAX_OUTPUT_TOKENS" GROQ_MAX_INPUT_TOKENS="$GROQ_MAX_INPUT_TOKENS" GROQ_TPM_LIMIT="$GROQ_TPM_LIMIT" GROQ_TPM_SAFETY_MARGIN="$GROQ_TPM_SAFETY_MARGIN" python3 /tmp/codex-groq-capture-proxy.py > /tmp/codex-groq-proxy.log 2>&1 &
-          PROXY_PID=$!
-          echo "$PROXY_PID" > /tmp/codex-groq-proxy.pid
-          for i in $(seq 1 30); do grep -q 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log && break; sleep 1; done
-          grep 'CAPTURE_PROXY_LISTENING=' /tmp/codex-groq-proxy.log
-          kill -0 "$PROXY_PID"
-          curl -fsS --max-time 5 http://127.0.0.1:8787/health >/tmp/codex-groq-health.json
-          grep -q '"status":"ok"' /tmp/codex-groq-health.json
-          chmod +x scripts/autonomous-agent.sh
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          set +e
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
-          agent_status=${PIPESTATUS[0]}
-          set -e
-          cat /tmp/codex-groq-proxy.log || true
-          if [ "$agent_status" -eq 0 ]; then exit 0; fi
-          if grep -qiE '429 Too Many Requests|rate.?limit|Rate limit exceeded|RESOURCE_EXHAUSTED' /tmp/codex-agent.log; then exit 75; fi
-          exit "$agent_status"
-      - name: Upload Groq compatibility diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-groq-compatibility-debug
-          path: |
-            /tmp/codex-groq-request.json
-            /tmp/codex-groq-adapted-request.json
-            /tmp/codex-groq-response.json
-            /tmp/codex-groq-proxy.log
-            /tmp/codex-agent.log
-            /tmp/codex-groq-health.json
-          if-no-files-found: ignore
-          retention-days: 3
       - name: Final validation
         if: success()
         working-directory: android
