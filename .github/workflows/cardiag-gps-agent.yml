@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      brain_response:
+        description: 'Optional validated Brain Protocol v1 response. Leave empty to create a new request.'
+        required: false
+        default: ''
+        type: string
   push:
     branches:
       - feat/multi-provider-ai-gateway
@@ -62,10 +67,17 @@ jobs:
           bash -n scripts/brain-protocol.sh
 
       - name: Initialize Brain Protocol v1
+        env:
+          BRAIN_RESPONSE_INPUT: ${{ inputs.brain_response }}
         run: |
           set -euo pipefail
-          rm -f .agent/brain/response.md
-          bash scripts/brain-protocol.sh request "Review the current milestone and provide the safest next implementation decision if human/ChatGPT reasoning is required."
+          if [ -n "$BRAIN_RESPONSE_INPUT" ]; then
+            printf '%s\n' "$BRAIN_RESPONSE_INPUT" > .agent/brain/response.md
+            bash scripts/brain-protocol.sh consume
+          else
+            rm -f .agent/brain/response.md
+            bash scripts/brain-protocol.sh request "Review the current milestone and provide the safest next implementation decision if human/ChatGPT reasoning is required."
+          fi
           bash scripts/brain-protocol.sh checkpoint "pre-agent"
           cat .agent/brain/status
           test -s .agent/brain/request.md
@@ -123,6 +135,7 @@ jobs:
           OPEN_ROUTER_API_KEY: ${{ inputs.brain_only && '' || secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ inputs.brain_only && '' || secrets.GROQ_API_KEY }}
           DEEPSEEK_API_KEY: ${{ inputs.brain_only && '' || secrets.DEEPSEEK_API_KEY }}
+          BRAIN_RESPONSE: ${{ inputs.brain_response }}
           CARDIAG_GATEWAY_KEY: local-gateway-key
           CODEX_PROVIDER: cardiag_gateway
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
@@ -142,6 +155,16 @@ jobs:
             echo 'AI_AGENT_STATUS=WAITING_FOR_BRAIN'
             echo 'status=WAITING_FOR_BRAIN' >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [ "$rc" -eq 43 ]; then
+            echo 'AI_AGENT_STATUS=WAITING_FOR_EXECUTOR'
+            echo 'status=WAITING_FOR_EXECUTOR' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$rc" -eq 44 ]; then
+            echo 'AI_AGENT_STATUS=INVALID_BRAIN_RESPONSE' >&2
+            echo 'status=INVALID_BRAIN_RESPONSE' >> "$GITHUB_OUTPUT"
+            exit 1
           fi
           echo 'status=EXECUTED' >> "$GITHUB_OUTPUT"
           exit "$rc"
@@ -170,12 +193,12 @@ jobs:
           retention-days: 7
 
       - name: Validate Android
-        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' }}
+        if: ${{ success() && steps.agent.outputs.status == 'EXECUTED' }}
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
 
       - name: Upload Debug APK
-        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' }}
+        if: ${{ success() && steps.agent.outputs.status == 'EXECUTED' }}
         uses: actions/upload-artifact@v4
         with:
           name: CarDiag-debug-APK-${{ github.run_number }}
@@ -184,7 +207,7 @@ jobs:
           retention-days: 30
 
       - name: Commit verified GPS changes
-        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' && github.event_name == 'push' }}
+        if: ${{ success() && steps.agent.outputs.status == 'EXECUTED' && github.event_name == 'push' }}
         run: |
           set -euo pipefail
           git diff --check
