@@ -23,6 +23,8 @@ Implement only that task. Do not implement another CarDiag feature or unrelated 
 The repository Android project is under android/. The persistent agent state file is ROOT/agent-state.md (not docs/agent-state.md).
 IMPORTANT: this is a continuation cycle. Existing uncommitted code changes are intentional work from previous AI cycles. Inspect and preserve them; never reset, discard, clean, or overwrite previous work merely to start fresh.
 Read ROOT/agent-state.md, docs/agent-next-task.md, and the current working tree first. Continue from the highest-value unfinished point.
+The previous state may contain stale or overly broad claims. Treat the task specification as authoritative and verify the implementation yourself. In particular, GPS_MAP_MILESTONE=COMPLETE is never evidence by itself.
+A map canvas, coordinate projection, default-location dot, or location snapshot UI is NOT sufficient. The milestone requires the Android app to request runtime location permission and obtain a real device location through Android location APIs, then display that actual latitude/longitude on the interactive map. Do not mark the milestone complete unless this real-location path is implemented and verified in code/tests.
 Make the smallest complete production-quality change, add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
 If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in ROOT/agent-state.md. Never claim unfinished work is complete.
 Before ending the cycle, update ROOT/agent-state.md with a concise handoff: completed work, files changed, validation performed, remaining work, and the next concrete action.
@@ -102,12 +104,13 @@ validate_completion() {
   return 0
 }
 
-for cycle in $(seq 1 "$MAX_CYCLES"); do
-  if grep -Fxq 'GPS_MAP_MILESTONE=COMPLETE' agent-state.md; then
-    validate_completion && { echo "AI_AGENT_SUCCESS=checkpoint-already-complete"; exit 0; }
-    sed -i '/^GPS_MAP_MILESTONE=COMPLETE$/d' agent-state.md
-  fi
+# Never trust a persisted completion marker as proof that the real-GPS milestone
+# is still complete. Every manual/dispatch run must give Codex an opportunity to
+# inspect and verify the implementation. Codex is the only component allowed to
+# restore the marker after verifying the real-device location path.
+sed -i '/^GPS_MAP_MILESTONE=COMPLETE$/d' agent-state.md
 
+for cycle in $(seq 1 "$MAX_CYCLES"); do
   MODEL="$(next_candidate)" || {
     echo "AI_AGENT_NO_FREE_MODEL=1"
     save_checkpoint "no-untried-free-model"
