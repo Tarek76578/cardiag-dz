@@ -1,7 +1,13 @@
 name: CarDiag GPS Agent
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      brain_only:
+        description: 'Pause safely for ChatGPT/Brain response instead of using provider APIs'
+        required: false
+        default: true
+        type: boolean
   push:
     branches:
       - feat/multi-provider-ai-gateway
@@ -54,7 +60,6 @@ jobs:
           python3 scripts/test_ai_gateway.py
           bash -n scripts/autonomous-agent.sh
           bash -n scripts/brain-protocol.sh
-          test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}"
 
       - name: Initialize Brain Protocol v1
         run: |
@@ -92,12 +97,17 @@ jobs:
           codex --version
 
       - name: Start gateway for agent rotation
+        if: ${{ !inputs.brain_only && github.event_name != 'workflow_dispatch' || (inputs.brain_only == false) }}
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
+          if [ -z "${OPEN_ROUTER_API_KEY}${GROQ_API_KEY}${DEEPSEEK_API_KEY}" ]; then
+            echo 'No provider API key configured; Brain Protocol will remain in WAITING_FOR_BRAIN mode.'
+            exit 0
+          fi
           python3 scripts/ai-gateway.py >/tmp/cardiag-ai-gateway.log 2>&1 &
           echo $! >/tmp/gateway.pid
           for i in $(seq 1 30); do
@@ -108,10 +118,11 @@ jobs:
           cat /tmp/gateway-health.json
 
       - name: Run GPS-only Codex agent with bounded continuation cycles
+        id: agent
         env:
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ inputs.brain_only && '' || secrets.OPEN_ROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ inputs.brain_only && '' || secrets.GROQ_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ inputs.brain_only && '' || secrets.DEEPSEEK_API_KEY }}
           CARDIAG_GATEWAY_KEY: local-gateway-key
           CODEX_PROVIDER: cardiag_gateway
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
@@ -123,7 +134,17 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/brain-protocol.sh checkpoint "agent-start"
+          set +e
           ./scripts/autonomous-agent.sh
+          rc=$?
+          set -e
+          if [ "$rc" -eq 42 ]; then
+            echo 'AI_AGENT_STATUS=WAITING_FOR_BRAIN'
+            echo 'status=WAITING_FOR_BRAIN' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'status=EXECUTED' >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
       - name: Finalize Brain Protocol checkpoint
         if: always()
@@ -149,12 +170,12 @@ jobs:
           retention-days: 7
 
       - name: Validate Android
-        if: success()
+        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' }}
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
 
       - name: Upload Debug APK
-        if: success()
+        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' }}
         uses: actions/upload-artifact@v4
         with:
           name: CarDiag-debug-APK-${{ github.run_number }}
@@ -163,7 +184,7 @@ jobs:
           retention-days: 30
 
       - name: Commit verified GPS changes
-        if: success() && github.event_name == 'push'
+        if: ${{ success() && steps.agent.outputs.status != 'WAITING_FOR_BRAIN' && github.event_name == 'push' }}
         run: |
           set -euo pipefail
           git diff --check
