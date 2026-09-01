@@ -6,7 +6,7 @@ PROVIDER="cardiag_gateway"
 BASE_URL="${CODEX_BASE_URL:-http://127.0.0.1:8787/v1}"
 ENV_KEY="${CODEX_ENV_KEY:-CARDIAG_GATEWAY_KEY}"
 WIRE_API="${CODEX_WIRE_API:-responses}"
-MAX_CYCLES="${AI_AGENT_MAX_CYCLES:-24}"
+MAX_CYCLES="${AI_AGENT_MAX_CYCLES:-6}"
 export CARDIAG_GATEWAY_KEY="${CARDIAG_GATEWAY_KEY:-local-gateway-key}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"; mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
 test "$WIRE_API" = responses || { echo "Responses API is required" >&2; exit 15; }
@@ -25,10 +25,11 @@ IMPORTANT: this is a continuation cycle. Existing uncommitted code changes are i
 Read ROOT/agent-state.md, docs/agent-next-task.md, and the current working tree first. Continue from the highest-value unfinished point.
 The previous state may contain stale or overly broad claims. Treat the task specification as authoritative and verify the implementation yourself. In particular, GPS_MAP_MILESTONE=COMPLETE is never evidence by itself.
 A map canvas, coordinate projection, default-location dot, or location snapshot UI is NOT sufficient. The milestone requires the Android app to request runtime location permission and obtain a real device location through Android location APIs, then display that actual latitude/longitude on the interactive map. Do not mark the milestone complete unless this real-location path is implemented and verified in code/tests.
-Make the smallest complete production-quality change, add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
+Make the smallest complete production-quality change. Prefer focused edits over broad exploration. Do not re-read unrelated project areas. Use the existing location/map infrastructure where possible.
+Add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
 If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in ROOT/agent-state.md. Never claim unfinished work is complete.
 Before ending the cycle, update ROOT/agent-state.md with a concise handoff: completed work, files changed, validation performed, remaining work, and the next concrete action.
-Only when the GPS + interactive map milestone is genuinely implemented and its required validation has passed, add this exact line to ROOT/agent-state.md:
+Only when the GPS + interactive map milestone is genuinely implemented, tested, and validated, add this exact line to ROOT/agent-state.md:
 GPS_MAP_MILESTONE=COMPLETE
 If it is not genuinely complete, do NOT add that line.
 Do not commit or push; the workflow handles verified commits. Stop after this single task.
@@ -105,9 +106,8 @@ validate_completion() {
 }
 
 # Never trust a persisted completion marker as proof that the real-GPS milestone
-# is still complete. Every manual/dispatch run must give Codex an opportunity to
-# inspect and verify the implementation. Codex is the only component allowed to
-# restore the marker after verifying the real-device location path.
+# is still complete. Every run must give Codex an opportunity to inspect and verify
+# the implementation. Codex is the only component allowed to restore the marker.
 sed -i '/^GPS_MAP_MILESTONE=COMPLETE$/d' agent-state.md
 
 for cycle in $(seq 1 "$MAX_CYCLES"); do
