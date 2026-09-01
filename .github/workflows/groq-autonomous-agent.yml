@@ -1,10 +1,13 @@
-name: CarDiag Autonomous Agent (Free AI Gateway)
+name: CarDiag Autonomous Agent (Continuous)
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
 
 permissions:
   contents: write
+  issues: read
 
 concurrency:
   group: cardiag-autonomous-agent
@@ -25,12 +28,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
-      - name: Repair and normalize git state
+      - name: Preserve continuation state
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git fetch origin main && git reset --hard origin/main && git clean -fdx
+          git fetch origin main
+          git checkout -B main origin/main
+          git clean -fdx -e .codex/
       - name: Baseline
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
@@ -61,10 +66,8 @@ jobs:
         run: |
           set -euo pipefail
           npm install --global --no-audit --no-fund @openai/codex@0.151.0
-          command -v codex
           codex --version
-          codex --help >/dev/null
-      - name: Run Codex through free-provider gateway
+      - name: Run continuous agent loop
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -74,6 +77,7 @@ jobs:
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
           CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           export CODEX_HOME="$HOME/.codex-cardiag"
@@ -98,6 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          if [ -z "$(git status --porcelain)" ]; then echo 'No autonomous changes to commit'; exit 32; fi
+          if [ -z "$(git status --porcelain)" ]; then echo 'No autonomous changes to commit'; exit 0; fi
           git add -A && git diff --cached --check
-          git commit -m 'feat: advance autonomous CarDiag milestone' && git push origin HEAD:main
+          git commit -m 'feat: advance autonomous CarDiag milestone'
+          git push origin HEAD:main
