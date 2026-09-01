@@ -97,6 +97,8 @@ EOF'''
           PY
           bash -n scripts/autonomous-agent.sh
       - name: Run continuous agent loop
+        id: agent
+        continue-on-error: true
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -112,6 +114,24 @@ EOF'''
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
           ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
+      - name: Persist checkpoint
+        if: always()
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'No checkpoint changes to persist'
+            exit 0
+          fi
+          git add -A
+          git diff --cached --check
+          git commit -m 'chore: persist autonomous agent checkpoint'
+          git push origin HEAD:main
+      - name: Stop after failed agent cycle
+        if: steps.agent.outcome != 'success'
+        run: |
+          echo 'Agent cycle failed; checkpoint was persisted. The next scheduled run will continue from the committed state.'
+          exit 1
       - name: Final validation
         if: success()
         working-directory: android
