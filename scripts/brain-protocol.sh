@@ -29,7 +29,23 @@ consume_response() {
   grep -q '^SCOPE:' "$response" || return 2
   grep -q '^VALIDATION:' "$response" || return 2
   grep -q '^STOP_IF:' "$response" || return 2
+  printf 'BRAIN_RESPONSE_VALID\n' > "$BRAIN_DIR/status"
   return 0
+}
+
+install_response() {
+  local source="${2:-}"
+  if [ -n "$source" ] && [ -f "$source" ]; then
+    cp "$source" "$BRAIN_DIR/response.md"
+  elif [ -n "${BRAIN_RESPONSE_FILE:-}" ] && [ -f "$BRAIN_RESPONSE_FILE" ]; then
+    cp "$BRAIN_RESPONSE_FILE" "$BRAIN_DIR/response.md"
+  elif [ -n "${BRAIN_RESPONSE:-}" ]; then
+    printf '%s\n' "$BRAIN_RESPONSE" > "$BRAIN_DIR/response.md"
+  else
+    echo "No Brain response supplied" >&2
+    return 3
+  fi
+  consume_response
 }
 
 checkpoint() {
@@ -46,12 +62,17 @@ checkpoint() {
     git -C "$ROOT" status --short
     printf '\nDIFF STAT\n=========\n'
     git -C "$ROOT" diff --stat
+    if [ -f "$BRAIN_DIR/response.md" ]; then
+      printf '\nBRAIN RESPONSE\n==============\n'
+      sed -n '1,220p' "$BRAIN_DIR/response.md"
+    fi
   } > "$BRAIN_DIR/checkpoint.md"
 }
 
 case "${1:-request}" in
   request) write_request "${2:-Provide the next safe implementation decision.}" ;;
   consume) consume_response ;;
+  install-response) install_response "${1:-}" "${2:-}" ;;
   checkpoint) checkpoint "${2:-checkpoint}" ;;
-  *) echo "usage: $0 {request|consume|checkpoint} [text]" >&2; exit 2 ;;
+  *) echo "usage: $0 {request|consume|install-response|checkpoint} [text|file]" >&2; exit 2 ;;
 esac
