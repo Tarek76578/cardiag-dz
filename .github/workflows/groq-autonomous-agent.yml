@@ -67,6 +67,35 @@ jobs:
           set -euo pipefail
           npm install --global --no-audit --no-fund @openai/codex@0.151.0
           codex --version
+      - name: Bind Codex to current repository task
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/autonomous-agent.sh')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('cat >"$PROMPT" <<\'EOF\'')
+          end = s.index('\nEOF\n\nnext_candidate', start)
+          block = '''cat >"$PROMPT" <<EOF
+You are the CarDiag continuous implementation agent.
+
+CURRENT TASK SPECIFICATION:
+$(cat docs/agent-next-task.md)
+
+Persistent state: ROOT/agent-state.md. Read it first, then inspect the current working tree.
+This is a continuation task. Preserve intentional existing changes; never reset, discard, clean, or overwrite prior work merely to start fresh.
+Implement ONLY the current task specification. Do not silently expand scope to unrelated CarDiag features.
+Treat the task specification as authoritative and verify claims in code/tests yourself.
+Prefer the smallest complete production-quality change and focused tests. Avoid broad repository exploration unrelated to the current task.
+Run relevant tests/lint/build, fix real failures, and review the diff.
+Update ROOT/agent-state.md with factual evidence: completed work, files changed, validation performed, remaining work, and the next concrete action.
+If the current task is complete, update docs/agent-next-task.md to the next concrete unfinished milestone and record the completed milestone in agent-state.md. Never claim unfinished work is complete.
+Do not commit or push; the workflow handles verified commits.
+Stop after the current task is genuinely complete or after recording a precise blocker.
+EOF'''
+          p.write_text(s[:start] + block + s[end + 4:], encoding='utf-8')
+          PY
+          bash -n scripts/autonomous-agent.sh
       - name: Run continuous agent loop
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
