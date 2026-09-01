@@ -1,4 +1,4 @@
-name: CarDiag Autonomous Agent (Continuous)
+name: CarDiag Autonomous Agent (Persistent)
 
 on:
   workflow_dispatch:
@@ -28,6 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: {fetch-depth: 0}
+
       - name: Preserve continuation state
         run: |
           set -euo pipefail
@@ -36,6 +37,7 @@ jobs:
           git fetch origin main
           git checkout -B main origin/main
           git clean -fdx -e .codex/
+
       - name: Baseline
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
@@ -46,57 +48,60 @@ jobs:
           test "$GITHUB_REF_NAME" = main
           test -f AGENTS.md && test -x android/gradlew && test -f android/app/build.gradle.kts
           test -f docs/agent-next-task.md && test -f agent-state.md
-          test -x scripts/autonomous-agent.sh && test -f scripts/ai-gateway.py
-          test -n "${OPEN_ROUTER_API_KEY}${GROQ_API_KEY}${DEEPSEEK_API_KEY}"
-          test -z "$(git status --porcelain)"
+          test -x scripts/autonomous-agent.sh && test -f scripts/persistent-orchestrator.sh
           python3 -m py_compile scripts/ai-gateway.py
           bash -n scripts/autonomous-agent.sh
+          bash -n scripts/persistent-orchestrator.sh
+          git diff --check
+
       - name: Java
         uses: actions/setup-java@v5
         with: {distribution: temurin, java-version: '17', cache: gradle}
+
       - name: Android
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
           accept-android-sdk-licenses: true
+
       - name: Node
         uses: actions/setup-node@v5
         with: {node-version: '22', package-manager-cache: false}
+
       - name: Install Codex CLI
         run: |
           set -euo pipefail
           npm install --global --no-audit --no-fund @openai/codex@0.151.0
           codex --version
-      - name: Bind Codex to current repository task
+
+      - name: Bind current task to Codex
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/autonomous-agent.sh')
           s = p.read_text(encoding='utf-8')
+          marker = 'PROMPT="${RUNNER_TEMP:-/tmp}/cardiag-agent-prompt"'
           start = s.index('cat >"$PROMPT" <<\'EOF\'')
           end = s.index('\nEOF\n\nnext_candidate', start)
-          block = '''cat >"$PROMPT" <<EOF
-You are the CarDiag continuous implementation agent.
-
-CURRENT TASK SPECIFICATION:
-$(cat docs/agent-next-task.md)
-
-Persistent state: ROOT/agent-state.md. Read it first, then inspect the current working tree.
-This is a continuation task. Preserve intentional existing changes; never reset, discard, clean, or overwrite prior work merely to start fresh.
-Implement ONLY the current task specification. Do not silently expand scope to unrelated CarDiag features.
-Treat the task specification as authoritative and verify claims in code/tests yourself.
-Prefer the smallest complete production-quality change and focused tests. Avoid broad repository exploration unrelated to the current task.
-Run relevant tests/lint/build, fix real failures, and review the diff.
-Update ROOT/agent-state.md with factual evidence: completed work, files changed, validation performed, remaining work, and the next concrete action.
-If the current task is complete, update docs/agent-next-task.md to the next concrete unfinished milestone and record the completed milestone in agent-state.md. Never claim unfinished work is complete.
-Do not commit or push; the workflow handles verified commits.
-Stop after the current task is genuinely complete or after recording a precise blocker.
-EOF'''
+          task = Path('docs/agent-next-task.md').read_text(encoding='utf-8')
+          block = '''cat >"$PROMPT" <<EOF\nYou are the CarDiag implementation worker.\n\nCURRENT TASK SPECIFICATION:\n${TASK_SPEC}\n\nPERSISTENT MEMORY:\n- ROOT/agent-state.md is the authoritative handoff/checkpoint file.\n- docs/agent-next-task.md is the authoritative current task.\n- Git history and the current working tree are persistent project state.\n\nOPERATING CONTRACT:\n1. Read agent-state.md, docs/agent-next-task.md, AGENTS.md, and the current working tree first.\n2. Preserve intentional existing changes. Never reset, discard, clean, or overwrite prior work merely to start fresh.\n3. Implement ONLY the current task. Do not expand into unrelated features or refactoring.\n4. Verify claims in code/tests yourself; state files are handoffs, not proof.\n5. Prefer the smallest complete production-quality change and focused tests.\n6. Run relevant tests, lint, and build validation. Fix real failures; never weaken validation.\n7. Update agent-state.md with factual evidence, changed files, validation, remaining work, and next action.\n8. If the task is genuinely complete, advance docs/agent-next-task.md to the next concrete unfinished milestone. Never claim unfinished work is complete.\n9. Do not commit or push; the outer workflow owns checkpoints and verified commits.\n10. Stop after the current task is complete or after recording a precise blocker.\n\nRESOURCE DISCIPLINE:\nDo not repeatedly rediscover the repository. Read only files relevant to the current task and use the existing architecture.\nEOF'''
           p.write_text(s[:start] + block + s[end + 4:], encoding='utf-8')
           PY
+          # Keep the authoritative task in an environment-safe temporary file.
+          printf '%s\n' "$(cat docs/agent-next-task.md)" > "$RUNNER_TEMP/cardiag-task.txt"
+          # Replace the runtime placeholder with the exact task without changing the tracked script.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/autonomous-agent.sh')
+          s = p.read_text(encoding='utf-8')
+          task = Path('docs/agent-next-task.md').read_text(encoding='utf-8')
+          s = s.replace('${TASK_SPEC}', task.replace('\\', '\\\\').replace('$', '\\$'))
+          p.write_text(s, encoding='utf-8')
+          PY
           bash -n scripts/autonomous-agent.sh
-      - name: Run continuous agent loop
+
+      - name: Run persistent orchestrator
         id: agent
         continue-on-error: true
         env:
@@ -113,7 +118,8 @@ EOF'''
           set -euo pipefail
           export CODEX_HOME="$HOME/.codex-cardiag"
           mkdir -p "$CODEX_HOME"
-          ./scripts/autonomous-agent.sh 2>&1 | tee /tmp/codex-agent.log
+          bash scripts/persistent-orchestrator.sh 2>&1 | tee "$RUNNER_TEMP/cardiag-orchestrator.log"
+
       - name: Persist checkpoint
         if: always()
         run: |
@@ -127,31 +133,42 @@ EOF'''
           git diff --cached --check
           git commit -m 'chore: persist autonomous agent checkpoint'
           git push origin HEAD:main
-      - name: Stop after failed agent cycle
+
+      - name: Stop after failed AI execution
         if: steps.agent.outcome != 'success'
         run: |
-          echo 'Agent cycle failed; checkpoint was persisted. The next scheduled run will continue from the committed state.'
+          echo 'AI execution failed; checkpoint was persisted. A later run can resume from the committed state.'
           exit 1
+
       - name: Final validation
         if: success()
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease bundleRelease --stacktrace
-      - name: Upload APK
+
+      - name: Upload APK and orchestrator report
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: cardiag-apk-${{ github.run_number }}
+          name: cardiag-build-${{ github.run_number }}
           path: |
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+            ${{ runner.temp }}/cardiag-orchestrator/*
+            ${{ runner.temp }}/cardiag-codex-cycle-*.log
           if-no-files-found: error
           retention-days: 14
+
       - name: Commit verified autonomous changes
         if: success()
         run: |
           set -euo pipefail
           git diff --check
-          if [ -z "$(git status --porcelain)" ]; then echo 'No autonomous changes to commit'; exit 0; fi
-          git add -A && git diff --cached --check
+          if [ -z "$(git status --porcelain)" ]; then
+            echo 'No autonomous changes to commit'
+            exit 0
+          fi
+          git add -A
+          git diff --cached --check
           git commit -m 'feat: advance autonomous CarDiag milestone'
           git push origin HEAD:main
