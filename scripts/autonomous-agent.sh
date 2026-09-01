@@ -11,7 +11,17 @@ export CARDIAG_GATEWAY_KEY="${CARDIAG_GATEWAY_KEY:-local-gateway-key}"
 export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"; mkdir -p "$CODEX_HOME"; chmod 700 "$CODEX_HOME"
 test "$WIRE_API" = responses || { echo "Responses API is required" >&2; exit 15; }
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed" >&2; exit 21; }
-test -n "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${DEEPSEEK_API_KEY:-}" || { echo "No AI provider API key is configured" >&2; exit 13; }
+
+# Brain Protocol v1: if no provider is configured, create a durable request and
+# stop safely instead of burning cycles or pretending an AI decision was made.
+if [ -z "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
+  bash scripts/brain-protocol.sh request "No AI provider is configured. Review this task as the Brain, then provide a contract-valid response.md with DECISION, SCOPE, VALIDATION and STOP_IF. The executor must remain idle until that response is supplied."
+  bash scripts/brain-protocol.sh checkpoint "waiting-for-brain-no-provider"
+  echo "AI_AGENT_STATUS=WAITING_FOR_BRAIN"
+  echo "AI_AGENT_REASON=no-ai-provider-configured"
+  exit 42
+fi
+
 ATTEMPTED="${RUNNER_TEMP:-/tmp}/cardiag-agent-models.txt"
 CHECKPOINT="${RUNNER_TEMP:-/tmp}/cardiag-agent-checkpoint"
 mkdir -p "$CHECKPOINT"
@@ -25,7 +35,7 @@ IMPORTANT: this is a continuation cycle. Existing uncommitted code changes are i
 Read ROOT/agent-state.md, docs/agent-next-task.md, and the current working tree first. Continue from the highest-value unfinished point.
 The previous state may contain stale or overly broad claims. Treat the task specification as authoritative and verify the implementation yourself. In particular, GPS_MAP_MILESTONE=COMPLETE is never evidence by itself.
 A map canvas, coordinate projection, default-location dot, or location snapshot UI is NOT sufficient. The milestone requires the Android app to request runtime location permission and obtain a real device location through Android location APIs, then display that actual latitude/longitude on the interactive map. Do not mark the milestone complete unless this real-location path is implemented and verified in code/tests.
-Make the smallest complete production-quality change. Prefer focused edits over broad exploration. Do not re-read unrelated project areas. Use the existing location/map infrastructure where possible.
+Make the smallest complete production-quality change. Prefer focused edits over broad exploration. Use the existing location/map infrastructure where possible.
 Add focused tests where practical, run relevant tests/lint/build, fix real failures, update ROOT/agent-state.md with factual evidence, and review the diff.
 If the milestone cannot be completely finished in this cycle, implement the highest-value safe portion and record precisely what remains in ROOT/agent-state.md. Never claim unfinished work is complete.
 Before ending the cycle, update ROOT/agent-state.md with a concise handoff: completed work, files changed, validation performed, remaining work, and the next concrete action.
@@ -58,9 +68,7 @@ if key:
         for _,mid in sorted(candidates,key=lambda z:(-z[0],z[1])): emit('openrouter',mid)
     except Exception as exc:
         print(f'OPENROUTER_DISCOVERY_ERROR={type(exc).__name__}',file=sys.stderr)
-for provider,key_name,defaults in [
-    ('groq','GROQ_API_KEY','openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile'),
-    ('deepseek','DEEPSEEK_API_KEY','deepseek-chat,deepseek-reasoner')]:
+for provider,key_name,defaults in [('groq','GROQ_API_KEY','openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile'),('deepseek','DEEPSEEK_API_KEY','deepseek-chat,deepseek-reasoner')]:
     if not os.environ.get(key_name): continue
     for model in os.environ.get(provider.upper()+'_FALLBACK_MODELS',defaults).split(','): emit(provider,model.strip())
 PY
