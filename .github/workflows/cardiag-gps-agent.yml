@@ -129,6 +129,15 @@ jobs:
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug --stacktrace
 
+      - name: Upload Debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarDiag-debug-APK-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Commit verified GPS changes
         if: success() && github.event_name == 'push'
         run: |
