@@ -39,10 +39,6 @@ jobs:
           git clean -fdx -e .codex/
 
       - name: Baseline
-        env:
-          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = main
@@ -74,30 +70,44 @@ jobs:
           npm install --global --no-audit --no-fund @openai/codex@0.151.0
           codex --version
 
-      - name: Bind current task to Codex
+      - name: Bind current task to Codex safely
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/autonomous-agent.sh')
           s = p.read_text(encoding='utf-8')
-          marker = 'PROMPT="${RUNNER_TEMP:-/tmp}/cardiag-agent-prompt"'
           start = s.index('cat >"$PROMPT" <<\'EOF\'')
           end = s.index('\nEOF\n\nnext_candidate', start)
-          task = Path('docs/agent-next-task.md').read_text(encoding='utf-8')
-          block = '''cat >"$PROMPT" <<EOF\nYou are the CarDiag implementation worker.\n\nCURRENT TASK SPECIFICATION:\n${TASK_SPEC}\n\nPERSISTENT MEMORY:\n- ROOT/agent-state.md is the authoritative handoff/checkpoint file.\n- docs/agent-next-task.md is the authoritative current task.\n- Git history and the current working tree are persistent project state.\n\nOPERATING CONTRACT:\n1. Read agent-state.md, docs/agent-next-task.md, AGENTS.md, and the current working tree first.\n2. Preserve intentional existing changes. Never reset, discard, clean, or overwrite prior work merely to start fresh.\n3. Implement ONLY the current task. Do not expand into unrelated features or refactoring.\n4. Verify claims in code/tests yourself; state files are handoffs, not proof.\n5. Prefer the smallest complete production-quality change and focused tests.\n6. Run relevant tests, lint, and build validation. Fix real failures; never weaken validation.\n7. Update agent-state.md with factual evidence, changed files, validation, remaining work, and next action.\n8. If the task is genuinely complete, advance docs/agent-next-task.md to the next concrete unfinished milestone. Never claim unfinished work is complete.\n9. Do not commit or push; the outer workflow owns checkpoints and verified commits.\n10. Stop after the current task is complete or after recording a precise blocker.\n\nRESOURCE DISCIPLINE:\nDo not repeatedly rediscover the repository. Read only files relevant to the current task and use the existing architecture.\nEOF'''
+          block = r'''cat >"$PROMPT" <<'EOF'
+You are the CarDiag implementation worker.
+
+CURRENT TASK SPECIFICATION:
+EOF
+cat docs/agent-next-task.md >>"$PROMPT"
+cat >>"$PROMPT" <<'EOF'
+
+PERSISTENT MEMORY:
+- ROOT/agent-state.md is the authoritative handoff/checkpoint file.
+- docs/agent-next-task.md is the authoritative current task.
+- Git history and the current working tree are persistent project state.
+
+OPERATING CONTRACT:
+1. Read agent-state.md, docs/agent-next-task.md, AGENTS.md, and the current working tree first.
+2. Preserve intentional existing changes. Never reset, discard, clean, or overwrite prior work merely to start fresh.
+3. Implement ONLY the current task. Do not expand into unrelated features or refactoring.
+4. Verify claims in code/tests yourself; state files are handoffs, not proof.
+5. Prefer the smallest complete production-quality change and focused tests.
+6. Run relevant tests, lint, and build validation. Fix real failures; never weaken validation.
+7. Update agent-state.md with factual evidence, changed files, validation, remaining work, and next action.
+8. If the task is genuinely complete, advance docs/agent-next-task.md to the next concrete unfinished milestone. Never claim unfinished work is complete.
+9. Do not commit or push; the outer workflow owns checkpoints and verified commits.
+10. Stop after the current task is complete or after recording a precise blocker.
+
+RESOURCE DISCIPLINE:
+Do not repeatedly rediscover the repository. Read only files relevant to the current task and use the existing architecture.
+EOF'''
           p.write_text(s[:start] + block + s[end + 4:], encoding='utf-8')
-          PY
-          # Keep the authoritative task in an environment-safe temporary file.
-          printf '%s\n' "$(cat docs/agent-next-task.md)" > "$RUNNER_TEMP/cardiag-task.txt"
-          # Replace the runtime placeholder with the exact task without changing the tracked script.
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/autonomous-agent.sh')
-          s = p.read_text(encoding='utf-8')
-          task = Path('docs/agent-next-task.md').read_text(encoding='utf-8')
-          s = s.replace('${TASK_SPEC}', task.replace('\\', '\\\\').replace('$', '\\$'))
-          p.write_text(s, encoding='utf-8')
           PY
           bash -n scripts/autonomous-agent.sh
 
