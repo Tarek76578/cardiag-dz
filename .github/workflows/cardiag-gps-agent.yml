@@ -22,7 +22,7 @@ env:
   OPENROUTER_WIRE_API: responses
   OPENROUTER_MODEL: ${{ vars.AI_MODEL || '' }}
   AI_MODEL: ${{ vars.AI_MODEL || '' }}
-  AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+  AI_GATEWAY_MAX_OUTPUT_TOKENS: '8000'
   AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
 
 jobs:
@@ -95,7 +95,7 @@ jobs:
           kill -0 "$(cat /tmp/gateway.pid)"
           cat /tmp/gateway-health.json
 
-      - name: Run GPS-only Codex agent with persistent free-model rotation
+      - name: Run GPS-only Codex agent with bounded continuation cycles
         env:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -105,9 +105,9 @@ jobs:
           CODEX_BASE_URL: http://127.0.0.1:8787/v1
           CODEX_ENV_KEY: CARDIAG_GATEWAY_KEY
           CODEX_WIRE_API: responses
-          AI_GATEWAY_MAX_OUTPUT_TOKENS: '12000'
+          AI_GATEWAY_MAX_OUTPUT_TOKENS: '8000'
           AI_GATEWAY_PROVIDER_ORDER: openrouter,groq,deepseek
-          AI_AGENT_MAX_CYCLES: '24'
+          AI_AGENT_MAX_CYCLES: '6'
         run: |
           set -euo pipefail
           ./scripts/autonomous-agent.sh
