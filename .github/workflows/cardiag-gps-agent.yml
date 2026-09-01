@@ -43,6 +43,8 @@ jobs:
           test -f AGENTS.md
           test -f docs/agent-next-task.md
           test -f agent-state.md
+          test -f docs/brain-protocol-v1.md
+          test -f scripts/brain-protocol.sh
           test -x scripts/autonomous-agent.sh
           test -f scripts/ai-gateway.py
           test -f scripts/test_ai_gateway.py
@@ -51,7 +53,17 @@ jobs:
           python3 -m py_compile scripts/ai-gateway.py
           python3 scripts/test_ai_gateway.py
           bash -n scripts/autonomous-agent.sh
+          bash -n scripts/brain-protocol.sh
           test -n "${{ secrets.OPEN_ROUTER_API_KEY }}${{ secrets.GROQ_API_KEY }}${{ secrets.DEEPSEEK_API_KEY }}"
+
+      - name: Initialize Brain Protocol v1
+        run: |
+          set -euo pipefail
+          rm -f .agent/brain/response.md
+          bash scripts/brain-protocol.sh request "Review the current milestone and provide the safest next implementation decision if human/ChatGPT reasoning is required."
+          bash scripts/brain-protocol.sh checkpoint "pre-agent"
+          cat .agent/brain/status
+          test -s .agent/brain/request.md
 
       - name: Java
         uses: actions/setup-java@v5
@@ -110,17 +122,29 @@ jobs:
           AI_AGENT_MAX_CYCLES: '6'
         run: |
           set -euo pipefail
+          bash scripts/brain-protocol.sh checkpoint "agent-start"
           ./scripts/autonomous-agent.sh
 
-      - name: Upload agent checkpoint on failure
-        if: failure()
+      - name: Finalize Brain Protocol checkpoint
+        if: always()
+        run: |
+          set -euo pipefail
+          reason="workflow-${{ job.status }}"
+          bash scripts/brain-protocol.sh checkpoint "$reason"
+          if [ -f .agent/brain/response.md ]; then
+            bash scripts/brain-protocol.sh consume || echo 'Brain response present but contract validation failed; executor must not trust it.'
+          fi
+
+      - name: Upload agent checkpoint
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cardiag-gps-agent-checkpoint-${{ github.run_id }}
+          name: cardiag-brain-checkpoint-${{ github.run_id }}
           path: |
-            /tmp/cardiag-agent-checkpoint/
+            .agent/brain/
             agent-state.md
             docs/agent-next-task.md
+            /tmp/cardiag-agent-checkpoint/
           if-no-files-found: warn
           retention-days: 7
 
