@@ -12,6 +12,27 @@ export CODEX_HOME="${CODEX_HOME:-$ROOT/.codex}"; mkdir -p "$CODEX_HOME"; chmod 7
 test "$WIRE_API" = responses || { echo "Responses API is required" >&2; exit 15; }
 command -v codex >/dev/null 2>&1 || { echo "Codex CLI is not installed" >&2; exit 21; }
 
+# Brain Protocol v1 response bridge. A validated response can be supplied by
+# ChatGPT/Brain through BRAIN_RESPONSE or BRAIN_RESPONSE_FILE. It is persisted
+# and checkpointed, but is never treated as executable shell code.
+if [ -n "${BRAIN_RESPONSE:-}" ] || [ -n "${BRAIN_RESPONSE_FILE:-}" ]; then
+  if bash scripts/brain-protocol.sh install-response "${BRAIN_RESPONSE_FILE:-}"; then
+    echo "AI_AGENT_STATUS=BRAIN_RESPONSE_ACCEPTED"
+    echo "AI_AGENT_REASON=validated-brain-response"
+    bash scripts/brain-protocol.sh checkpoint "brain-response-accepted"
+    # A Brain response is a decision contract, not an implementation engine.
+    # Without an actual coding model the executor must remain idle rather than
+    # pretending to implement code from prose.
+    if [ -z "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
+      echo "AI_AGENT_STATUS=WAITING_FOR_EXECUTOR"
+      exit 43
+    fi
+  else
+    echo "AI_AGENT_STATUS=INVALID_BRAIN_RESPONSE" >&2
+    exit 44
+  fi
+fi
+
 # Brain Protocol v1: if no provider is configured, create a durable request and
 # stop safely instead of burning cycles or pretending an AI decision was made.
 if [ -z "${OPEN_ROUTER_API_KEY:-}${GROQ_API_KEY:-}${DEEPSEEK_API_KEY:-}" ]; then
