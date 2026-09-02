@@ -22,13 +22,29 @@ jobs:
           ref: fix/real-gps-no-api
           fetch-depth: 1
 
-      - name: Verify GPS implementation and no provider API usage
+      - name: Verify real GPS, OSM map and no AI provider dependency
         run: |
           set -euo pipefail
-          test -f android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
-          grep -q 'getCurrentLocation' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
-          grep -q 'requestSingleUpdate' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
-          grep -q 'GPS_PROVIDER' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          provider=android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          screen=android/app/src/main/java/dz/cardiag/app/RoadAssistantScreen.kt
+          map=android/app/src/main/java/dz/cardiag/app/ui/components/InteractiveMapView.kt
+          manifest=android/app/src/main/AndroidManifest.xml
+          test -f "$provider"
+          test -f "$screen"
+          test -f "$map"
+          grep -q 'getCurrentLocation' "$provider"
+          grep -q 'requestSingleUpdate' "$provider"
+          grep -q 'GPS_PROVIDER' "$provider"
+          grep -q 'NETWORK_PROVIDER' "$provider"
+          grep -q 'FUSED_PROVIDER' "$provider"
+          grep -q 'lastKnown' "$provider"
+          grep -q 'ACCESS_COARSE_LOCATION' "$manifest"
+          grep -q 'ACCESS_FINE_LOCATION' "$manifest"
+          grep -q 'openstreetmap.org/export/embed.html' "$map"
+          grep -q 'WebView' "$map"
+          grep -q 'OpenStreetMap / Overpass' "$screen"
+          grep -q 'latitude = location?.latitude' "$screen"
+          grep -q 'longitude = location?.longitude' "$screen"
           if grep -RniE 'OPEN_ROUTER_API_KEY|GROQ_API_KEY|DEEPSEEK_API_KEY|OPENROUTER_BASE_URL|api.openrouter.ai|api.groq.com|api.deepseek.com' android --exclude-dir=build; then
             echo 'Unexpected external AI provider reference found in Android source.'
             exit 1
