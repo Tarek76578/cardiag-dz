@@ -1,0 +1,1 @@
+Trigger independent Android build after OSM map merge.
