@@ -2,18 +2,12 @@ package dz.cardiag.app.core.road
 
 /**
  * Aggregates location, nearby-search and hazards providers into a single
- * snapshot the UI can render. The default implementation is fully offline
- * and returns no fabricated businesses, addresses or phone numbers: it
- * exposes the curated categories and lets the user hand off to a real
- * map / search app for actual nearby results.
- *
- * The service is intentionally provider-agnostic. Real Overpass / HERE /
- * Mapbox providers can replace [OfflineRoadDataProvider] by implementing
- * [NearbySearchProvider] / [HazardsProvider] and supplying them here.
+ * snapshot the UI can render. Nearby services use live OpenStreetMap data;
+ * missing business fields are kept null rather than fabricated.
  */
 class RoadAssistantService(
     private val locationProvider: LocationProvider,
-    private val nearbyProvider: NearbySearchProvider = OfflineNearbyProvider(),
+    private val nearbyProvider: NearbySearchProvider = OverpassNearbyProvider(),
     private val hazardsProvider: HazardsProvider = OfflineHazardsProvider()
 ) {
 
@@ -54,7 +48,7 @@ class RoadAssistantService(
     }
 }
 
-/** Default offline provider that returns the curated category descriptions. */
+/** Offline fallback retained for tests and explicit no-network scenarios. */
 class OfflineNearbyProvider : NearbySearchProvider {
     override val displayName: String = OfflineRoadDataProvider.providerDisplayName
     override val isLive: Boolean = OfflineRoadDataProvider.isLive
@@ -65,9 +59,6 @@ class OfflineNearbyProvider : NearbySearchProvider {
         radiusMeters: Int,
         language: String
     ): NearbyResult {
-        // Honest return: no fake businesses, addresses, phone numbers or
-        // ratings. The screen will render the category descriptions and
-        // hand off to a real map / search app.
         val lang = if (language == "ar") "ar" else "fr"
         val services = categories.map { category ->
             val description = OfflineRoadDataProvider.categoryDescriptions[category.key]?.get(lang)
@@ -75,7 +66,7 @@ class OfflineNearbyProvider : NearbySearchProvider {
                 ?: category.key
             NearbyService(
                 id = "category-${category.key}",
-                name = description ?: category.key,
+                name = description,
                 category = category,
                 latitude = center.latitude,
                 longitude = center.longitude,
@@ -95,10 +86,6 @@ class OfflineHazardsProvider : HazardsProvider {
     override val displayName: String = OfflineRoadDataProvider.providerDisplayName
     override val isLive: Boolean = OfflineRoadDataProvider.isLive
 
-    override suspend fun fetch(center: CoarseLocation, language: String): HazardsResult {
-        // Live hazard data must never be invented. The offline provider
-        // intentionally returns no hazards; the screen shows a clear
-        // "no live data source" state.
-        return HazardsResult.Success(emptyList())
-    }
+    override suspend fun fetch(center: CoarseLocation, language: String): HazardsResult =
+        HazardsResult.Success(emptyList())
 }
