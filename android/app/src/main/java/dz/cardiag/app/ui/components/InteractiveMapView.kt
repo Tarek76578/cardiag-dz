@@ -31,7 +31,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import dz.cardiag.app.core.road.CoarseLocation
+import dz.cardiag.app.core.road.NearbyResult
 import dz.cardiag.app.core.road.NearbyService
+import dz.cardiag.app.core.road.OverpassNearbyProvider
+import dz.cardiag.app.core.road.ServiceCategory
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -40,8 +44,8 @@ import org.osmdroid.views.overlay.Marker
 import java.util.Locale
 
 /**
- * Real OpenStreetMap map with native gestures, GPS marker, live service
- * markers, a recenter control and an optional full-screen search view.
+ * Real OpenStreetMap map with native gestures, live OSM service markers,
+ * recenter, visible zoom controls, full-screen mode and map search.
  */
 @Composable
 fun InteractiveMapView(
@@ -52,7 +56,6 @@ fun InteractiveMapView(
     contentDescriptionText: String,
     services: List<NearbyService> = emptyList()
 ) {
-    val context = LocalContext.current
     var fullScreen by remember { mutableStateOf(false) }
 
     MapSurface(
@@ -108,16 +111,48 @@ private fun MapSurface(
         latitude != 0.0 && longitude != 0.0
     val mapLat = if (validLocation) latitude!! else defaultLat
     val mapLon = if (validLocation) longitude!! else defaultLon
+
     var search by remember { mutableStateOf("") }
-    val filteredServices = remember(services, search) {
+    var liveServices by remember { mutableStateOf<List<NearbyService>>(emptyList()) }
+    val overpass = remember { OverpassNearbyProvider() }
+
+    LaunchedEffect(validLocation, mapLat, mapLon) {
+        if (!validLocation) {
+            liveServices = emptyList()
+            return@LaunchedEffect
+        }
+        val center = CoarseLocation(
+            latitude = mapLat,
+            longitude = mapLon,
+            accuracyMeters = accuracyMeters ?: 0.0,
+            capturedAtEpochMs = System.currentTimeMillis(),
+            source = "gps"
+        )
+        val result = overpass.search(
+            center = center,
+            categories = LIVE_MAP_CATEGORIES,
+            radiusMeters = 10_000,
+            language = "fr"
+        )
+        liveServices = when (result) {
+            is NearbyResult.Success -> result.services
+            is NearbyResult.Failure -> emptyList()
+        }
+    }
+
+    val allServices = remember(services, liveServices) {
+        (services + liveServices).distinctBy { it.id }
+    }
+    val filteredServices = remember(allServices, search) {
         val q = search.trim().lowercase()
-        if (q.isEmpty()) services else services.filter { service ->
+        if (q.isEmpty()) allServices else allServices.filter { service ->
             service.name.lowercase().contains(q) ||
                 service.category.key.lowercase().contains(q) ||
                 service.address?.lowercase()?.contains(q) == true ||
                 service.phone?.lowercase()?.contains(q) == true
         }
     }
+
     val mapView = remember(context, fullScreen) { createMapView(context, mapLat, mapLon) }
 
     DisposableEffect(mapView) {
@@ -175,23 +210,6 @@ private fun MapSurface(
                 placeholder = { Text("Rechercher sur la carte") },
                 shape = RoundedCornerShape(14.dp)
             )
-        }
-
-        IconButton(
-            onClick = {
-                if (validLocation) {
-                    mapView.controller.animateTo(GeoPoint(mapLat, mapLon))
-                    mapView.controller.setZoom(if (fullScreen) 15.0 else 13.0)
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(if (fullScreen) 18.dp else 8.dp)
-        ) {
-            Icon(Icons.Default.LocationOn, contentDescription = "Position actuelle")
-        }
-
-        if (fullScreen) {
             IconButton(
                 onClick = { onCloseFullScreen?.invoke() },
                 modifier = Modifier.align(Alignment.TopStart).padding(12.dp)
@@ -223,6 +241,20 @@ private fun MapSurface(
             )
         }
 
+        IconButton(
+            onClick = {
+                if (validLocation) {
+                    mapView.controller.animateTo(GeoPoint(mapLat, mapLon))
+                    mapView.controller.setZoom(if (fullScreen) 15.0 else 13.0)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(if (fullScreen) 18.dp else 8.dp)
+        ) {
+            Icon(Icons.Default.LocationOn, contentDescription = "Position actuelle")
+        }
+
         if (!validLocation && !fullScreen) {
             Text(
                 text = "Algeria · GPS unavailable",
@@ -239,7 +271,7 @@ private fun createMapView(context: Context, latitude: Double, longitude: Double)
     val preferences = appContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
     Configuration.getInstance().load(appContext, preferences)
     Configuration.getInstance().userAgentValue =
-        String.format(Locale.US, "%s/1.0.4", appContext.packageName)
+        String.format(Locale.US, "%s/1.0.5", appContext.packageName)
 
     return MapView(appContext).apply {
         setTileSource(TileSourceFactory.MAPNIK)
@@ -269,32 +301,34 @@ private fun updateMapMarkers(
     overlays.removeAll { it is Marker && (it.id == GPS_MARKER_ID || it.id?.startsWith(SERVICE_MARKER_PREFIX) == true) }
 
     if (validLocation) {
-        val gpsMarker = Marker(mapView).apply {
-            id = GPS_MARKER_ID
-            position = GeoPoint(latitude, longitude)
-            title = "Position actuelle"
-            snippet = accuracyMeters?.takeIf { it > 0.0 }?.let {
-                String.format(Locale.US, "GPS accuracy +/- %.0f m", it)
+        overlays.add(
+            Marker(mapView).apply {
+                id = GPS_MARKER_ID
+                position = GeoPoint(latitude, longitude)
+                title = "Position actuelle"
+                snippet = accuracyMeters?.takeIf { it > 0.0 }?.let {
+                    String.format(Locale.US, "GPS accuracy +/- %.0f m", it)
+                }
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             }
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-        }
-        overlays.add(gpsMarker)
+        )
     }
 
     services.forEachIndexed { index, service ->
-        val marker = Marker(mapView).apply {
-            id = "$SERVICE_MARKER_PREFIX$index-${service.id}"
-            position = GeoPoint(service.latitude, service.longitude)
-            title = service.name
-            snippet = buildString {
-                append(service.category.key)
-                service.distanceMeters?.let { append(" · ").append(formatDistance(it)) }
-                service.address?.let { append("\n").append(it) }
-                service.phone?.let { append("\n").append(it) }
+        overlays.add(
+            Marker(mapView).apply {
+                id = "$SERVICE_MARKER_PREFIX$index-${service.id}"
+                position = GeoPoint(service.latitude, service.longitude)
+                title = service.name
+                snippet = buildString {
+                    append(service.category.key)
+                    service.distanceMeters?.let { append(" · ").append(formatDistance(it)) }
+                    service.address?.let { append("\n").append(it) }
+                    service.phone?.let { append("\n").append(it) }
+                }
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             }
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-        }
-        overlays.add(marker)
+        )
     }
 }
 
@@ -302,6 +336,16 @@ private fun formatDistance(meters: Double): String = when {
     meters < 1_000 -> String.format(Locale.US, "%.0f m", meters)
     else -> String.format(Locale.US, "%.1f km", meters / 1_000.0)
 }
+
+private val LIVE_MAP_CATEGORIES = setOf(
+    ServiceCategory.MECHANIC,
+    ServiceCategory.AUTO_ELECTRICIAN,
+    ServiceCategory.ROADSIDE_ASSISTANCE,
+    ServiceCategory.SPARE_PARTS,
+    ServiceCategory.FUEL_STATION,
+    ServiceCategory.HOSPITAL,
+    ServiceCategory.TOWING
+)
 
 private const val GPS_MARKER_ID = "cardiag-gps-marker"
 private const val SERVICE_MARKER_PREFIX = "cardiag-service-marker-"
