@@ -1,0 +1,1 @@
+This marker forces the independent Android build workflow to validate the merged main branch after the OSM map merge.
