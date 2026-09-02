@@ -47,7 +47,7 @@ class OverpassNearbyProvider(
         runCatching {
             val response = client.post(endpoint) {
                 contentType(ContentType.Application.FormUrlEncoded)
-                setBody("data".formUrlEncode(query))
+                setBody(listOf("data" to query).formUrlEncode())
             }
             val payload = response.bodyAsText()
             if (response.status.value !in 200..299) {
