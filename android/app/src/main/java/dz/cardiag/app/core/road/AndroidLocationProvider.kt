@@ -73,7 +73,7 @@ class AndroidLocationProvider(private val context: Context) : LocationProvider {
         else -> null
     }
 
-    @SuppressLint("MissingPermission")
+    @SuppressLint("MissingPermission", "NewApi")
     private suspend fun requestCurrentLocation(
         manager: LocationManager,
         provider: String
