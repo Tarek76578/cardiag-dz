@@ -7,6 +7,9 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
@@ -16,13 +19,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * Live OpenStreetMap nearby search through Overpass.
- *
- * The query is deliberately small (one request per refresh, capped by the
- * requested radius) and uses a descriptive User-Agent. Results are real OSM
- * objects; missing fields remain null rather than being fabricated.
- */
+/** Live OpenStreetMap nearby search through Overpass. */
 class OverpassNearbyProvider(
     private val client: HttpClient = HttpClient(Android)
 ) : NearbySearchProvider {
@@ -42,11 +39,10 @@ class OverpassNearbyProvider(
             val response = client.post(ENDPOINT) {
                 header("User-Agent", USER_AGENT)
                 header("Accept", "application/json")
+                header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
                 setBody("data=${java.net.URLEncoder.encode(query, Charsets.UTF_8.name())}")
             }
-            if (response.status.value !in 200..299) {
-                error("Overpass HTTP ${response.status.value}")
-            }
+            if (response.status.value !in 200..299) error("Overpass HTTP ${response.status.value}")
             parse(response.bodyAsText(), center, language)
         }.fold(
             onSuccess = { NearbyResult.Success(it) },
@@ -54,7 +50,12 @@ class OverpassNearbyProvider(
         )
     }
 
-    private fun buildQuery(lat: Double, lon: Double, radius: Int, categories: Set<ServiceCategory>): String {
+    private fun buildQuery(
+        lat: Double,
+        lon: Double,
+        radius: Int,
+        categories: Set<ServiceCategory>
+    ): String {
         val parts = mutableListOf<String>()
         categories.forEach { category ->
             when (category) {
@@ -73,17 +74,16 @@ class OverpassNearbyProvider(
 
     private fun parse(body: String, center: CoarseLocation, language: String): List<NearbyService> {
         val elements = Json.parseToJsonElement(body).jsonObject["elements"]?.jsonArray.orEmpty()
-        val requestedCategories = inferRequestedCategories(elements)
         return elements.mapNotNull { element ->
             val obj = element.jsonObject
-            val id = "osm-${obj["type"]?.jsonPrimitive?.contentOrNull}-${obj["id"]?.jsonPrimitive?.contentOrNull}" 
+            val id = "osm-${obj["type"]?.jsonPrimitive?.contentOrNull}-${obj["id"]?.jsonPrimitive?.contentOrNull}"
             val tags = obj["tags"]?.jsonObject
             val lat = obj["lat"]?.jsonPrimitive?.doubleOrNull
                 ?: obj["center"]?.jsonObject?.get("lat")?.jsonPrimitive?.doubleOrNull
             val lon = obj["lon"]?.jsonPrimitive?.doubleOrNull
                 ?: obj["center"]?.jsonObject?.get("lon")?.jsonPrimitive?.doubleOrNull
             if (lat == null || lon == null) return@mapNotNull null
-            val category = classify(tags, requestedCategories)
+            val category = classify(tags)
             val name = tags?.get("name")?.jsonPrimitive?.contentOrNull
                 ?: tags?.get("brand")?.jsonPrimitive?.contentOrNull
                 ?: categoryLabel(category, language)
@@ -104,31 +104,26 @@ class OverpassNearbyProvider(
         }.sortedBy { it.distanceMeters ?: Double.MAX_VALUE }.distinctBy { it.id }
     }
 
-    private fun inferRequestedCategories(elements: List<kotlinx.serialization.json.JsonElement>): Set<ServiceCategory> =
-        elements.mapNotNull { e -> classify(e.jsonObject["tags"]?.jsonObject, ServiceCategory.entries.toSet()) }.toSet()
-
-    private fun classify(
-        tags: kotlinx.serialization.json.JsonObject?,
-        requested: Set<ServiceCategory>
-    ): ServiceCategory {
-        if (tags == null) return requested.firstOrNull() ?: ServiceCategory.OTHER
+    private fun classify(tags: JsonObject?): ServiceCategory {
+        if (tags == null) return ServiceCategory.OTHER
         val shop = tags["shop"]?.jsonPrimitive?.contentOrNull
         val amenity = tags["amenity"]?.jsonPrimitive?.contentOrNull
         val craft = tags["craft"]?.jsonPrimitive?.contentOrNull
+        val office = tags["office"]?.jsonPrimitive?.contentOrNull
         val towing = tags["service:vehicle:towing"]?.jsonPrimitive?.contentOrNull
         val electrical = tags["service:vehicle:electrical"]?.jsonPrimitive?.contentOrNull
         return when {
             amenity == "fuel" -> ServiceCategory.FUEL_STATION
             amenity == "hospital" -> ServiceCategory.HOSPITAL
             shop == "car_parts" || shop == "tyres" -> ServiceCategory.SPARE_PARTS
-            towing == "yes" || shop == "towing" || tags["office"]?.jsonPrimitive?.contentOrNull == "towing" -> ServiceCategory.TOWING
+            towing == "yes" || shop == "towing" || office == "towing" -> ServiceCategory.TOWING
             electrical == "yes" || craft == "auto_electrician" -> ServiceCategory.AUTO_ELECTRICIAN
             shop == "car_repair" || craft == "car_repair" || tags["service:vehicle:car_repair"] != null -> ServiceCategory.MECHANIC
-            else -> requested.firstOrNull() ?: ServiceCategory.OTHER
+            else -> ServiceCategory.OTHER
         }
     }
 
-    private fun formatAddress(tags: kotlinx.serialization.json.JsonObject?): String? {
+    private fun formatAddress(tags: JsonObject?): String? {
         if (tags == null) return null
         val street = tags["addr:street"]?.jsonPrimitive?.contentOrNull
         val number = tags["addr:housenumber"]?.jsonPrimitive?.contentOrNull
