@@ -16,9 +16,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -26,17 +23,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.util.Locale
 
-/**
- * Real OpenStreetMap-backed map used by the Road Assistant.
- *
- * Unlike the previous Compose Canvas placeholder, this view renders real
- * map tiles, supports native pan/pinch gestures and places a GPS marker at
- * the location supplied by AndroidLocationProvider. Nearby service data is
- * intentionally kept in RoadAssistantService/Overpass and is not fabricated
- * by the map widget.
- *
- * The OSM tile source is HTTPS and requires no Google Maps API key.
- */
+/** Real OpenStreetMap map with native pan/zoom and a supplied GPS marker. */
 @Composable
 fun InteractiveMapView(
     latitude: Double?,
@@ -46,7 +33,6 @@ fun InteractiveMapView(
     contentDescriptionText: String
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val defaultLat = 28.0339
     val defaultLon = 1.6596
     val validLocation = latitude != null && longitude != null &&
@@ -54,36 +40,28 @@ fun InteractiveMapView(
         latitude != 0.0 && longitude != 0.0
     val mapLat = if (validLocation) latitude!! else defaultLat
     val mapLon = if (validLocation) longitude!! else defaultLon
-
     val mapView = remember(context) { createMapView(context, mapLat, mapLon) }
 
-    DisposableEffect(lifecycleOwner, mapView) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
+    DisposableEffect(mapView) {
+        mapView.onResume()
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
         }
     }
 
-    LaunchedEffect(mapLat, mapLon, validLocation, accuracyMeters) {
+    LaunchedEffect(mapLat, mapLon, validLocation) {
         updateGpsMarker(mapView, mapLat, mapLon, validLocation, accuracyMeters)
-        if (validLocation && !mapView.hasFocus()) {
-            mapView.controller.animateTo(GeoPoint(mapLat, mapLon))
+        if (validLocation && mapView.tag != MAP_LOCATION_INITIALIZED) {
+            mapView.controller.setCenter(GeoPoint(mapLat, mapLon))
+            mapView.controller.setZoom(12.0)
+            mapView.tag = MAP_LOCATION_INITIALIZED
         }
         mapView.invalidate()
     }
 
     Box(
-        modifier = modifier
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+        modifier = modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
     ) {
         AndroidView(
             factory = { mapView },
@@ -93,26 +71,18 @@ fun InteractiveMapView(
                 updateGpsMarker(view, mapLat, mapLon, validLocation, accuracyMeters)
             }
         )
-
-        // Always-visible attribution prevents the map from looking like an
-        // unlabelled proprietary basemap and remains present during tile load.
         Text(
             text = "© OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(6.dp)
+            modifier = Modifier.align(Alignment.BottomStart).padding(6.dp)
         )
-
         if (!validLocation) {
             Text(
                 text = "Algeria · GPS unavailable",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp)
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
             )
         }
     }
@@ -131,8 +101,8 @@ private fun createMapView(context: Context, latitude: Double, longitude: Double)
         setBuiltInZoomControls(false)
         setTilesScaledToDpi(false)
         setUseDataConnection(true)
-        minZoomLevel = 3.0
-        maxZoomLevel = 20.0
+        setMinZoomLevel(3.0)
+        setMaxZoomLevel(20.0)
         controller.setZoom(if (latitude.isFinite() && longitude.isFinite()) 12.0 else 5.0)
         controller.setCenter(GeoPoint(latitude, longitude))
         isClickable = true
@@ -148,15 +118,12 @@ private fun updateGpsMarker(
     validLocation: Boolean,
     accuracyMeters: Double?
 ) {
-    val marker = mapView.overlays
-        .filterIsInstance<Marker>()
+    val marker = mapView.overlays.filterIsInstance<Marker>()
         .firstOrNull { it.id == GPS_MARKER_ID }
-
     if (!validLocation) {
         if (marker != null) mapView.overlays.remove(marker)
         return
     }
-
     val gpsMarker = marker ?: Marker(mapView).also {
         it.id = GPS_MARKER_ID
         it.title = "CarDiag GPS"
@@ -165,8 +132,9 @@ private fun updateGpsMarker(
     }
     gpsMarker.position = GeoPoint(latitude, longitude)
     gpsMarker.snippet = accuracyMeters?.takeIf { it > 0.0 }?.let {
-        String.format(Locale.US, "GPS accuracy ±%.0f m", it)
+        String.format(Locale.US, "GPS accuracy +/- %.0f m", it)
     }
 }
 
 private const val GPS_MARKER_ID = "cardiag-gps-marker"
+private const val MAP_LOCATION_INITIALIZED = "cardiag-map-location-initialized"
