@@ -58,3 +58,11 @@ jobs:
       - name: Debug build
         working-directory: android
         run: timeout 600s ./gradlew --no-daemon assembleDebug --stacktrace
+
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarDiag-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
