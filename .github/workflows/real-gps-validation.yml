@@ -1,0 +1,60 @@
+name: CarDiag Real GPS Validation
+
+on:
+  push:
+    branches:
+      - fix/real-gps-no-api
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-real-gps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v5
+        with:
+          ref: fix/real-gps-no-api
+          fetch-depth: 1
+
+      - name: Verify GPS implementation and no provider API usage
+        run: |
+          set -euo pipefail
+          test -f android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          grep -q 'getCurrentLocation' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          grep -q 'requestSingleUpdate' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          grep -q 'GPS_PROVIDER' android/app/src/main/java/dz/cardiag/app/core/road/AndroidLocationProvider.kt
+          if grep -RniE 'OPEN_ROUTER_API_KEY|GROQ_API_KEY|DEEPSEEK_API_KEY|OPENROUTER_BASE_URL|api.openrouter.ai|api.groq.com|api.deepseek.com' android --exclude-dir=build; then
+            echo 'Unexpected external AI provider reference found in Android source.'
+            exit 1
+          fi
+
+      - name: Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Android unit tests
+        working-directory: android
+        run: timeout 600s ./gradlew --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Android lint
+        working-directory: android
+        run: timeout 600s ./gradlew --no-daemon lintDebug --stacktrace
+
+      - name: Debug build
+        working-directory: android
+        run: timeout 600s ./gradlew --no-daemon assembleDebug --stacktrace
