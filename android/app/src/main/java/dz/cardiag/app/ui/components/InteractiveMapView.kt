@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,10 +44,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import java.util.Locale
 
-/**
- * Real OpenStreetMap map with native gestures, live OSM service markers,
- * recenter, visible zoom controls, full-screen mode and map search.
- */
+/** Real OpenStreetMap map with live nearby services and full-screen search. */
 @Composable
 fun InteractiveMapView(
     latitude: Double?,
@@ -128,13 +126,14 @@ private fun MapSurface(
             capturedAtEpochMs = System.currentTimeMillis(),
             source = "gps"
         )
-        val result = overpass.search(
-            center = center,
-            categories = LIVE_MAP_CATEGORIES,
-            radiusMeters = 10_000,
-            language = "fr"
-        )
-        liveServices = when (result) {
+        liveServices = when (
+            val result = overpass.search(
+                center = center,
+                categories = LIVE_MAP_CATEGORIES,
+                radiusMeters = 10_000,
+                language = "fr"
+            )
+        ) {
             is NearbyResult.Success -> result.services
             is NearbyResult.Failure -> emptyList()
         }
@@ -164,14 +163,7 @@ private fun MapSurface(
     }
 
     LaunchedEffect(mapLat, mapLon, validLocation, filteredServices, fullScreen) {
-        updateMapMarkers(
-            mapView = mapView,
-            latitude = mapLat,
-            longitude = mapLon,
-            validLocation = validLocation,
-            accuracyMeters = accuracyMeters,
-            services = filteredServices
-        )
+        updateMapMarkers(mapView, mapLat, mapLon, validLocation, accuracyMeters, filteredServices)
         if (validLocation && mapView.tag != MAP_LOCATION_INITIALIZED) {
             mapView.controller.setCenter(GeoPoint(mapLat, mapLon))
             mapView.controller.setZoom(if (fullScreen) 14.0 else 12.0)
@@ -197,7 +189,7 @@ private fun MapSurface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    .padding(horizontal = 64.dp, vertical = 12.dp),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -227,11 +219,13 @@ private fun MapSurface(
                 modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
             )
         } else {
-            IconButton(
+            Button(
                 onClick = { onOpenFullScreen?.invoke() },
-                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+                shape = RoundedCornerShape(12.dp)
             ) {
-                Icon(Icons.Default.Fullscreen, contentDescription = "Ouvrir la carte en plein écran")
+                Icon(Icons.Default.Fullscreen, contentDescription = null)
+                Text("Ouvrir la carte")
             }
             Text(
                 text = "© OpenStreetMap contributors",
@@ -248,9 +242,7 @@ private fun MapSurface(
                     mapView.controller.setZoom(if (fullScreen) 15.0 else 13.0)
                 }
             },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(if (fullScreen) 18.dp else 8.dp)
+            modifier = Modifier.align(Alignment.BottomEnd).padding(if (fullScreen) 18.dp else 8.dp)
         ) {
             Icon(Icons.Default.LocationOn, contentDescription = "Position actuelle")
         }
