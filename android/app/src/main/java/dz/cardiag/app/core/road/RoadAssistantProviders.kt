@@ -12,8 +12,8 @@ interface LocationProvider {
     /** Returns the most recent coarse fix, or null if no fix is available. */
     suspend fun lastKnown(): CoarseLocation?
 
-    /** Returns the current fix or null if unavailable/timeout. */
-    suspend fun current(timeoutMs: Long = 8_000L): CoarseLocation?
+    /** Returns a fresh device fix or null if unavailable/timeout. */
+    suspend fun current(timeoutMs: Long = 30_000L): CoarseLocation?
 }
 
 interface NearbySearchProvider {
