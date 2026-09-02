@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import dz.cardiag.app.core.road.AndroidLocationProvider
 import dz.cardiag.app.core.road.NearbyService
 import dz.cardiag.app.core.road.RoadAssistantContext
@@ -86,6 +85,9 @@ fun RoadAssistantScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         permissionGranted = grants.values.any { it }
+        if (!permissionGranted) {
+            message = if (arabic) "لم يتم منح إذن الموقع." else "Autorisation de localisation refusée."
+        }
     }
 
     fun refresh() {
@@ -93,12 +95,25 @@ fun RoadAssistantScreen(
         loading = true
         message = null
         scope.launch {
-            val snap = runCatching { service.snapshot(selected, (radiusKm * 1000).roundToInt(), language) }
+            val snap = runCatching {
+                service.snapshot(selected, (radiusKm * 1000).roundToInt(), language)
+            }
             snap.onSuccess {
                 location = it.location
                 results = it.services
-                if (it.location == null) message = if (arabic) "تعذر الحصول على موقع GPS." else "Position GPS indisponible."
-                else if (it.services.isEmpty()) message = if (arabic) "لم نجد خدمات موسومة في OpenStreetMap ضمن هذا النطاق." else "Aucun service OSM trouvé dans ce rayon."
+                if (it.location == null) {
+                    message = if (arabic) {
+                        "تعذر الحصول على موقع GPS. تأكد من تشغيل خدمات الموقع ثم أعد المحاولة."
+                    } else {
+                        "Position GPS indisponible. Activez la localisation puis réessayez."
+                    }
+                } else if (it.services.isEmpty()) {
+                    message = if (arabic) {
+                        "لم نجد خدمات موسومة في OpenStreetMap ضمن هذا النطاق. جرّب زيادة النطاق أو تغيير الفئات."
+                    } else {
+                        "Aucun service OSM trouvé dans ce rayon. Augmentez le rayon ou changez les catégories."
+                    }
+                }
             }.onFailure {
                 message = it.message ?: if (arabic) "خطأ في جلب الخدمات." else "Erreur lors de la recherche."
             }
@@ -106,7 +121,9 @@ fun RoadAssistantScreen(
         }
     }
 
-    LaunchedEffect(permissionGranted, selected, radiusKm.roundToInt()) { if (permissionGranted) refresh() }
+    LaunchedEffect(permissionGranted, selected, radiusKm.roundToInt()) {
+        if (permissionGranted) refresh()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(padding),
@@ -115,10 +132,20 @@ fun RoadAssistantScreen(
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                onBack?.let { IconButton(onClick = it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null) } }
+                onBack?.let {
+                    IconButton(onClick = it) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                    }
+                }
                 Column(Modifier.weight(1f)) {
-                    Text(if (arabic) "المساعدة على الطريق" else "Assistance routière", style = MaterialTheme.typography.headlineMedium)
-                    Text(if (arabic) "خدمات حقيقية قريبة منك" else "Services réels à proximité", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (arabic) "المساعدة على الطريق" else "Assistance routière",
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                    Text(
+                        if (arabic) "خدمات حقيقية قريبة منك" else "Services réels à proximité",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         }
@@ -127,9 +154,17 @@ fun RoadAssistantScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (arabic) "فعّل الموقع" else "Activez la localisation", style = MaterialTheme.typography.titleMedium)
-                        Text(if (arabic) "يحتاج CarDiag إلى GPS الحقيقي للبحث حول موقعك." else "CarDiag utilise le GPS réel pour rechercher autour de votre position.")
-                        Button(onClick = { permissionLauncher.launch(RoadAssistantContext.locationPermissions) }) {
+                        Text(
+                            if (arabic) "فعّل الموقع" else "Activez la localisation",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            if (arabic) "يحتاج CarDiag إلى GPS الحقيقي للبحث حول موقعك."
+                            else "CarDiag utilise le GPS réel pour rechercher autour de votre position."
+                        )
+                        Button(onClick = {
+                            permissionLauncher.launch(RoadAssistantContext.locationPermissions)
+                        }) {
                             Text(if (arabic) "السماح بالموقع" else "Autoriser la localisation")
                         }
                     }
@@ -144,22 +179,35 @@ fun RoadAssistantScreen(
                             ServiceCategory.entries.filter { it != ServiceCategory.OTHER }.forEach { category ->
                                 FilterChip(
                                     selected = category in selected,
-                                    onClick = { selected = if (category in selected) selected - category else selected + category },
+                                    onClick = {
+                                        selected = if (category in selected) selected - category else selected + category
+                                    },
                                     label = { Text(categoryLabel(category, arabic)) }
                                 )
                             }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (arabic) "النطاق: ${radiusKm.roundToInt()} كم" else "Rayon : ${radiusKm.roundToInt()} km", Modifier.weight(1f))
+                            Text(
+                                if (arabic) "النطاق: ${radiusKm.roundToInt()} كم"
+                                else "Rayon : ${radiusKm.roundToInt()} km",
+                                Modifier.weight(1f)
+                            )
                         }
-                        Slider(value = radiusKm, onValueChange = { radiusKm = it }, valueRange = 1f..20f, steps = 18)
+                        Slider(
+                            value = radiusKm,
+                            onValueChange = { radiusKm = it },
+                            valueRange = 1f..20f,
+                            steps = 18
+                        )
                         OutlinedTextField(
                             value = query,
                             onValueChange = { query = it },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            placeholder = { Text(if (arabic) "ابحث بالاسم أو العنوان أو الهاتف" else "Nom, adresse ou téléphone") }
+                            placeholder = {
+                                Text(if (arabic) "ابحث بالاسم أو العنوان أو الهاتف" else "Nom, adresse ou téléphone")
+                            }
                         )
                     }
                 }
@@ -167,9 +215,12 @@ fun RoadAssistantScreen(
 
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(if (arabic) "موقعك الحالي" else "Votre position actuelle", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            if (arabic) "موقعك الحالي" else "Votre position actuelle",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(Modifier.height(2.dp))
                         InteractiveMapView(
                             latitude = location?.latitude,
                             longitude = location?.longitude,
@@ -177,6 +228,20 @@ fun RoadAssistantScreen(
                             modifier = Modifier.fillMaxWidth().height(220.dp),
                             contentDescriptionText = if (arabic) "خريطة موقع GPS الحالي" else "Carte de la position GPS actuelle"
                         )
+                        location?.let { fix ->
+                            val accuracyText = if (fix.accuracyMeters.isFinite()) {
+                                if (arabic) "الدقة: ${fix.accuracyMeters.roundToInt()} م"
+                                else "Précision : ${fix.accuracyMeters.roundToInt()} m"
+                            } else ""
+                            Text(
+                                text = if (arabic) {
+                                    "GPS: ${String.format(Locale.US, "%.6f", fix.latitude)}, ${String.format(Locale.US, "%.6f", fix.longitude)} $accuracyText"
+                                } else {
+                                    "GPS : ${String.format(Locale.US, "%.6f", fix.latitude)}, ${String.format(Locale.US, "%.6f", fix.longitude)} $accuracyText"
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }
@@ -186,28 +251,53 @@ fun RoadAssistantScreen(
                     Icon(Icons.Default.LocationOn, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (arabic) "المصدر المباشر" else "Source en direct", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (arabic) "المصدر المباشر" else "Source en direct",
+                            style = MaterialTheme.typography.titleSmall
+                        )
                         Text("OpenStreetMap / Overpass", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (loading) CircularProgressIndicator(Modifier.width(24.dp).height(24.dp), strokeWidth = 2.dp)
+                    if (loading) {
+                        CircularProgressIndicator(
+                            Modifier.width(24.dp).height(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
                 }
             }
 
             message?.let { text ->
-                item { Card(Modifier.fillMaxWidth()) { Text(text, Modifier.padding(16.dp)) } }
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Text(text, Modifier.padding(16.dp))
+                    }
+                }
             }
 
             val normalized = query.trim().lowercase(Locale.ROOT)
             val visible = if (normalized.isEmpty()) results else results.filter {
-                listOfNotNull(it.name, it.address, it.phone, it.category.key).joinToString(" ").lowercase(Locale.ROOT).contains(normalized)
+                listOfNotNull(it.name, it.address, it.phone, it.category.key)
+                    .joinToString(" ")
+                    .lowercase(Locale.ROOT)
+                    .contains(normalized)
             }
-            item { Text(if (arabic) "${visible.size} نتيجة حقيقية" else "${visible.size} résultat(s) réel(s)", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Text(
+                    if (arabic) "${visible.size} نتيجة حقيقية"
+                    else "${visible.size} résultat(s) réel(s)",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            }
             items(visible, key = { it.id }) { nearby ->
                 NearbyServiceCard(nearby, arabic, context)
             }
 
             item {
-                OutlinedButton(onClick = ::refresh, Modifier.fillMaxWidth(), enabled = !loading) {
+                OutlinedButton(
+                    onClick = ::refresh,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading
+                ) {
                     Text(if (arabic) "تحديث النتائج" else "Actualiser les résultats")
                 }
             }
@@ -231,7 +321,9 @@ private fun NearbyServiceCard(service: NearbyService, arabic: Boolean, context: 
             service.distanceMeters?.let { Text(formatDistance(it, arabic), style = MaterialTheme.typography.bodySmall) }
             service.phone?.let { phone ->
                 Button(onClick = {
-                    runCatching { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))) }
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone")))
+                    }
                 }) {
                     Icon(Icons.Default.Phone, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
@@ -242,7 +334,9 @@ private fun NearbyServiceCard(service: NearbyService, arabic: Boolean, context: 
                 OutlinedButton(onClick = {
                     val uri = Uri.parse("geo:${service.latitude},${service.longitude}?q=${Uri.encode(service.name)}")
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                }) { Text(if (arabic) "فتح الخريطة" else "Ouvrir la carte") }
+                }) {
+                    Text(if (arabic) "فتح الخريطة" else "Ouvrir la carte")
+                }
                 Text("OSM", style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.CenterVertically))
             }
         }
@@ -265,6 +359,7 @@ private fun formatDistance(meters: Double, arabic: Boolean): String {
         if (arabic) "على بعد ${meters.roundToInt()} م" else "À ${meters.roundToInt()} m"
     } else {
         val km = meters / 1000.0
-        if (arabic) "على بعد ${String.format(Locale.US, "%.1f", km)} كم" else "À ${String.format(Locale.US, "%.1f", km)} km"
+        if (arabic) "على بعد ${String.format(Locale.US, "%.1f", km)} كم"
+        else "À ${String.format(Locale.US, "%.1f", km)} km"
     }
 }
