@@ -72,6 +72,8 @@ dependencies {
     implementation("io.ktor:ktor-client-android:3.5.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    // Native OpenStreetMap renderer. Uses HTTPS OSM raster tiles; no Google Maps API key.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     constraints { implementation("androidx.browser:browser:1.8.0") }
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
