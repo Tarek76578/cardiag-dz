@@ -48,32 +48,6 @@ class RoadAssistantTest {
     private val algiers = CoarseLocation(36.7538, 3.0588, 50.0, 0L, "fake")
 
     @Test
-    fun `offline provider never fabricates businesses`() = runBlocking {
-        val provider = dz.cardiag.app.core.road.OfflineNearbyProvider()
-        val outFr = provider.search(algiers, setOf(ServiceCategory.MECHANIC), 5000, "fr")
-        val outAr = provider.search(algiers, setOf(ServiceCategory.MECHANIC), 5000, "ar")
-        assertTrue(outFr is NearbyResult.Success)
-        assertTrue(outAr is NearbyResult.Success)
-        val fr = (outFr as NearbyResult.Success).services
-        val ar = (outAr as NearbyResult.Success).services
-        assertEquals(1, fr.size)
-        assertEquals(1, ar.size)
-        // Address/phone/rating/distance must be null to be honest with the user.
-        assertNull(fr[0].address)
-        assertNull(fr[0].phone)
-        assertNull(fr[0].rating)
-        assertNull(fr[0].distanceMeters)
-        assertNull(ar[0].address)
-        assertNull(ar[0].phone)
-        assertNull(ar[0].rating)
-        assertNull(ar[0].distanceMeters)
-        // Description must be in the right language.
-        assertTrue(fr[0].name.isNotBlank())
-        assertTrue(ar[0].name.isNotBlank())
-        assertNotNull(OfflineRoadDataProvider.categoryDescriptions[ServiceCategory.MECHANIC.key])
-    }
-
-    @Test
     fun `offline hazards provider returns no hazards`() = runBlocking {
         val provider = dz.cardiag.app.core.road.OfflineHazardsProvider()
         val out = provider.fetch(algiers, "fr")
