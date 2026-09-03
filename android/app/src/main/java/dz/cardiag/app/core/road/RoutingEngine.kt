@@ -29,15 +29,19 @@ class RoutingEngine(
         }
         val route = root["routes"]?.jsonArray?.firstOrNull()?.jsonObject
             ?: error("No driving route found")
-        val distanceMeters = route["distance"]?.jsonPrimitive?.double
+        val distanceMeters = route["distance"]?.jsonPrimitive?.content?.toDoubleOrNull()
             ?: error("Routing response has no distance")
-        val durationSeconds = route["duration"]?.jsonPrimitive?.double
+        val durationSeconds = route["duration"]?.jsonPrimitive?.content?.toDoubleOrNull()
             ?: error("Routing response has no duration")
         val coordinatesJson = route["geometry"]?.jsonObject?.get("coordinates")?.jsonArray
             ?: error("Routing response has no geometry")
         val points = coordinatesJson.mapNotNull { pair ->
             val values = pair.jsonArray
-            if (values.size < 2) null else GeoPoint(values[1].jsonPrimitive.double, values[0].jsonPrimitive.double)
+            if (values.size < 2) null else {
+                val lon = values[0].jsonPrimitive.content.toDoubleOrNull()
+                val lat = values[1].jsonPrimitive.content.toDoubleOrNull()
+                if (lon == null || lat == null) null else GeoPoint(lat, lon)
+            }
         }
         return RouteResult(distanceMeters, durationSeconds, points)
     }
