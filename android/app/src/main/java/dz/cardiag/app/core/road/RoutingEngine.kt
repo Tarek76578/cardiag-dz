@@ -17,13 +17,11 @@ class RoutingEngine(
     private val client: HttpClient = HttpClient(Android)
 ) {
     suspend fun route(start: GeoPoint, end: GeoPoint): RouteResult {
-        val primaryError = runCatching { requestRoute(baseUrl, start, end) }.exceptionOrNull()
-        if (primaryError == null) return requestRoute(baseUrl, start, end)
-
-        // routing.openstreetmap.de is another OSRM server using worldwide OSM car data.
-        // It is a fallback only; production should use a controlled routing backend.
-        return runCatching { requestRoute(FALLBACK_BASE_URL, start, end) }.getOrElse { fallbackError ->
-            error("Routing failed: ${primaryError.message ?: "primary provider unavailable"}; fallback: ${fallbackError.message ?: "unavailable"}")
+        val primary = runCatching { requestRoute(baseUrl, start, end) }
+        return primary.getOrElse { primaryError ->
+            runCatching { requestRoute(FALLBACK_BASE_URL, start, end) }.getOrElse { fallbackError ->
+                error("Routing failed: ${primaryError.message ?: "primary provider unavailable"}; fallback: ${fallbackError.message ?: "unavailable"}")
+            }
         }
     }
 
@@ -35,8 +33,7 @@ class RoutingEngine(
             parameter("steps", "false")
             parameter("alternatives", "false")
         }
-        val body = response.bodyAsText()
-        val root = Json.parseToJsonElement(body).jsonObject
+        val root = Json.parseToJsonElement(response.bodyAsText()).jsonObject
         if (root["code"]?.jsonPrimitive?.content != "Ok") {
             error(root["message"]?.jsonPrimitive?.content ?: "Routing provider returned an error")
         }
