@@ -54,6 +54,12 @@ enum class ServiceCategory(val key: String) {
     OTHER("other");
 
     companion object {
+        // Compatibility aliases used by the interactive map's legacy category filter.
+        val GARAGE: ServiceCategory get() = MECHANIC
+        val DEPANNAGE: ServiceCategory get() = ROADSIDE_ASSISTANCE
+        val PARTS: ServiceCategory get() = SPARE_PARTS
+        val TIRE: ServiceCategory get() = SPARE_PARTS
+
         fun fromKey(key: String?): ServiceCategory =
             entries.firstOrNull { it.key == key } ?: OTHER
     }
@@ -99,5 +105,5 @@ sealed interface HazardsResult {
     data class Success(val hazards: List<RoadHazard>) : HazardsResult
 
     @Serializable
-    data class Failure(val failure: NearbyFailure, val message: String? = null) : HazardsResult
+    data class Failure(val failure: NearbyFailure, val message: String? = null) : NearbyResult
 }
