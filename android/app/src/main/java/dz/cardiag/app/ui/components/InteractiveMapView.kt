@@ -48,6 +48,7 @@ import org.osmdroid.views.overlay.Polyline
 import java.util.Locale
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -141,13 +142,35 @@ private fun MapSurface(
     val mapView = remember(context, fullScreen) { createMapView(context, latitude, longitude) }
     val currentMeasureTap by rememberUpdatedState(onMeasureTap)
 
+    // Measurement mode owns the touch stream. Normal map mode never installs an intercepting listener,
+    // so one-finger pan and pinch-to-zoom remain native osmdroid gestures.
     DisposableEffect(mapView, measuring) {
+        var downX = 0f
+        var downY = 0f
+        var moved = false
         val listener = android.view.View.OnTouchListener { _, event ->
-            if (measuring && event.action == MotionEvent.ACTION_UP) {
-                val projection = mapView.projection
-                currentMeasureTap(projection.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint)
+            if (!measuring) return@OnTouchListener false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) > 12.0) moved = true
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) {
+                        val projection = mapView.projection
+                        currentMeasureTap(projection.fromPixels(event.x.toInt(), event.y.toInt()) as GeoPoint)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> true
             }
-            false
         }
         mapView.setOnTouchListener(listener)
         onDispose { mapView.setOnTouchListener(null) }
@@ -189,8 +212,8 @@ private fun MapSurface(
 }
 
 private fun statusLabel(measuring: Boolean, points: List<GeoPoint>, route: RouteResult?, routingLoading: Boolean, routingError: String?, loading: Boolean, count: Int): String = when {
-    routingLoading -> "Calcul de la distance par route…"
-    route != null -> "Route : ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}"
+    routingLoading -> "Calcul de l'itinéraire routier…"
+    route != null -> "Route : ${formatDistance(route.distanceMeters)} · Durée : ${formatDuration(route.durationSeconds)}"
     routingError != null -> "Itinéraire indisponible · ${routingError.take(70)}"
     measuring && points.isEmpty() -> "Touchez la carte pour le point 1"
     measuring && points.size == 1 -> "Point 1 placé · touchez pour le point 2"
@@ -199,7 +222,7 @@ private fun statusLabel(measuring: Boolean, points: List<GeoPoint>, route: Route
 }
 
 private fun formatDuration(seconds: Double): String {
-    val totalMinutes = (seconds / 60.0).roundToInt()
+    val totalMinutes = (seconds / 60.0).roundToInt().coerceAtLeast(1)
     return if (totalMinutes < 60) "${totalMinutes} min" else "${totalMinutes / 60} h ${totalMinutes % 60} min"
 }
 
@@ -237,12 +260,20 @@ private fun clusteredServices(services: List<NearbyService>): List<List<NearbySe
 
 private fun serviceSnippet(s: NearbyService): String = buildString { append(s.category.key); s.distanceMeters?.let { append(" · ").append(formatDistance(it)) }; s.address?.let { append("\n").append(it) }; s.phone?.let { append("\n").append(it) } }
 private fun formatDistance(meters: Double): String = if (meters < 1_000) String.format(Locale.US, "%.0f m", meters) else String.format(Locale.US, "%.1f km", meters / 1_000.0)
-private fun roundToInt(value: Double): Int = kotlin.math.round(value).toInt()
-private fun haversineMeters(a: GeoPoint, b: GeoPoint): Double { val r = 6_371_000.0; val dLat = Math.toRadians(b.latitude - a.latitude); val dLon = Math.toRadians(b.longitude - a.longitude); val x = sin(dLat / 2) * sin(dLat / 2) + cos(Math.toRadians(a.latitude)) * cos(Math.toRadians(b.latitude)) * sin(dLon / 2) * sin(dLon / 2); return 2 * r * atan2(sqrt(x), sqrt(1 - x)) }
+private fun haversineMeters(a: GeoPoint, b: GeoPoint): Double {
+    val r = 6_371_000.0
+    val p1 = Math.toRadians(a.latitude); val p2 = Math.toRadians(b.latitude)
+    val dp = Math.toRadians(b.latitude - a.latitude); val dl = Math.toRadians(b.longitude - a.longitude)
+    val h = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
+    return 2 * r * atan2(sqrt(h), sqrt(1 - h))
+}
 
-private val LIVE_MAP_CATEGORIES = setOf(ServiceCategory.MECHANIC, ServiceCategory.AUTO_ELECTRICIAN, ServiceCategory.ROADSIDE_ASSISTANCE, ServiceCategory.SPARE_PARTS, ServiceCategory.FUEL_STATION, ServiceCategory.HOSPITAL, ServiceCategory.TOWING)
-private const val GPS_MARKER_ID = "cardiag-gps-marker"
-private const val SERVICE_MARKER_PREFIX = "cardiag-service-marker-"
-private const val MEASURE_LINE_ID = "cardiag-measure-line"
-private const val ROUTE_LINE_ID = "cardiag-route-line"
-private const val MAP_LOCATION_INITIALIZED = "cardiag-map-location-initialized"
+private val LIVE_MAP_CATEGORIES = setOf(
+    ServiceCategory.GARAGE, ServiceCategory.DEPANNAGE, ServiceCategory.AUTO_ELECTRICIAN,
+    ServiceCategory.PARTS, ServiceCategory.TIRE
+)
+private const val GPS_MARKER_ID = "gps-current"
+private const val SERVICE_MARKER_PREFIX = "service-"
+private const val MEASURE_LINE_ID = "measure-line"
+private const val ROUTE_LINE_ID = "route-line"
+private const val MAP_LOCATION_INITIALIZED = "map-location-initialized"
