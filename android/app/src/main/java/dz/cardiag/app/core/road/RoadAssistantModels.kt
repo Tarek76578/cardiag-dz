@@ -105,5 +105,5 @@ sealed interface HazardsResult {
     data class Success(val hazards: List<RoadHazard>) : HazardsResult
 
     @Serializable
-    data class Failure(val failure: NearbyFailure, val message: String? = null) : NearbyResult
+    data class Failure(val failure: NearbyFailure, val message: String? = null) : HazardsResult
 }
