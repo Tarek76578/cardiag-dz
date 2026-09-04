@@ -225,10 +225,10 @@ private fun MapSurface(
                 }
             }
             IconButton({ onCloseFullScreen?.invoke() }, Modifier.align(Alignment.TopStart).padding(12.dp)) { Icon(Icons.Default.Close, "Fermer la carte") }
-            IconButton({ mapView.controller.setMapOrientation(0f) }, Modifier.align(Alignment.TopStart).padding(top = 68.dp, start = 12.dp)) { Icon(Icons.Default.North, "Nord") }
+            IconButton({ mapView.setMapOrientation(0f) }, Modifier.align(Alignment.TopStart).padding(top = 68.dp, start = 12.dp)) { Icon(Icons.Default.North, "Nord") }
         } else {
             Button({ onOpenFullScreen?.invoke() }, Modifier.align(Alignment.TopEnd).padding(6.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Fullscreen, null); Text("Ouvrir la carte") }
-            IconButton({ mapView.controller.setMapOrientation(0f) }, Modifier.align(Alignment.TopStart).padding(6.dp)) { Icon(Icons.Default.North, "Nord") }
+            IconButton({ mapView.setMapOrientation(0f) }, Modifier.align(Alignment.TopStart).padding(6.dp)) { Icon(Icons.Default.North, "Nord") }
         }
         if (searching || routing) Text(if (routing) "Calcul de l'itinéraire…" else "Recherche…", Modifier.align(Alignment.TopCenter).padding(top = if (fullScreen) 78.dp else 8.dp), style = MaterialTheme.typography.labelSmall)
         routeError?.let { Text(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 58.dp), style = MaterialTheme.typography.labelSmall) }
