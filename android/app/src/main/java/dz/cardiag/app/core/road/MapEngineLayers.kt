@@ -1,8 +1,12 @@
 package dz.cardiag.app.core.road
 
+import android.content.Context
+import java.io.File
+import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.ITileSource
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.views.MapView
 
 /** Visual map layers supported by the Map Engine. */
 enum class MapLayer(val label: String) {
@@ -18,8 +22,8 @@ enum class LiveLayerStatus {
 
 /**
  * Centralizes tile-source definitions so the UI never embeds provider URLs.
- * Satellite and terrain providers are deliberately isolated and can be replaced
- * by a licensed commercial provider without changing the map UI.
+ * Satellite/terrain are intentionally conservative on maximum zoom to reduce
+ * tile pressure on mobile devices.
  */
 object MapEngineLayers {
     val standard: ITileSource = TileSourceFactory.MAPNIK
@@ -27,7 +31,7 @@ object MapEngineLayers {
     val satellite: ITileSource = XYTileSource(
         "CarDiag-Satellite",
         0,
-        19,
+        18,
         256,
         ".jpg",
         arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
@@ -37,7 +41,7 @@ object MapEngineLayers {
     val terrain: ITileSource = XYTileSource(
         "CarDiag-Terrain",
         0,
-        17,
+        16,
         256,
         ".png",
         arrayOf("https://a.tile.opentopomap.org/"),
@@ -51,14 +55,41 @@ object MapEngineLayers {
     }
 }
 
-/** Offline mode controls network tile downloads. Existing osmdroid cache/archive data remains usable. */
-class OfflineMapController {
+/**
+ * Controls network access for the map and makes the osmdroid tile cache
+ * persistent. Offline mode therefore works immediately with tiles already
+ * cached on the device; a complete Algeria package can be dropped into the
+ * same storage later without changing the UI contract.
+ */
+class OfflineMapController(context: Context) {
+    private val appContext = context.applicationContext
+    private val offlineRoot = File(appContext.filesDir, "cardiag/offline-map")
+    private val tileCache = File(offlineRoot, "tiles")
+
     var enabled: Boolean = false
         private set
 
-    fun apply(mapView: org.osmdroid.views.MapView, offline: Boolean) {
+    init {
+        prepareStorage()
+    }
+
+    private fun prepareStorage() {
+        if (!offlineRoot.exists()) offlineRoot.mkdirs()
+        if (!tileCache.exists()) tileCache.mkdirs()
+        val configuration = Configuration.getInstance()
+        configuration.osmdroidBasePath = offlineRoot
+        configuration.osmdroidTileCache = tileCache
+    }
+
+    fun apply(mapView: MapView, offline: Boolean) {
+        prepareStorage()
         enabled = offline
         mapView.setUseDataConnection(!offline)
         mapView.invalidate()
     }
+
+    /** True when the persistent osmdroid tile cache contains usable data. */
+    fun hasCachedMapData(): Boolean = tileCache.walkTopDown().any { it.isFile && it.length() > 0L }
+
+    fun storagePath(): File = offlineRoot
 }
