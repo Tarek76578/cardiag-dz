@@ -40,4 +40,67 @@ class DiagnosticEngineTest {
         assertEquals("Invalid codes are filtered", 1, result.size)
         assertEquals("P0301", result.single().code)
     }
+
+    @Test fun normalLiveDataDoesNotIncreaseDiagnosticScore() {
+        val knowledge = DiagnosticKnowledge(
+            title = "Test",
+            reason = "Test",
+            severity = "medium",
+            confidence = 0.5,
+            tests = emptyList(),
+            recommendations = emptyList(),
+            liveDataRanges = mapOf("RPM" to 600.0..800.0)
+        )
+
+        val withoutLiveData = DiagnosticEngine.evaluate(knowledge)
+        val withNormalLiveData = DiagnosticEngine.evaluate(
+            knowledge,
+            liveData = mapOf("RPM" to 700.0)
+        )
+
+        assertEquals(withoutLiveData.score, withNormalLiveData.score)
+        assertEquals(withoutLiveData.confidence, withNormalLiveData.confidence, 0.0001)
+    }
+
+    @Test fun outOfRangeLiveDataAddsDiagnosticEvidence() {
+        val knowledge = DiagnosticKnowledge(
+            title = "Test",
+            reason = "Test",
+            severity = "medium",
+            confidence = 0.5,
+            tests = emptyList(),
+            recommendations = emptyList(),
+            liveDataRanges = mapOf("RPM" to 600.0..800.0)
+        )
+
+        val baseline = DiagnosticEngine.evaluate(knowledge)
+        val abnormal = DiagnosticEngine.evaluate(
+            knowledge,
+            liveData = mapOf("RPM" to 1200.0)
+        )
+
+        assertTrue(abnormal.score > baseline.score)
+        assertTrue(abnormal.confidence > baseline.confidence)
+    }
+
+    @Test fun liveDataWithoutConfiguredRangeDoesNotAddEvidence() {
+        val knowledge = DiagnosticKnowledge(
+            title = "Test",
+            reason = "Test",
+            severity = "medium",
+            confidence = 0.5,
+            tests = emptyList(),
+            recommendations = emptyList(),
+            liveDataRanges = emptyMap()
+        )
+
+        val baseline = DiagnosticEngine.evaluate(knowledge)
+        val withUnboundedLiveData = DiagnosticEngine.evaluate(
+            knowledge,
+            liveData = mapOf("RPM" to 700.0)
+        )
+
+        assertEquals(baseline.score, withUnboundedLiveData.score)
+        assertEquals(baseline.confidence, withUnboundedLiveData.confidence, 0.0001)
+    }
 }
