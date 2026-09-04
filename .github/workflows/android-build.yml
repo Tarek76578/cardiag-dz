@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -44,6 +47,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -f android/app/build.gradle.kts
           test -f android/app/src/main/java/dz/cardiag/app/ui/components/InteractiveMapView.kt
+          test -f android/app/src/main/java/dz/cardiag/app/core/road/MapEngineLayers.kt
 
       - name: Build and test
         working-directory: android
