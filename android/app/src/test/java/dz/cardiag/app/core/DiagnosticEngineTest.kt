@@ -50,6 +50,7 @@ class DiagnosticEngineTest {
     fun normalLiveDataDoesNotIncreaseDiagnosticScore() {
         val knowledge = DtcKnowledge(
             code = "P0301",
+            title = "Cylinder 1 misfire",
             severity = "warning",
             symptoms = listOf("rough idle"),
             causes = listOf("ignition/fuel delivery"),
@@ -60,7 +61,9 @@ class DiagnosticEngineTest {
         val withoutLiveData = DiagnosticEngine.evaluate(knowledge)
         val withNormalLiveData = DiagnosticEngine.evaluate(
             knowledge,
-            liveData = listOf(LivePidValue("RPM", 700.0, min = 600.0, max = 800.0))
+            liveData = listOf(
+                LivePidValue("RPM", "RPM", 700.0, "rpm", 600.0, 800.0, 0L)
+            )
         )
 
         assertEquals(withoutLiveData.score, withNormalLiveData.score)
@@ -71,6 +74,7 @@ class DiagnosticEngineTest {
     fun outOfRangeLiveDataAddsDiagnosticEvidence() {
         val knowledge = DtcKnowledge(
             code = "P0301",
+            title = "Cylinder 1 misfire",
             severity = "warning",
             symptoms = emptyList(),
             causes = listOf("ignition/fuel delivery"),
@@ -81,7 +85,9 @@ class DiagnosticEngineTest {
         val baseline = DiagnosticEngine.evaluate(knowledge)
         val abnormal = DiagnosticEngine.evaluate(
             knowledge,
-            liveData = listOf(LivePidValue("RPM", 1200.0, min = 600.0, max = 800.0))
+            liveData = listOf(
+                LivePidValue("RPM", "RPM", 1200.0, "rpm", 600.0, 800.0, 0L)
+            )
         )
 
         assertTrue(abnormal.score > baseline.score)
@@ -92,6 +98,7 @@ class DiagnosticEngineTest {
     fun liveDataWithoutConfiguredRangeDoesNotAddEvidence() {
         val knowledge = DtcKnowledge(
             code = "P0301",
+            title = "Cylinder 1 misfire",
             severity = "warning",
             symptoms = emptyList(),
             causes = emptyList(),
@@ -102,7 +109,9 @@ class DiagnosticEngineTest {
         val baseline = DiagnosticEngine.evaluate(knowledge)
         val withUnboundedLiveData = DiagnosticEngine.evaluate(
             knowledge,
-            liveData = listOf(LivePidValue("RPM", 700.0))
+            liveData = listOf(
+                LivePidValue("RPM", "RPM", 700.0, "rpm", timestamp = 0L)
+            )
         )
 
         assertEquals(baseline.score, withUnboundedLiveData.score)
