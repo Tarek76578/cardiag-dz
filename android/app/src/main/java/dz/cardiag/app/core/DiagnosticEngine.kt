@@ -73,10 +73,17 @@ object DiagnosticEngine {
         var score = 40
         score += observedSymptoms.count { symptom -> knowledge.symptoms.any { it.equals(symptom, true) } } * 10
         score += testResults.values.count { it } * 8
+
+        // Normal live data is not positive evidence for a fault. Only an
+        // out-of-range, finite value can increase confidence in a DTC-related
+        // hypothesis. PIDs without a configured range contribute nothing.
         score += liveData.count { value ->
-            value.value.isFinite() && value.value in
-                (value.min ?: Double.NEGATIVE_INFINITY)..(value.max ?: Double.POSITIVE_INFINITY)
+            val measured = value.value
+            measured.isFinite() &&
+                value.min != null && value.max != null &&
+                (measured < value.min!! || measured > value.max!!)
         } * 2
+
         val bounded = score.coerceIn(0, 100)
         return DiagnosticFinding(
             code = knowledge.code,
