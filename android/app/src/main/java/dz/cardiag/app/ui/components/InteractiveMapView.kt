@@ -57,6 +57,7 @@ import org.osmdroid.views.overlay.Polyline
 import java.util.Locale
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -80,6 +81,7 @@ fun InteractiveMapView(
     var route by remember { mutableStateOf<RoadRoute?>(null) }
     var routing by remember { mutableStateOf(false) }
     var routeError by remember { mutableStateOf<String?>(null) }
+    var pendingDestination by remember { mutableStateOf<GeoPoint?>(null) }
 
     val validLocation = latitude != null && longitude != null && latitude.isFinite() && longitude.isFinite() && latitude != 0.0 && longitude != 0.0
     val mapLat = if (validLocation) latitude!! else 28.0339
@@ -103,59 +105,33 @@ fun InteractiveMapView(
         if (measuring) measurePoints = if (measurePoints.size >= 2) listOf(point) else measurePoints + point
     }
 
-    suspend fun doRoute(destination: GeoPoint) {
-        if (!validLocation) return
+    LaunchedEffect(pendingDestination, validLocation, mapLat, mapLon) {
+        val destination = pendingDestination ?: return@LaunchedEffect
+        if (!validLocation) { pendingDestination = null; return@LaunchedEffect }
         routing = true
         routeError = null
-        route = mapEngine.route(GeoPoint(mapLat, mapLon), destination).getOrElse {
-            routeError = it.message ?: "Impossible de calculer l'itinéraire"
-            null
-        }
+        route = null
+        mapEngine.route(GeoPoint(mapLat, mapLon), destination).fold(
+            onSuccess = { route = it },
+            onFailure = { routeError = it.message ?: "Impossible de calculer l'itinéraire" }
+        )
         routing = false
+        pendingDestination = null
     }
 
-    LaunchedEffect(Unit) {
-        // Keep the search engine warm without performing a network request.
-    }
-
-    MapSurface(
-        latitude = mapLat, longitude = mapLon, validLocation = validLocation, accuracyMeters = accuracyMeters,
-        services = allServices, modifier = modifier, contentDescriptionText = contentDescriptionText,
-        fullScreen = false, loading = loading, measuring = measuring, measurePoints = measurePoints,
-        searchResults = searchResults, searching = searching, route = route, routing = routing, routeError = routeError,
-        onSearch = { query ->
-            if (query.trim().length < 2) searchResults = emptyList() else {
-                searching = true
-                searchResults = mapEngine.search(query, "fr")
-                searching = false
-            }
-        },
-        onSelectSearchResult = { result ->
-            searchResults = emptyList()
+    fun requestRoute(destination: GeoPoint) {
+        if (validLocation) {
             routeError = null
-            if (validLocation) {
-                routing = true
-                route = null
-            }
-        },
-        onRouteDestination = { destination ->
-            if (validLocation) {
-                routing = true
-                routeError = null
-            }
-        },
-        onMeasureTap = { onMeasureTap.value(it) }, onMeasureStart = { measuring = true; measurePoints = emptyList(); route = null },
-        onMeasureClear = { measurePoints = emptyList(); measuring = false }, onOpenFullScreen = { fullScreen = true }
-    )
+            pendingDestination = destination
+        }
+    }
 
-    if (fullScreen) Dialog(
-        onDismissRequest = { fullScreen = false },
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-    ) {
+    @Composable
+    fun Surface(full: Boolean, close: (() -> Unit)? = null, open: (() -> Unit)? = null) {
         MapSurface(
             latitude = mapLat, longitude = mapLon, validLocation = validLocation, accuracyMeters = accuracyMeters,
-            services = allServices, modifier = Modifier.fillMaxSize(), contentDescriptionText = contentDescriptionText,
-            fullScreen = true, loading = loading, measuring = measuring, measurePoints = measurePoints,
+            services = allServices, modifier = if (full) Modifier.fillMaxSize() else modifier, contentDescriptionText = contentDescriptionText,
+            fullScreen = full, loading = loading, measuring = measuring, measurePoints = measurePoints,
             searchResults = searchResults, searching = searching, route = route, routing = routing, routeError = routeError,
             onSearch = { query ->
                 if (query.trim().length < 2) searchResults = emptyList() else {
@@ -166,22 +142,23 @@ fun InteractiveMapView(
             },
             onSelectSearchResult = { result ->
                 searchResults = emptyList()
-                if (validLocation) {
-                    routing = true
-                    routeError = null
-                }
+                val destination = GeoPoint(result.latitude, result.longitude)
+                requestRoute(destination)
             },
-            onRouteDestination = { destination ->
-                if (validLocation) { routing = true; routeError = null }
-            },
-            onMeasureTap = { onMeasureTap.value(it) }, onMeasureStart = { measuring = true; measurePoints = emptyList(); route = null },
-            onMeasureClear = { measurePoints = emptyList(); measuring = false }, onCloseFullScreen = { fullScreen = false }
+            onMeasureTap = { onMeasureTap.value(it) },
+            onMeasureStart = { measuring = true; measurePoints = emptyList(); route = null },
+            onMeasureClear = { measurePoints = emptyList(); measuring = false },
+            onOpenFullScreen = open, onCloseFullScreen = close
         )
     }
 
-    // Execute a pending route request after UI state has been updated.
-    LaunchedEffect(routing, route, searchResults) {
-        if (!routing || route != null || searchResults.isNotEmpty()) return@LaunchedEffect
+    Surface(full = false, open = { fullScreen = true })
+
+    if (fullScreen) Dialog(
+        onDismissRequest = { fullScreen = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Surface(full = true, close = { fullScreen = false })
     }
 }
 
@@ -191,8 +168,8 @@ private fun MapSurface(
     modifier: Modifier, contentDescriptionText: String, fullScreen: Boolean, loading: Boolean, measuring: Boolean,
     measurePoints: List<GeoPoint>, searchResults: List<MapSearchResult>, searching: Boolean, route: RoadRoute?,
     routing: Boolean, routeError: String?, onSearch: suspend (String) -> Unit,
-    onSelectSearchResult: (MapSearchResult) -> Unit, onRouteDestination: (GeoPoint) -> Unit,
-    onMeasureTap: (GeoPoint) -> Unit, onMeasureStart: () -> Unit, onMeasureClear: () -> Unit,
+    onSelectSearchResult: (MapSearchResult) -> Unit, onMeasureTap: (GeoPoint) -> Unit,
+    onMeasureStart: () -> Unit, onMeasureClear: () -> Unit,
     onOpenFullScreen: (() -> Unit)? = null, onCloseFullScreen: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -242,7 +219,7 @@ private fun MapSurface(
                 if (searchResults.isNotEmpty()) {
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))) {
                         searchResults.take(6).forEach { result ->
-                            Text(result.displayName, Modifier.fillMaxWidth().clickable { onSelectSearchResult(result); onRouteDestination(GeoPoint(result.latitude, result.longitude)); mapView.controller.animateTo(GeoPoint(result.latitude, result.longitude)) }.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                            Text(result.displayName, Modifier.fillMaxWidth().clickable { onSelectSearchResult(result); mapView.controller.animateTo(GeoPoint(result.latitude, result.longitude)) }.padding(12.dp), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -261,7 +238,7 @@ private fun MapSurface(
             modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
         )
         IconButton({ if (measuring) onMeasureClear() else onMeasureStart() }, Modifier.align(Alignment.BottomStart).padding(if (fullScreen) 18.dp else 6.dp)) { Icon(Icons.Default.Straighten, if (measuring) "Annuler la mesure" else "Mesurer") }
-        IconButton({ if (validLocation && route != null) mapView.controller.animateTo(GeoPoint(latitude, longitude)) }, Modifier.align(Alignment.BottomEnd).padding(if (fullScreen) 18.dp else 8.dp)) { Icon(if (route != null) Icons.Default.Navigation else Icons.Default.LocationOn, if (route != null) "Départ" else "Position actuelle") }
+        IconButton({ if (validLocation) mapView.controller.animateTo(GeoPoint(latitude, longitude)) }, Modifier.align(Alignment.BottomEnd).padding(if (fullScreen) 18.dp else 8.dp)) { Icon(if (route != null) Icons.Default.Navigation else Icons.Default.LocationOn, if (route != null) "Position actuelle" else "Position actuelle") }
     }
 }
 
@@ -290,7 +267,7 @@ private fun updateMapMarkers(mapView: MapView, latitude: Double, longitude: Doub
     route?.let { r ->
         mapView.overlays.add(Polyline(mapView).apply { id = ROUTE_LINE_ID; setPoints(r.points); width = 10f })
         r.points.lastOrNull()?.let { destination -> mapView.overlays.add(Marker(mapView).apply { id = SEARCH_ROUTE_DESTINATION_ID; position = destination; title = "Destination"; setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) }) }
-        if (r.points.isNotEmpty()) mapView.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(r.points), true, 72)
+        if (r.points.size >= 2) mapView.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(r.points), true, 72)
     }
 }
 
