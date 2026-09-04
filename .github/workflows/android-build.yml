@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feature/map-v3-engine
   pull_request:
     branches:
       - main
@@ -48,6 +49,7 @@ jobs:
           test -f android/app/build.gradle.kts
           test -f android/app/src/main/java/dz/cardiag/app/ui/components/InteractiveMapView.kt
           test -f android/app/src/main/java/dz/cardiag/app/core/road/MapEngineLayers.kt
+          test -f android/app/src/main/java/dz/cardiag/app/core/road/MapEngineV3.kt
 
       - name: Build and test
         working-directory: android
