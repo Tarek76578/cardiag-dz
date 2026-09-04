@@ -2,6 +2,7 @@ package dz.cardiag.app.core.road
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
+import io.ktor.client.plugins.timeout.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
@@ -49,16 +50,26 @@ data class RoadRoute(
 /**
  * Network map services for Map Engine V3.
  * Nominatim provides place/geocoding search; OSRM provides road geometry,
- * distance, duration and turn-by-turn maneuver data.
+ * real road distance, duration and turn-by-turn maneuver data.
  */
-class MapEngineV3(private val client: HttpClient = HttpClient(Android)) {
+class MapEngineV3(
+    private val client: HttpClient = HttpClient(Android) {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 15_000
+            connectTimeoutMillis = 8_000
+            socketTimeoutMillis = 15_000
+        }
+    }
+) {
     private var lastSearchAtMs = 0L
-    private val searchCache = LinkedHashMap<String, List<MapSearchResult>>(32, 0.75f, true)
+    private val searchCache = LinkedHashMap<String, List<MapSearchResult>>(48, 0.75f, true)
+    private val routeCache = LinkedHashMap<String, RoadRoute>(24, 0.75f, true)
 
     suspend fun search(query: String, language: String = "fr", limit: Int = 8): List<MapSearchResult> {
         val normalized = query.trim().replace(Regex("\\s+"), " ")
         if (normalized.length < 2) return emptyList()
-        val key = "${language.lowercase()}:$normalized:${limit.coerceIn(1, 10)}"
+        val safeLimit = limit.coerceIn(1, 10)
+        val key = "${language.lowercase()}:$normalized:$safeLimit"
         searchCache[key]?.let { return it }
 
         val wait = 1_000L - (System.currentTimeMillis() - lastSearchAtMs)
@@ -68,7 +79,7 @@ class MapEngineV3(private val client: HttpClient = HttpClient(Android)) {
             val body = client.get(NOMINATIM_URL) {
                 parameter("q", normalized)
                 parameter("format", "jsonv2")
-                parameter("limit", limit.coerceIn(1, 10))
+                parameter("limit", safeLimit)
                 parameter("countrycodes", "dz")
                 parameter("addressdetails", 1)
                 parameter("accept-language", if (language == "ar") "ar,fr;q=0.8" else "fr,ar;q=0.8")
@@ -91,32 +102,49 @@ class MapEngineV3(private val client: HttpClient = HttpClient(Android)) {
                 )
             }
             searchCache[key] = results
-            while (searchCache.size > 32) searchCache.remove(searchCache.entries.first().key)
+            while (searchCache.size > 48) searchCache.remove(searchCache.entries.first().key)
             results
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * Calculates a driving route over the road network. This is deliberately
+     * separate from straight-line measurement: callers must use distanceMeters
+     * from this result for "distance by road".
+     */
     suspend fun route(from: GeoPoint, to: GeoPoint): Result<RoadRoute> = runCatching {
+        require(validCoordinate(from)) { "Invalid origin coordinates" }
+        require(validCoordinate(to)) { "Invalid destination coordinates" }
+
+        val key = routeCacheKey(from, to)
+        routeCache[key]?.let { return@runCatching it }
+
         val body = client.get("$OSRM_URL/${from.longitude},${from.latitude};${to.longitude},${to.latitude}") {
             parameter("overview", "full")
             parameter("geometries", "geojson")
             parameter("steps", "true")
+            parameter("continue_straight", "false")
             parameter("language", "fr")
             header("User-Agent", USER_AGENT)
         }.bodyAsText()
+
         val root = Json.parseToJsonElement(body).jsonObject
         if (root["code"]?.jsonPrimitive?.content != "Ok") {
             error("Routing provider returned ${root["code"]?.jsonPrimitive?.content ?: "unknown error"}")
         }
+
         val route = root["routes"]?.jsonArray?.firstOrNull()?.jsonObject ?: error("No route")
         val distance = route["distance"]?.jsonPrimitive?.doubleOrNull ?: error("Missing route distance")
         val duration = route["duration"]?.jsonPrimitive?.doubleOrNull ?: error("Missing route duration")
-        val coordinates = route["geometry"]?.jsonObject?.get("coordinates")?.jsonArray ?: error("Missing route geometry")
+        require(distance > 0.0) { "Invalid route distance" }
+
+        val coordinates = route["geometry"]?.jsonObject?.get("coordinates")?.jsonArray
+            ?: error("Missing route geometry")
         val points = coordinates.mapNotNull { pair ->
             val values = pair.jsonArray
             val lon = values.getOrNull(0)?.jsonPrimitive?.doubleOrNull
             val lat = values.getOrNull(1)?.jsonPrimitive?.doubleOrNull
-            if (lat == null || lon == null) null else GeoPoint(lat, lon)
+            if (lat == null || lon == null || !lat.isFinite() || !lon.isFinite()) null else GeoPoint(lat, lon)
         }
         if (points.size < 2) error("Route geometry is too short")
 
@@ -146,15 +174,26 @@ class MapEngineV3(private val client: HttpClient = HttpClient(Android)) {
                 )
             }
         }
-        RoadRoute(points, distance, duration, steps)
+
+        RoadRoute(points, distance, duration, steps).also {
+            routeCache[key] = it
+            while (routeCache.size > 24) routeCache.remove(routeCache.entries.first().key)
+        }
     }
 
     fun close() = client.close()
 
+    private fun validCoordinate(point: GeoPoint): Boolean =
+        point.latitude.isFinite() && point.longitude.isFinite() &&
+            point.latitude in -90.0..90.0 && point.longitude in -180.0..180.0
+
+    private fun routeCacheKey(from: GeoPoint, to: GeoPoint): String =
+        "${from.latitude.round5()},${from.longitude.round5()}->${to.latitude.round5()},${to.longitude.round5()}"
+
     companion object {
         private const val NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
         private const val OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
-        private const val USER_AGENT = "CarDiagDZ/1.0 MapEngineV3"
+        private const val USER_AGENT = "CarDiagDZ/1.1 MapEngineV3"
 
         private fun buildInstruction(type: String, modifier: String?, roadName: String?, exit: Int?): String {
             val road = roadName?.let { " — $it" } ?: ""
@@ -184,6 +223,8 @@ class MapEngineV3(private val client: HttpClient = HttpClient(Android)) {
         }
     }
 }
+
+private fun Double.round5(): String = String.format(java.util.Locale.US, "%.5f", this)
 
 fun roadDistanceFallbackMeters(a: GeoPoint, b: GeoPoint): Double {
     val r = 6_371_000.0
