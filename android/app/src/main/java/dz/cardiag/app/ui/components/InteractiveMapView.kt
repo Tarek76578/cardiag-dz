@@ -14,19 +14,23 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.North
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Satellite
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,7 +75,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.delay
 
-/** Map Engine V3 Full: search, routing, live services, layers, offline cache and turn instructions. */
+/** Map Engine V3: search, road routing, nearby services, layers and offline cache. */
 @Composable
 fun InteractiveMapView(
     latitude: Double?, longitude: Double?, accuracyMeters: Double?, modifier: Modifier = Modifier,
@@ -82,7 +86,6 @@ fun InteractiveMapView(
     val cache = remember(context) { NearbyServiceCache(context) }
     val provider = remember { OverpassNearbyProvider() }
     val mapEngine = remember { MapEngineV3() }
-    val offlineController = remember { OfflineMapController() }
     var liveServices by remember { mutableStateOf<List<NearbyService>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var measuring by remember { mutableStateOf(false) }
@@ -120,15 +123,12 @@ fun InteractiveMapView(
     }
 
     val allServices = remember(services, liveServices) { (services + liveServices).distinctBy { it.id } }
-    val onMeasureTap = rememberUpdatedState<(GeoPoint) -> Unit> { point ->
-        if (measuring) measurePoints = if (measurePoints.size >= 2) listOf(point) else measurePoints + point
-    }
 
     LaunchedEffect(pendingDestination, validLocation, mapLat, mapLon, offlineMode) {
         val destination = pendingDestination ?: return@LaunchedEffect
         if (!validLocation) { pendingDestination = null; return@LaunchedEffect }
         if (offlineMode) {
-            routeError = "Le calcul d'itinéraire hors ligne sera disponible avec les données routières Offline Algeria."
+            routeError = "Itinéraire hors ligne indisponible sans données routières locales."
             pendingDestination = null
             return@LaunchedEffect
         }
@@ -145,13 +145,15 @@ fun InteractiveMapView(
 
     fun requestRoute(destination: GeoPoint) {
         if (validLocation) {
+            measuring = false
+            measurePoints = emptyList()
             routeError = null
             pendingDestination = destination
         }
     }
 
     @Composable
-    fun Surface(full: Boolean, close: (() -> Unit)? = null, open: (() -> Unit)? = null) {
+    fun SurfaceHost(full: Boolean, close: (() -> Unit)? = null, open: (() -> Unit)? = null) {
         MapSurface(
             latitude = mapLat, longitude = mapLon, validLocation = validLocation, accuracyMeters = accuracyMeters,
             services = allServices, modifier = if (full) Modifier.fillMaxSize() else modifier,
@@ -171,20 +173,20 @@ fun InteractiveMapView(
             },
             onLayerChange = { mapLayer = it },
             onOfflineChange = { offlineMode = it },
-            onMeasureTap = { onMeasureTap.value(it) },
-            onMeasureStart = { measuring = true; measurePoints = emptyList(); route = null },
+            onMeasureTap = { point -> if (measuring) measurePoints = if (measurePoints.size >= 2) listOf(point) else measurePoints + point },
+            onMeasureStart = { route = null; routeError = null; measuring = true; measurePoints = emptyList() },
             onMeasureClear = { measurePoints = emptyList(); measuring = false },
             onOpenFullScreen = open, onCloseFullScreen = close
         )
     }
 
-    Surface(full = false, open = { fullScreen = true })
+    SurfaceHost(full = false, open = { fullScreen = true })
 
     if (fullScreen) Dialog(
         onDismissRequest = { fullScreen = false },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
-        Surface(full = true, close = { fullScreen = false })
+        SurfaceHost(full = true, close = { fullScreen = false })
     }
 }
 
@@ -202,7 +204,7 @@ private fun MapSurface(
     val context = LocalContext.current
     var search by remember { mutableStateOf("") }
     val mapView = remember(context, fullScreen) { createMapView(context, latitude, longitude) }
-    val offlineController = remember(mapView) { OfflineMapController() }
+    val offlineController = remember(mapView) { OfflineMapController(context) }
     var locationInitialized by remember(mapView) { mutableStateOf(false) }
     var fittedRouteKey by remember(mapView) { mutableStateOf<String?>(null) }
     val currentMeasureTap by rememberUpdatedState(onMeasureTap)
@@ -251,9 +253,8 @@ private fun MapSurface(
         if (query.length >= 2) {
             delay(450)
             onSearch(query)
-        } else {
-            // Do not retain stale remote results after clearing the field.
-            if (query.isEmpty()) onSearch("")
+        } else if (query.isEmpty()) {
+            onSearch("")
         }
     }
 
@@ -263,94 +264,168 @@ private fun MapSurface(
         })
 
         if (fullScreen) {
-            Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 56.dp, vertical = 10.dp)) {
-                OutlinedTextField(
-                    value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    trailingIcon = { if (search.isNotEmpty()) IconButton({ search = "" }) { Icon(Icons.Default.Close, "Effacer") } },
-                    placeholder = { Text("Rechercher un lieu ou une adresse en Algérie") }, shape = RoundedCornerShape(14.dp)
-                )
-                if (searchResults.isNotEmpty()) {
-                    LazyColumn(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))) {
-                        items(searchResults.take(6)) { result ->
-                            Text(result.displayName, Modifier.fillMaxWidth().clickable { onSelectSearchResult(result); mapView.controller.animateTo(GeoPoint(result.latitude, result.longitude)) }.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp, shadowElevation = 6.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+            ) {
+                Column(Modifier.padding(10.dp)) {
+                    OutlinedTextField(
+                        value = search, onValueChange = { search = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        trailingIcon = { if (search.isNotEmpty()) IconButton({ search = "" }) { Icon(Icons.Default.Close, "Effacer") } },
+                        placeholder = { Text("Rechercher un lieu ou une adresse en Algérie") }, shape = RoundedCornerShape(14.dp)
+                    )
+                    if (searchResults.isNotEmpty()) {
+                        LazyColumn(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                            items(searchResults.take(6)) { result ->
+                                Text(
+                                    result.displayName,
+                                    Modifier.fillMaxWidth().clickable { onSelectSearchResult(result); mapView.controller.animateTo(GeoPoint(result.latitude, result.longitude)) }.padding(12.dp),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
                     }
                 }
             }
-            IconButton({ onCloseFullScreen?.invoke() }, Modifier.align(Alignment.TopStart).padding(12.dp)) { Icon(Icons.Default.Close, "Fermer la carte") }
+            MapControlSurface(Modifier.align(Alignment.TopStart).padding(top = 92.dp, start = 12.dp)) {
+                IconButton({ onCloseFullScreen?.invoke() }) { Icon(Icons.Default.Close, "Fermer la carte") }
+            }
         } else {
-            Button({ onOpenFullScreen?.invoke() }, Modifier.align(Alignment.TopEnd).padding(6.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Fullscreen, null); Text("Ouvrir la carte") }
+            MapControlSurface(Modifier.align(Alignment.TopEnd).padding(10.dp)) {
+                Button({ onOpenFullScreen?.invoke() }, shape = RoundedCornerShape(12.dp)) {
+                    Icon(Icons.Default.Fullscreen, null); Text("Ouvrir la carte")
+                }
+            }
         }
 
-        Row(
-            Modifier.align(if (fullScreen) Alignment.TopEnd else Alignment.TopStart).padding(if (fullScreen) 12.dp else 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        Column(
+            Modifier.align(Alignment.TopEnd).padding(top = if (fullScreen) 150.dp else 58.dp, end = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button({ onLayerChange(nextLayer(mapLayer)) }, shape = RoundedCornerShape(10.dp)) {
-                Icon(if (mapLayer == MapLayer.SATELLITE) Icons.Default.Satellite else Icons.Default.Navigation, null)
-                Text(mapLayer.label)
+            MapControlSurface {
+                Button(
+                    { onLayerChange(nextLayer(mapLayer)) },
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = ButtonDefaults.ContentPadding
+                ) {
+                    Icon(if (mapLayer == MapLayer.SATELLITE) Icons.Default.Satellite else Icons.Default.Navigation, null)
+                    Text(mapLayer.label)
+                }
             }
-            Button({ onOfflineChange(!offlineMode) }, shape = RoundedCornerShape(10.dp)) {
-                Text(if (offlineMode) "Offline" else "Online")
+            MapControlSurface {
+                Button({ onOfflineChange(!offlineMode) }, shape = RoundedCornerShape(12.dp)) {
+                    Text(if (offlineMode) "Offline" else "Online")
+                }
             }
         }
 
-        if (fullScreen) {
-            IconButton({ mapView.setMapOrientation(0f) }, Modifier.align(Alignment.CenterStart).padding(start = 6.dp)) { Icon(Icons.Default.North, "Nord") }
-        } else {
-            IconButton({ mapView.setMapOrientation(0f) }, Modifier.align(Alignment.CenterStart).padding(6.dp)) { Icon(Icons.Default.North, "Nord") }
+        Column(
+            Modifier.align(Alignment.CenterEnd).padding(end = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            MapControlSurface {
+                IconButton({ mapView.controller.setZoom((mapView.zoomLevelDouble + 1.0).coerceAtMost(18.0)) }) { Icon(Icons.Default.Add, "Zoom avant") }
+            }
+            MapControlSurface {
+                IconButton({ mapView.controller.setZoom((mapView.zoomLevelDouble - 1.0).coerceAtLeast(3.0)) }) { Icon(Icons.Default.Remove, "Zoom arrière") }
+            }
         }
 
-        if (searching || routing) Text(
-            if (routing) "Calcul de l'itinéraire…" else "Recherche…",
-            Modifier.align(Alignment.TopCenter).padding(top = if (fullScreen) 82.dp else 8.dp), style = MaterialTheme.typography.labelSmall
-        )
+        MapControlSurface(Modifier.align(Alignment.CenterStart).padding(start = 10.dp)) {
+            IconButton({ mapView.setMapOrientation(0f) }) { Icon(Icons.Default.North, "Nord") }
+        }
 
-        routeError?.let { Text(it, Modifier.align(Alignment.BottomCenter).padding(bottom = 58.dp, start = 16.dp, end = 16.dp), style = MaterialTheme.typography.labelSmall) }
+        if (searching || routing) {
+            Surface(
+                Modifier.align(Alignment.TopCenter).padding(top = if (fullScreen) 94.dp else 12.dp),
+                shape = RoundedCornerShape(20.dp), tonalElevation = 4.dp, shadowElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f)
+            ) {
+                Text(if (routing) "Calcul de l'itinéraire routier…" else "Recherche…", Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        routeError?.let {
+            Surface(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = if (route != null) 110.dp else 64.dp, start = 16.dp, end = 16.dp),
+                shape = RoundedCornerShape(14.dp), tonalElevation = 5.dp,
+                color = MaterialTheme.colorScheme.errorContainer
+            ) { Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onErrorContainer) }
+        }
 
         if (route != null && route.steps.isNotEmpty()) {
             NavigationSteps(route.steps, fullScreen, Modifier.align(Alignment.BottomCenter))
         }
 
-        Text(
-            text = when {
-                measuring -> measurementLabel(measurePoints)
-                route != null -> "Itinéraire : ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)} · ${route.steps.size} instructions"
-                offlineMode -> "Mode Offline · données locales/cache uniquement"
-                loading -> "Services en chargement…"
-                else -> "${services.size} service(s) · ${mapLayer.label} · © OpenStreetMap contributors"
-            },
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-        )
-
-        if (!offlineMode) {
+        Surface(
+            Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = if (fullScreen) 12.dp else 8.dp),
+            shape = RoundedCornerShape(14.dp), tonalElevation = 5.dp, shadowElevation = 4.dp,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+        ) {
             Text(
-                text = "Traffic: ${LiveLayerStatus.PROVIDER_REQUIRED.name.lowercase()} · Risk: ${LiveLayerStatus.PROVIDER_REQUIRED.name.lowercase()}",
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 8.dp, end = 8.dp)
+                text = when {
+                    measuring -> measurementLabel(measurePoints)
+                    route != null -> "Distance par la route : ${formatDistance(route.distanceMeters)} · ${formatDuration(route.durationSeconds)}"
+                    offlineMode -> if (offlineController.hasCachedMapData()) "Offline · cache cartographique disponible" else "Offline · cache vide"
+                    loading -> "Services en chargement…"
+                    else -> "${services.size} service(s) · ${mapLayer.label}"
+                },
+                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             )
         }
 
-        IconButton({ if (measuring) onMeasureClear() else onMeasureStart() }, Modifier.align(Alignment.BottomStart).padding(if (fullScreen) 18.dp else 6.dp)) {
-            Icon(Icons.Default.Straighten, if (measuring) "Annuler la mesure" else "Mesurer")
+        if (!offlineMode) {
+            Surface(
+                Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = if (fullScreen) 12.dp else 8.dp),
+                shape = RoundedCornerShape(14.dp), tonalElevation = 5.dp, shadowElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+            ) {
+                Text("Traffic: ${LiveLayerStatus.PROVIDER_REQUIRED.name.lowercase()} · Risk: ${LiveLayerStatus.PROVIDER_REQUIRED.name.lowercase()}", Modifier.padding(horizontal = 10.dp, vertical = 8.dp), style = MaterialTheme.typography.labelSmall)
+            }
         }
-        IconButton({ if (validLocation) mapView.controller.animateTo(GeoPoint(latitude, longitude)) }, Modifier.align(Alignment.BottomEnd).padding(if (fullScreen) 34.dp else 28.dp)) {
-            Icon(if (route != null) Icons.Default.Navigation else Icons.Default.LocationOn, "Position actuelle")
+
+        MapControlSurface(Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = if (fullScreen) 66.dp else 58.dp)) {
+            IconButton({ if (measuring) onMeasureClear() else onMeasureStart() }) {
+                Icon(Icons.Default.Straighten, if (measuring) "Arrêter la mesure" else "Mesurer la distance directe")
+            }
+        }
+        MapControlSurface(Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = if (fullScreen) 66.dp else 58.dp)) {
+            IconButton({ if (validLocation) mapView.controller.animateTo(GeoPoint(latitude, longitude)) }) {
+                Icon(if (route != null) Icons.Default.Navigation else Icons.Default.LocationOn, "Position actuelle")
+            }
         }
     }
 }
 
 @Composable
+private fun MapControlSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        tonalElevation = 6.dp,
+        shadowElevation = 6.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        content = content
+    )
+}
+
+@Composable
 private fun NavigationSteps(steps: List<TurnInstruction>, fullScreen: Boolean, modifier: Modifier) {
-    Column(modifier.fillMaxWidth(if (fullScreen) 0.92f else 1f).padding(bottom = if (fullScreen) 58.dp else 46.dp).clip(RoundedCornerShape(14.dp))) {
-        Text("Navigation", Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.titleSmall)
-        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            items(steps.take(8)) { step ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(step.text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    Text(formatDistance(step.distanceMeters), style = MaterialTheme.typography.labelSmall)
+    Surface(
+        modifier.fillMaxWidth(if (fullScreen) 0.92f else 1f).padding(bottom = if (fullScreen) 120.dp else 104.dp),
+        shape = RoundedCornerShape(16.dp), tonalElevation = 7.dp, shadowElevation = 7.dp,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+    ) {
+        Column {
+            Text("Navigation · distance par la route", Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.titleSmall)
+            LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(steps.take(8)) { step ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(step.text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        Text(formatDistance(step.distanceMeters), style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
@@ -366,30 +441,34 @@ private fun nextLayer(layer: MapLayer): MapLayer = when (layer) {
 private fun createMapView(context: Context, latitude: Double, longitude: Double): MapView {
     val appContext = context.applicationContext
     Configuration.getInstance().load(appContext, appContext.getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
-    Configuration.getInstance().userAgentValue = String.format(Locale.US, "%s/1.0.5", appContext.packageName)
+    Configuration.getInstance().userAgentValue = String.format(Locale.US, "%s/1.1.0", appContext.packageName)
     return MapView(appContext).apply {
         setTileSource(MapEngineLayers.standard)
         setMultiTouchControls(true)
-        setBuiltInZoomControls(true)
-        setTilesScaledToDpi(true)
+        setBuiltInZoomControls(false)
+        setTilesScaledToDpi(false)
         setUseDataConnection(true)
         setMinZoomLevel(3.0)
-        setMaxZoomLevel(20.0)
+        setMaxZoomLevel(18.0)
         controller.setZoom(12.0)
         controller.setCenter(GeoPoint(latitude, longitude))
         isClickable = true
         isFocusable = true
+        isFocusableInTouchMode = true
     }
 }
 
-private fun updateMapMarkers(mapView: MapView, latitude: Double, longitude: Double, validLocation: Boolean, accuracyMeters: Double?, services: List<NearbyService>, measurePoints: List<GeoPoint>, route: RoadRoute?) {
+private fun updateMapMarkers(
+    mapView: MapView, latitude: Double, longitude: Double, validLocation: Boolean, accuracyMeters: Double?,
+    services: List<NearbyService>, measurePoints: List<GeoPoint>, route: RoadRoute?
+) {
     mapView.overlays.removeAll { overlay ->
         (overlay is Marker && (overlay.id == GPS_MARKER_ID || overlay.id?.startsWith(SERVICE_MARKER_PREFIX) == true || overlay.id == SEARCH_ROUTE_DESTINATION_ID)) ||
             (overlay is Polyline && (overlay.id == MEASURE_LINE_ID || overlay.id == ROUTE_LINE_ID))
     }
     if (validLocation) mapView.overlays.add(Marker(mapView).apply {
         id = GPS_MARKER_ID; position = GeoPoint(latitude, longitude); title = "Position actuelle"
-        snippet = accuracyMeters?.takeIf { it > 0 }?.let { String.format(Locale.US, "GPS accuracy +/- %.0f m", it) }
+        snippet = accuracyMeters?.takeIf { it > 0 }?.let { String.format(Locale.US, "GPS ± %.0f m", it) }
         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
     })
     clusteredServices(services).forEachIndexed { index, cluster ->
@@ -427,7 +506,7 @@ private fun serviceSnippet(s: NearbyService): String = buildString {
 
 private fun formatDistance(meters: Double): String = if (meters < 1_000) String.format(Locale.US, "%.0f m", meters) else String.format(Locale.US, "%.1f km", meters / 1_000.0)
 private fun formatDuration(seconds: Double): String { val minutes = (seconds / 60.0).roundToInt(); return if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min" }
-private fun measurementLabel(points: List<GeoPoint>): String = when (points.size) { 0 -> "Touchez la carte pour le point 1"; 1 -> "Point 1 placé · touchez pour le point 2"; else -> "Distance : ${formatDistance(haversineMeters(points[0], points[1]))}" }
+private fun measurementLabel(points: List<GeoPoint>): String = when (points.size) { 0 -> "Mesure directe · touchez le point 1"; 1 -> "Point 1 placé · touchez le point 2"; else -> "Distance directe : ${formatDistance(haversineMeters(points[0], points[1]))}" }
 private fun haversineMeters(a: GeoPoint, b: GeoPoint): Double {
     val r = 6_371_000.0; val dLat = Math.toRadians(b.latitude - a.latitude); val dLon = Math.toRadians(b.longitude - a.longitude)
     val x = sin(dLat / 2) * sin(dLat / 2) + cos(Math.toRadians(a.latitude)) * cos(Math.toRadians(b.latitude)) * sin(dLon / 2) * sin(dLon / 2)
