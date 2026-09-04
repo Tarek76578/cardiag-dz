@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MAP_ENGINE_VALIDATION: "true"
+
 concurrency:
   group: cardiag-android-build-${{ github.ref }}
   cancel-in-progress: true
